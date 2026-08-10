@@ -683,6 +683,81 @@ function createMissingHostBindingsNativeDispatch(
         claim.runId,
         claim.stepId,
       );
+      const completedNativeMechanism =
+        attempt !== undefined &&
+        hasUnclassifiedCompletedNativeMechanism(
+          context.db,
+          attempt.attemptId,
+        );
+      if (
+        completedNativeMechanism &&
+        (executorName === "agent-loop" ||
+          executorName === "agent-once" ||
+          executorName === "script")
+      ) {
+        const rounds = listExecutorRoundsForStep(
+          context.db,
+          claim.runId,
+          claim.stepId,
+        );
+        const round = [...rounds]
+          .reverse()
+          .find(
+            (candidate) =>
+              candidate.attemptNumber === attempt?.attemptNumber &&
+              candidate.classification === null &&
+              listExecutorCheckpointsForRound(
+                context.db,
+                candidate.roundId,
+              ).some((checkpoint) => checkpoint.stage === "mechanism_completed"),
+          );
+        if (attempt === undefined || round === undefined) {
+          throw new RegisteredExecutorHostBindingsError(
+            "runtime_unavailable",
+            "completed native mechanism evidence has no resumable round",
+          );
+        }
+        const settleRepoOwnership = recoverCompletedLiveStepRepoOwnership(
+          context.db,
+          claim.runId,
+          claim.stepId,
+          attempt.attemptNumber,
+          context.now,
+        );
+        const start = {
+          roundId: round.roundId,
+          attemptId: round.attemptId,
+          workflowRunId: round.workflowRunId,
+          stepRunId: round.stepRunId,
+          stepKey: round.stepKey,
+          attemptNumber: round.attemptNumber,
+          roundIndex: round.roundIndex,
+          inputDigest: round.inputDigest,
+          artifactRoot: round.artifactRoot,
+          logPaths: [...round.logPaths],
+          startedAt: round.startedAt,
+        };
+        if (executorName === "agent-loop") {
+          return {
+            start,
+            selection: resolveGoalLoopRoundSelection({}),
+            replayOnly: true,
+            ...(settleRepoOwnership === undefined
+              ? {}
+              : { settleRepoOwnership }),
+          } satisfies GoalLoopExecutorHostBindings;
+        }
+        const singleShotExecutor =
+          executorName === "agent-once" ? "agent-once" : "script";
+        return {
+          start: { ...start, executor: singleShotExecutor },
+          selection: resolveSingleShotRoundSelection({}),
+          replayOnly: true,
+          ...(settleRepoOwnership === undefined
+            ? {}
+            : { settleRepoOwnership }),
+        } satisfies SingleShotExecutorHostBindings;
+      }
       if (
         canonicalExecutorIdentity(executorName) ===
         DELEGATE_SUPERVISOR_EXECUTOR_NAME

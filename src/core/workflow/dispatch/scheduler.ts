@@ -610,7 +610,8 @@ export function recoverStaleWorkflowLeases(
       continue;
     }
 
-    db.exec("BEGIN IMMEDIATE");
+    const ownsTransaction = !db.isTransaction;
+    if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
     try {
       const live = getWorkflowLease(db, candidate.runId, candidate.leaseKind);
       const classification =
@@ -631,7 +632,7 @@ export function recoverStaleWorkflowLeases(
             runId: live.runId,
             now,
           });
-          db.exec("COMMIT");
+          if (ownsTransaction) db.exec("COMMIT");
           recovered.push({
             runId: live.runId,
             leaseKind: live.leaseKind,
@@ -641,7 +642,7 @@ export function recoverStaleWorkflowLeases(
             recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
           });
         } else {
-          db.exec("ROLLBACK");
+          if (ownsTransaction) db.exec("ROLLBACK");
           skipped.push({
             runId: candidate.runId,
             leaseKind: candidate.leaseKind,
@@ -665,7 +666,7 @@ export function recoverStaleWorkflowLeases(
           now,
         });
         if (marked.ok) {
-          db.exec("COMMIT");
+          if (ownsTransaction) db.exec("COMMIT");
           recovered.push({
             runId: live.runId,
             leaseKind: live.leaseKind,
@@ -680,7 +681,7 @@ export function recoverStaleWorkflowLeases(
             now,
           });
         } else {
-          db.exec("ROLLBACK");
+          if (ownsTransaction) db.exec("ROLLBACK");
           skipped.push({
             runId: candidate.runId,
             leaseKind: candidate.leaseKind,
@@ -690,7 +691,7 @@ export function recoverStaleWorkflowLeases(
       } else {
         // The row was released or re-freshed (heartbeated) between the scan and
         // this transaction; leave it for the next pass.
-        db.exec("ROLLBACK");
+        if (ownsTransaction) db.exec("ROLLBACK");
         skipped.push({
           runId: candidate.runId,
           leaseKind: candidate.leaseKind,
@@ -699,7 +700,7 @@ export function recoverStaleWorkflowLeases(
       }
     } catch (error) {
       try {
-        db.exec("ROLLBACK");
+        if (ownsTransaction) db.exec("ROLLBACK");
       } catch {
         // Ignore rollback errors so callers see the original write failure.
       }
@@ -859,14 +860,15 @@ function tryParkStaleRunningDispatchLease(
 
   let parked:
     { lease: WorkflowLeaseRecord; runningStep: WorkflowStepRecord } | undefined;
-  db.exec("BEGIN IMMEDIATE");
+  const ownsTransaction = !db.isTransaction;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
   try {
     const live = getWorkflowLease(db, candidate.runId, candidate.leaseKind);
     if (
       live === undefined ||
       classifyWorkflowLease(live, { now, graceMs }) !== "stale-auto-release"
     ) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
@@ -874,7 +876,7 @@ function tryParkStaleRunningDispatchLease(
       (step) => step.state === "running",
     );
     if (runningStep === undefined) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
@@ -896,7 +898,7 @@ function tryParkStaleRunningDispatchLease(
       attempt.executor === "subworkflow" &&
       !isTerminalExecutorAttemptState(attempt.state)
     ) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
     if (
@@ -908,14 +910,14 @@ function tryParkStaleRunningDispatchLease(
         claimedExecutorNames,
       )
     ) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
     if (
       attempt !== undefined &&
       isTerminalExecutorAttemptState(attempt.state)
     ) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
@@ -928,7 +930,7 @@ function tryParkStaleRunningDispatchLease(
       now,
     });
     if (!marked.ok) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
     const released = releaseWorkflowLease(db, {
@@ -939,15 +941,15 @@ function tryParkStaleRunningDispatchLease(
       now,
     });
     if (!released.ok) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
     parked = { lease: live, runningStep };
-    db.exec("COMMIT");
+    if (ownsTransaction) db.exec("COMMIT");
   } catch (error) {
     try {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
     } catch {}
     throw error;
   }
@@ -1137,7 +1139,8 @@ export function claimRunnableWorkflowStep(
   const graceMs = input.graceMs ?? 0;
   const stalePolicy = input.stalePolicy ?? "auto-release";
 
-  db.exec("BEGIN IMMEDIATE");
+  const ownsTransaction = !db.isTransaction;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
   try {
     const run = db
       .prepare(
@@ -1149,14 +1152,14 @@ export function claimRunnableWorkflowStep(
       (WorkflowRunScanRow & { needs_manual_recovery: number }) | undefined;
 
     if (run === undefined) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return { ok: false, reason: "run_not_found" };
     }
     if (
       run.needs_manual_recovery !== 0 ||
       RUN_TERMINAL_STATE_SET.has(run.state)
     ) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return { ok: false, reason: "run_not_runnable" };
     }
 
@@ -1172,7 +1175,7 @@ export function claimRunnableWorkflowStep(
       signals.outstandingNonMonitorLease !== undefined &&
       signals.freshNonMonitorLease === undefined;
     if (signals.hasStaleManualRecoveryLease || hasStaleNonMonitorLease) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return { ok: false, reason: "run_not_runnable" };
     }
 
@@ -1182,17 +1185,17 @@ export function claimRunnableWorkflowStep(
       graceMs,
     });
     if (derivedRunState !== "approved") {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return { ok: false, reason: "run_not_runnable" };
     }
 
     const step = nextRunnableStep(steps);
     if (step === undefined) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return { ok: false, reason: "run_not_runnable" };
     }
     if (step.stepId !== input.stepId) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return {
         ok: false,
         reason: "step_superseded",
@@ -1214,11 +1217,11 @@ export function claimRunnableWorkflowStep(
       stalePolicy,
     );
     if (!acquired.ok) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return { ok: false, reason: "lease_held", existing: acquired.existing };
     }
 
-    db.exec("COMMIT");
+    if (ownsTransaction) db.exec("COMMIT");
     return {
       ok: true,
       claim: {
@@ -1234,7 +1237,7 @@ export function claimRunnableWorkflowStep(
     };
   } catch (error) {
     try {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
     } catch {
       // Ignore rollback errors so callers see the original failure.
     }
@@ -1893,7 +1896,8 @@ function acquireActiveSubworkflowDispatchClaim(
       >;
     }
   | undefined {
-  db.exec("BEGIN IMMEDIATE");
+  const ownsTransaction = !db.isTransaction;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
   try {
     const run = db
       .prepare(
@@ -1905,7 +1909,7 @@ function acquireActiveSubworkflowDispatchClaim(
       )
       .get(runId) as WorkflowRunScanRow | undefined;
     if (run === undefined) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
@@ -1918,13 +1922,13 @@ function acquireActiveSubworkflowDispatchClaim(
       expectedCandidate === undefined ||
       expectedCandidate.stepId !== input.expectedStepId
     ) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
     const existing = getWorkflowLease(db, run.id, WORKFLOW_DISPATCH_LEASE_KIND);
     if (existing !== undefined && existing.releasedAt === null) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
@@ -1942,17 +1946,17 @@ function acquireActiveSubworkflowDispatchClaim(
       input.stalePolicy,
     );
     if (!acquired.ok) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
     const claim = buildActiveSubworkflowClaim(db, run, acquired.lease, input);
     if (claim === undefined || claim.stepId !== input.expectedStepId) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
-    db.exec("COMMIT");
+    if (ownsTransaction) db.exec("COMMIT");
     const staleDispatchTakeover =
       existing !== undefined &&
       existing.releasedAt !== null &&
@@ -1969,7 +1973,7 @@ function acquireActiveSubworkflowDispatchClaim(
     };
   } catch (error) {
     try {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
     } catch {}
     throw error;
   }
@@ -2375,6 +2379,11 @@ function runWorkflowSchedulerOnceCore(
   // freshness against one consistent clock. (recover / scan validate now/graceMs.)
   const tickNow = now();
   const runScope = input.runId === undefined ? {} : { runId: input.runId };
+  const ownsPreClaimTransaction =
+    input.preClaim !== undefined && !db.isTransaction;
+  if (ownsPreClaimTransaction) db.exec("BEGIN IMMEDIATE");
+
+  try {
 
   // Refuse before any durable mutation: when a pre-claim guard is wired, run
   // the read-only preflight ahead of stale-lease recovery so a refusal (e.g.
@@ -2478,6 +2487,7 @@ function runWorkflowSchedulerOnceCore(
               leaseDurationMs,
             });
       if (dispatchClaimCandidate !== undefined) {
+        if (ownsPreClaimTransaction) db.exec("COMMIT");
         return dispatchClaim(
           {
             db,
@@ -2499,6 +2509,7 @@ function runWorkflowSchedulerOnceCore(
   }
 
   if (candidate === undefined) {
+    if (ownsPreClaimTransaction) db.exec("COMMIT");
     return {
       code: "idle",
       workerId,
@@ -2521,10 +2532,12 @@ function runWorkflowSchedulerOnceCore(
     stalePolicy,
   });
   if (!claimResult.ok) {
+    if (ownsPreClaimTransaction) db.exec("COMMIT");
     return { code: "claim_contended", workerId, recovery, claimResult };
   }
 
   const claim = claimResult.claim;
+  if (ownsPreClaimTransaction) db.exec("COMMIT");
   return dispatchClaim(
     {
       db,
@@ -2538,6 +2551,14 @@ function runWorkflowSchedulerOnceCore(
     },
     dispatch,
   );
+  } catch (error) {
+    if (ownsPreClaimTransaction) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {}
+    }
+    throw error;
+  }
 }
 
 function isPromiseLike<T>(value: MaybePromise<T>): value is Promise<T> {

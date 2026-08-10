@@ -162,6 +162,7 @@ export type SingleShotExecutorHostBindings = {
   hostBindingIdentity?: string;
   /** True only for the host call that atomically inserted this new round. */
   roundAlreadyMaterialized?: boolean;
+  replayOnly?: boolean;
   /** Host-resolved native runner for production registered dispatch. */
   runRound?: SingleShotRoundRunner;
   /** Release or retain repository ownership after durable mechanism evidence. */
@@ -317,6 +318,20 @@ export class SingleShotExecutor implements Executor<
       (snapshot) =>
         snapshot.round.attemptNumber === context.state.attempt.attemptNumber,
     );
+    if (hostBindings.replayOnly === true && currentAttemptRounds.length > 0) {
+      try {
+        const resumed = resumeCompletedSingleShotRound(this.name, {
+          ...context,
+          config,
+          hostBindings,
+        });
+        hostBindings.settleRepoOwnership?.(true);
+        return resumed;
+      } catch (error) {
+        hostBindings.settleRepoOwnership?.(false);
+        throw error;
+      }
+    }
     if (
       currentAttemptRounds.length > 0 &&
       hostBindings.roundAlreadyMaterialized !== true
@@ -565,13 +580,15 @@ function resumeCompletedSingleShotRound(
       `Single-shot resumable round ${round.roundId} does not match host round ${context.hostBindings.start.roundId}.`,
     );
   }
-  assertSingleShotRoundMatchesHost(executor, context, round);
-  assertResumableDispatchBinding(
-    executor,
-    context,
-    round,
-    snapshot.checkpoints,
-  );
+  if (context.hostBindings.replayOnly !== true) {
+    assertSingleShotRoundMatchesHost(executor, context, round);
+    assertResumableDispatchBinding(
+      executor,
+      context,
+      round,
+      snapshot.checkpoints,
+    );
+  }
   if (round.classification !== null || isTerminalRoundState(round.state)) {
     throw new Error(
       `Single-shot round ${round.roundId} is already terminal and cannot resume classification.`,

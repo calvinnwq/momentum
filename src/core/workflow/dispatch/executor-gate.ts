@@ -31,7 +31,8 @@ export function parkRegisteredExecutorAtHumanGate(input: {
   requireStaleLeaseAt?: { now: number; graceMs: number };
 }): WorkflowGateRecord {
   const { db, claim, attemptId, now } = input;
-  db.exec("BEGIN IMMEDIATE");
+  const ownsTransaction = !db.isTransaction;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
   try {
     if (input.requireStaleLeaseAt !== undefined) {
       const lease = getWorkflowLease(
@@ -119,10 +120,10 @@ export function parkRegisteredExecutorAtHumanGate(input: {
       );
     }
     refreshWorkflowRunRuntimeState(db, { runId: claim.runId, now });
-    db.exec("COMMIT");
+    if (ownsTransaction) db.exec("COMMIT");
     return gate;
   } catch (error) {
-    safeRollback(db);
+    if (ownsTransaction) safeRollback(db);
     throw error;
   }
 }

@@ -69,6 +69,8 @@ export const DAEMON_HOST_BINDINGS_FILE_ENV_VAR = "MOMENTUM_HOST_BINDINGS_FILE";
 export const RETIRED_LIVE_WRAPPER_PROFILE_ENV_VAR =
   "MOMENTUM_LIVE_WRAPPER_PROFILE";
 
+const DAEMON_HOST_BINDINGS_SOURCE_MAX_BYTES = 1024 * 1024;
+
 /** Why configured host bindings could not be resolved. */
 export type DaemonHostBindingsErrorCode =
   | "source_unreadable"
@@ -192,6 +194,20 @@ export function readDaemonHostBindingsSource(
   sourcePath: string,
 ): DaemonHostBindingsSourceLoad {
   try {
+    const stat = fs.statSync(sourcePath);
+    if (!stat.isFile()) {
+      return {
+        ok: false,
+        error: "host-bindings source is not a regular file",
+      };
+    }
+    if (stat.size > DAEMON_HOST_BINDINGS_SOURCE_MAX_BYTES) {
+      return {
+        ok: false,
+        error:
+          `host-bindings source exceeds ${DAEMON_HOST_BINDINGS_SOURCE_MAX_BYTES} bytes`,
+      };
+    }
     return { ok: true, contents: fs.readFileSync(sourcePath, "utf8") };
   } catch (error) {
     return {

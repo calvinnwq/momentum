@@ -3022,6 +3022,92 @@ describe("delegate-supervisor SDK executor", () => {
 });
 
 describe("profile-backed persisted delegate state", () => {
+  it("reads a completed no-mistakes state from a launched receipt without a tool field", async () => {
+    const { db, attempt, root } = openDelegateDb();
+    execFileSync("git", ["-C", root, "init", "--quiet"]);
+    execFileSync("git", ["-C", root, "config", "user.name", "Momentum Test"]);
+    execFileSync("git", [
+      "-C",
+      root,
+      "config",
+      "user.email",
+      "momentum@example.test",
+    ]);
+    fs.writeFileSync(path.join(root, "README.md"), "fixture\n");
+    execFileSync("git", ["-C", root, "add", "README.md"]);
+    execFileSync("git", ["-C", root, "commit", "--quiet", "-m", "test: fixture"]);
+    const branch = execFileSync(
+      "git",
+      ["-C", root, "branch", "--show-current"],
+      { encoding: "utf8" },
+    ).trim();
+    const headSha = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    const artifactRoot = path.join(root, "artifacts");
+    fs.mkdirSync(artifactRoot, { recursive: true });
+    const statePath = path.join(artifactRoot, "delegate-external-state.json");
+    const receiptPath = path.join(artifactRoot, "delegate-handoff.json");
+    const identity = {
+      externalRunId: "nm-run-launched-receipt",
+      branch,
+      headSha,
+    };
+    writeState(
+      statePath,
+      state({
+        ...identity,
+        activeStep: null,
+        stepStatus: "completed",
+        ciState: "passed",
+      }),
+    );
+    fs.writeFileSync(
+      receiptPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        handoffCorrelationId: "launched-receipt",
+        attempt: 1,
+        phase: "launched",
+        branch,
+        headSha,
+        statePath,
+        resultJsonPath: path.join(artifactRoot, "result.json"),
+        executorLogPath: path.join(artifactRoot, "executor.log"),
+        externalIdentity: identity,
+      }),
+      "utf8",
+    );
+    const adapter = createPersistedProfileDelegateToolAdapter({
+      tool: "no-mistakes",
+      repoPath: root,
+      command: "",
+      argsPrefix: [],
+      env: {},
+    });
+
+    const observed = await adapter.readExternalState({
+      attempt,
+      config: { tool: "no-mistakes" },
+      signal: new AbortController().signal,
+      handoff: {
+        externalIdentity: identity,
+        summary: "launched receipt handoff",
+        artifactPaths: [statePath, receiptPath],
+      },
+    });
+
+    expect(observed).toMatchObject({
+      ok: true,
+      value: {
+        externalRunId: identity.externalRunId,
+        stepStatus: "completed",
+        ciState: "passed",
+      },
+    });
+    db.close();
+  });
+
   it("rejects an external-state path with a symlinked parent directory", async () => {
     const { db, attempt, root } = openDelegateDb();
     const outside = fs.mkdtempSync(

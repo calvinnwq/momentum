@@ -315,6 +315,27 @@ describe("readDaemonHostBindingsSource", () => {
     expect(load.error.length).toBeGreaterThan(0);
   });
 
+  it("rejects a non-regular source without reading it", () => {
+    const dir = makeTempDir();
+    const load = readDaemonHostBindingsSource(dir);
+    expect(load).toMatchObject({
+      ok: false,
+      error: "host-bindings source is not a regular file",
+    });
+  });
+
+  it("rejects an oversized source before reading its contents", () => {
+    const dir = makeTempDir();
+    const file = path.join(dir, "bindings.json");
+    fs.writeFileSync(file, "{}", "utf8");
+    fs.truncateSync(file, 1024 * 1024 + 1);
+    const load = readDaemonHostBindingsSource(file);
+    expect(load).toMatchObject({
+      ok: false,
+      error: "host-bindings source exceeds 1048576 bytes",
+    });
+  });
+
   it("resolves end to end from a real file through the default loader", () => {
     const dir = makeTempDir();
     const file = path.join(dir, "bindings.json");
@@ -538,6 +559,10 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
     runId: string,
     stepId: string,
     executor: string,
+    options: {
+      state?: "running" | "capturing_result";
+      detail?: string;
+    } = {},
   ): { attemptId: string; roundId: string } {
     const attemptId = `${runId}::${stepId}::attempt-1`;
     const roundId = `${attemptId}::round::0`;
@@ -568,7 +593,7 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
         executor,
         attemptNumber: 1,
         roundIndex: 0,
-        state: "running",
+        state: options.state ?? "running",
         classification: null,
         startedAt: NOW,
         heartbeatAt: NOW,
@@ -610,11 +635,158 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
         roundId,
         sequence: 1,
         stage: "mechanism_completed",
-        detail: "durable completion evidence",
+        detail: options.detail ?? "durable completion evidence",
       },
       { now: NOW },
     );
     return { attemptId, roundId };
+  }
+
+  function seedCompletedDelegateHandoffAttempt(
+    db: ReturnType<typeof openDb>,
+    runId: string,
+    stepId: string,
+    repoPath: string,
+  ): { statePath: string; receiptPath: string } {
+    const attemptId = `${runId}::${stepId}::attempt-1`;
+    const roundId = `${attemptId}::round::0`;
+    insertExecutorAttempt(
+      db,
+      {
+        attemptId,
+        workflowRunId: runId,
+        stepRunId: stepId,
+        stepKey: stepId,
+        executor: "delegate-supervisor",
+        state: "running",
+        attemptNumber: 1,
+        startedAt: NOW,
+        heartbeatAt: NOW,
+        finishedAt: null,
+      },
+      { now: NOW },
+    );
+    insertExecutorRound(
+      db,
+      {
+        roundId,
+        attemptId,
+        workflowRunId: runId,
+        stepRunId: stepId,
+        stepKey: stepId,
+        executor: "delegate-supervisor",
+        attemptNumber: 1,
+        roundIndex: 0,
+        state: "running",
+        classification: null,
+        startedAt: NOW,
+        heartbeatAt: NOW,
+        finishedAt: null,
+        agentProvider: null,
+        model: null,
+        effort: null,
+        inputDigest: null,
+        resultDigest: null,
+        artifactRoot: null,
+        logPaths: [],
+        summary: null,
+        keyChanges: [],
+        keyLearnings: [],
+        remainingWork: [],
+        changedFiles: [],
+        verificationStatus: null,
+        commitSha: null,
+        recoveryCode: null,
+        humanGate: null,
+      },
+      { now: NOW },
+    );
+    const branch = execFileSync(
+      "git",
+      ["-C", repoPath, "branch", "--show-current"],
+      { encoding: "utf8" },
+    ).trim();
+    const headSha = execFileSync("git", ["-C", repoPath, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    const artifactRoot = path.join(
+      repoPath,
+      ".agent-workflows",
+      runId,
+      "delegate",
+      stepId,
+    );
+    fs.mkdirSync(artifactRoot, { recursive: true });
+    const statePath = path.join(artifactRoot, "delegate-external-state.json");
+    const receiptPath = path.join(artifactRoot, "delegate-handoff.json");
+    const externalIdentity = {
+      externalRunId: `${runId}-external`,
+      branch,
+      headSha,
+    };
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({
+        ...externalIdentity,
+        activeStep: null,
+        stepStatus: "completed",
+        findings: [],
+        selectedFindingIds: [],
+        decisions: [],
+        prUrl: null,
+        ciState: "passed",
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      receiptPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        tool: "gnhf",
+        phase: "finalized",
+        externalState: {
+          ...externalIdentity,
+          activeStep: null,
+          stepStatus: "completed",
+          findings: [],
+          selectedFindingIds: [],
+          decisions: [],
+          prUrl: null,
+          ciState: "passed",
+        },
+      }),
+      "utf8",
+    );
+    insertExecutorCheckpoint(
+      db,
+      {
+        checkpointId: `${roundId}-checkpoint-0`,
+        roundId,
+        sequence: 0,
+        stage: "round_started",
+        detail: null,
+      },
+      { now: NOW },
+    );
+    insertExecutorCheckpoint(
+      db,
+      {
+        checkpointId: `${roundId}-checkpoint-1`,
+        roundId,
+        sequence: 1,
+        stage: "delegate_handoff_completed",
+        detail: JSON.stringify({
+          adapterName: "gnhf",
+          handoff: {
+            externalIdentity,
+            summary: "completed delegated work",
+            artifactPaths: [statePath, receiptPath],
+          },
+        }),
+      },
+      { now: NOW },
+    );
+    return { statePath, receiptPath };
   }
 
   it("refuses pre-claim on a missing binding even when completed native mechanism evidence exists", async () => {
@@ -1013,7 +1185,12 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
       runId,
       repoPath,
     );
-    seedCompletedMechanismAttempt(db, runId, "handoff", "delegate-supervisor");
+    const evidence = seedCompletedDelegateHandoffAttempt(
+      db,
+      runId,
+      "handoff",
+      repoPath,
+    );
 
     const production = resolveDaemonWorkflowStepDispatch(
       {},
@@ -1035,6 +1212,84 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
     });
 
     expect(result.code).toBe("dispatched");
+    expect(
+      db
+        .prepare("SELECT state FROM workflow_steps WHERE run_id = ?")
+        .get(runId),
+    ).toEqual({ state: "succeeded" });
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ count: 1 });
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ state: "succeeded" });
+    expect(fs.existsSync(evidence.statePath)).toBe(true);
+    expect(fs.existsSync(evidence.receiptPath)).toBe(true);
+    db.close();
+  });
+
+  it("reclassifies completed native evidence without launching when bindings are absent", async () => {
+    const repoPath = initRepo();
+    const db = openDb(makeTempDir("momentum-daemon-completed-native-data-"));
+    const runId = "native-completed-without-bindings-run";
+    startApprovedRun(
+      db,
+      {
+        key: "daemon-completed-native-without-bindings",
+        title: "Daemon Completed Native Without Bindings",
+        version: 1,
+        steps: [
+          {
+            key: "preflight",
+            kind: "preflight",
+            executor: "agent-once",
+            config: {},
+            order: 0,
+            required: true,
+          },
+        ],
+      },
+      runId,
+      repoPath,
+    );
+    seedCompletedMechanismAttempt(db, runId, "preflight", "agent-once", {
+      state: "capturing_result",
+      detail: "attempt outcome: ok",
+    });
+
+    const production = resolveDaemonWorkflowStepDispatch(
+      {},
+      executeWorkflowStepDispatch,
+      {},
+    );
+    expect(production.ok, production.ok ? "" : production.message).toBe(true);
+    if (!production.ok) return;
+
+    const result = await runWorkflowSchedulerOnceAsync({
+      db,
+      runId,
+      workerId: "native-completed-without-bindings-worker",
+      dispatch: production.dispatch,
+      ...(production.preClaim === undefined
+        ? {}
+        : { preClaim: production.preClaim }),
+      now: () => NOW + 1,
+    });
+
+    expect(result.code).toBe("dispatched");
+    expect(
+      db
+        .prepare("SELECT state FROM workflow_steps WHERE run_id = ?")
+        .get(runId),
+    ).toEqual({ state: "succeeded" });
     expect(
       db
         .prepare(

@@ -52,6 +52,7 @@ export type GoalLoopExecutorHostBindings = {
   hostBindingIdentity?: string;
   /** True only when the host atomically inserted this fresh bound round. */
   roundAlreadyMaterialized?: boolean;
+  replayOnly?: boolean;
   runRound?: GoalLoopRoundRunner;
   settleRepoOwnership?: (completionDurable: boolean) => void;
 };
@@ -124,12 +125,14 @@ export class GoalLoopSdkExecutor implements Executor<
       !reusingMaterializedRound
     ) {
       try {
-        assertGoalLoopRoundMatchesHost(
-          current.round,
-          current.checkpoints,
-          context.hostBindings,
-          selection,
-        );
+        if (context.hostBindings.replayOnly !== true) {
+          assertGoalLoopRoundMatchesHost(
+            current.round,
+            current.checkpoints,
+            context.hostBindings,
+            selection,
+          );
+        }
         const resumed = resumeCompletedRound(
           current.round,
           current.checkpoints,
