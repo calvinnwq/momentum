@@ -478,11 +478,20 @@ export function resolveDaemonWorkflowStepDispatch(
             canonicalBuiltInExecutorNames,
             resolveHostBindings,
             resolveOwnedRoundMaterializer,
-            // A delegated handoff is one durable SDK round; allow that
-            // executor to replay the handoff and perform its first bounded
-            // read under the same claim.
-            resolveMaxTicks: ({ executorName }) =>
-              executorName === DELEGATE_SUPERVISOR_EXECUTOR_NAME ? 2 : 1,
+            // A fresh delegated handoff is one durable SDK round followed by
+            // its first bounded read; a retry with any prior handoff must only
+            // replay that handoff under the same claim.
+            resolveMaxTicks: ({ executorName, attempt, context }) =>
+              executorName !== DELEGATE_SUPERVISOR_EXECUTOR_NAME
+                ? 1
+                : hasPriorCompletedDelegateHandoff(
+                      context.db,
+                      attempt.workflowRunId,
+                      attempt.stepRunId,
+                      attempt.attemptNumber,
+                    )
+                  ? 1
+                  : 2,
           }),
           env,
           deps,
@@ -666,8 +675,17 @@ function createMissingHostBindingsNativeDispatch(
   return createRegisteredExecutorWorkflowDispatch(baseDispatch, {
     registry,
     canonicalBuiltInExecutorNames: new Set(NATIVE_HOST_BINDING_EXECUTORS),
-    resolveMaxTicks: ({ executorName }) =>
-      executorName === DELEGATE_SUPERVISOR_EXECUTOR_NAME ? 2 : 1,
+    resolveMaxTicks: ({ executorName, attempt, context }) =>
+      executorName !== DELEGATE_SUPERVISOR_EXECUTOR_NAME
+        ? 1
+        : hasPriorCompletedDelegateHandoff(
+              context.db,
+              attempt.workflowRunId,
+              attempt.stepRunId,
+              attempt.attemptNumber,
+            )
+          ? 1
+          : 2,
     resolveHostBindings: ({
       claim,
       context,
@@ -2235,6 +2253,27 @@ function findInterruptedDelegateHandoffAttempt(
       DELEGATE_SUPERVISOR_HANDOFF_STAGE,
     ) as { attempt_number: number } | undefined;
   return row?.attempt_number;
+}
+
+function hasPriorCompletedDelegateHandoff(
+  db: MomentumDb,
+  runId: string,
+  stepId: string,
+  attemptNumber: number,
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1
+         FROM executor_rounds AS r
+         JOIN executor_checkpoints AS c ON c.round_id = r.round_id
+        WHERE r.workflow_run_id = ?
+          AND r.step_run_id = ?
+          AND r.attempt_number < ?
+          AND c.stage = ?
+        LIMIT 1`,
+    )
+    .get(runId, stepId, attemptNumber, DELEGATE_SUPERVISOR_HANDOFF_STAGE);
+  return row !== undefined;
 }
 
 function hasExecutorCheckpoint(
