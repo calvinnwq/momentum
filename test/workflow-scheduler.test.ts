@@ -2188,14 +2188,6 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       // A due-but-not-urgent active delegate continuation whose candidate the
       // pre-claim guard would refuse...
       seedCheckpointedDelegateHandoff(db, "run-continuation", "implementation");
-      seedLease(db, {
-        runId: "run-continuation",
-        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
-        holder: "scheduler-1",
-        acquiredAt: NOW,
-        heartbeatAt: NOW,
-        expiresAt: NOW + 7_235_000,
-      });
       // ...plus a valid runnable candidate in another run.
       seedRun(db, { runId: "run-runnable", state: "approved" });
       seedStep(db, {
@@ -2230,6 +2222,13 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         claim: { runId: "run-runnable" },
       });
       expect(preClaimed).not.toContain("run-continuation");
+      expect(
+        getWorkflowLease(
+          db,
+          "run-continuation",
+          WORKFLOW_DISPATCH_LEASE_KIND,
+        ),
+      ).toBeUndefined();
     } finally {
       db.close();
     }

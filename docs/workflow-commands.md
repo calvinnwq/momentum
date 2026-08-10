@@ -2314,6 +2314,7 @@ A cron, OpenClaw, or GUI poller branches on the envelope instead of scraping tex
 | `invalid_cursor` | The `--since` value is not a valid durable event cursor. |
 | `data_dir_failed` | Data directory resolution, SQLite access, the bounded `--once` dispatch tick, or stream polling failed. |
 | `daemon_host_bindings_invalid` | The shared daemon host-binding file was configured but unreadable or invalid when the bounded dispatch tick resolved it. |
+| `daemon_host_bindings_required` | Dispatch was refused because a native executor has no usable host bindings; workflow state is not mutated and no process is launched. |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
 | `watch_unsupported_source` | The run source is not `momentum-native-coding` (`--once` mode only). |
 

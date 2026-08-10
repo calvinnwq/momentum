@@ -1472,25 +1472,23 @@ function scanDispatchLeaseOrderedRuns(
         .all(runId) as WorkflowRunScanRow[]);
 }
 
+type ActiveSubworkflowDispatchSelection = {
+  claim?: ClaimedWorkflowStep;
+  pendingCandidate?: RunnableWorkflowStep;
+  continuationPending: boolean;
+};
+
 function selectActiveSubworkflowDispatchRecheck(
   db: MomentumDb,
   input: {
     now: number;
     graceMs: number;
     holder: string;
-    leaseDurationMs: number;
     continuationPollIntervalMs: number;
-    stalePolicy: WorkflowLeaseStalePolicy;
     claimedExecutorNames?: ReadonlySet<string>;
     runId?: string;
   },
-): {
-  claim?: ClaimedWorkflowStep;
-  continuationPending: boolean;
-  staleDispatchTakeover?: NonNullable<
-    WorkflowStepDispatchContext["staleDispatchTakeover"]
-  >;
-} {
+): ActiveSubworkflowDispatchSelection {
   const runs = scanDispatchLeaseOrderedRuns(db, input.runId);
 
   let continuationPending = false;
@@ -1518,14 +1516,11 @@ function selectActiveSubworkflowDispatchRecheck(
       continue;
     }
 
-    const acquired = acquireActiveSubworkflowDispatchClaim(db, run.id, input);
-    if (acquired !== undefined) {
+    const candidate = selectActiveSubworkflowCandidateStep(db, run, input);
+    if (candidate !== undefined) {
       return {
-        claim: acquired.claim,
+        pendingCandidate: candidate,
         continuationPending: true,
-        ...(acquired.staleDispatchTakeover === undefined
-          ? {}
-          : { staleDispatchTakeover: acquired.staleDispatchTakeover }),
       };
     }
   }
@@ -1887,6 +1882,7 @@ function acquireActiveSubworkflowDispatchClaim(
     holder: string;
     leaseDurationMs: number;
     stalePolicy: WorkflowLeaseStalePolicy;
+    expectedStepId: string;
     claimedExecutorNames?: ReadonlySet<string>;
   },
 ):
@@ -1909,6 +1905,19 @@ function acquireActiveSubworkflowDispatchClaim(
       )
       .get(runId) as WorkflowRunScanRow | undefined;
     if (run === undefined) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+
+    const expectedCandidate = selectActiveSubworkflowCandidateStep(
+      db,
+      run,
+      input,
+    );
+    if (
+      expectedCandidate === undefined ||
+      expectedCandidate.stepId !== input.expectedStepId
+    ) {
       db.exec("ROLLBACK");
       return undefined;
     }
@@ -1938,7 +1947,7 @@ function acquireActiveSubworkflowDispatchClaim(
     }
 
     const claim = buildActiveSubworkflowClaim(db, run, acquired.lease, input);
-    if (claim === undefined) {
+    if (claim === undefined || claim.stepId !== input.expectedStepId) {
       db.exec("ROLLBACK");
       return undefined;
     }
@@ -2415,9 +2424,7 @@ function runWorkflowSchedulerOnceCore(
     now: tickNow,
     graceMs,
     holder: workerId,
-    leaseDurationMs,
     continuationPollIntervalMs,
-    stalePolicy,
     ...(input.claimedExecutorNames === undefined
       ? {}
       : { claimedExecutorNames: input.claimedExecutorNames }),
@@ -2426,40 +2433,68 @@ function runWorkflowSchedulerOnceCore(
   const scan = selectRunnableWork(db, { now: tickNow, graceMs, ...runScope });
   const candidate = scan.runnable[0];
   const activeClaim = activeSelection.claim;
+  const pendingActiveCandidate = activeSelection.pendingCandidate;
+  const activeCandidate = activeClaim ?? pendingActiveCandidate;
   if (
-    activeClaim !== undefined &&
+    activeCandidate !== undefined &&
     (candidate === undefined ||
-      isActiveSubworkflowRecheckUrgent(activeClaim.lease, {
-        now: tickNow,
-        continuationPollIntervalMs,
-      }))
+      (activeClaim !== undefined &&
+        isActiveSubworkflowRecheckUrgent(activeClaim.lease, {
+          now: tickNow,
+          continuationPollIntervalMs,
+        })))
   ) {
-    input.preClaim?.({ db, candidate: activeClaim });
-    const refreshedClaim = heartbeatActiveDispatchClaim(db, {
-      claim: activeClaim,
-      now: tickNow,
-      leaseDurationMs,
-    });
-    if (refreshedClaim !== undefined) {
-      return dispatchClaim(
+    input.preClaim?.({ db, candidate: activeCandidate });
+    let activeClaimForDispatch = activeClaim;
+    let staleDispatchTakeover:
+      | NonNullable<WorkflowStepDispatchContext["staleDispatchTakeover"]>
+      | undefined;
+    if (activeClaimForDispatch === undefined) {
+      const acquired = acquireActiveSubworkflowDispatchClaim(
+        db,
+        activeCandidate.runId,
         {
-          db,
-          workerId,
-          recovery,
-          claim: refreshedClaim,
-          tickNow,
-          now,
+          now: tickNow,
+          graceMs,
+          holder: workerId,
           leaseDurationMs,
-          recoveredDispatchLeases,
-          ...(activeSelection.staleDispatchTakeover === undefined
+          stalePolicy,
+          expectedStepId: activeCandidate.stepId,
+          ...(input.claimedExecutorNames === undefined
             ? {}
-            : {
-                durableStaleDispatchTakeover:
-                  activeSelection.staleDispatchTakeover,
-              }),
+            : { claimedExecutorNames: input.claimedExecutorNames }),
         },
-        dispatch,
       );
+      activeClaimForDispatch = acquired?.claim;
+      staleDispatchTakeover = acquired?.staleDispatchTakeover;
+    }
+    if (activeClaimForDispatch !== undefined) {
+      const dispatchClaimCandidate =
+        activeClaim === undefined
+          ? activeClaimForDispatch
+          : heartbeatActiveDispatchClaim(db, {
+              claim: activeClaimForDispatch,
+              now: tickNow,
+              leaseDurationMs,
+            });
+      if (dispatchClaimCandidate !== undefined) {
+        return dispatchClaim(
+          {
+            db,
+            workerId,
+            recovery,
+            claim: dispatchClaimCandidate,
+            tickNow,
+            now,
+            leaseDurationMs,
+            recoveredDispatchLeases,
+            ...(staleDispatchTakeover === undefined
+              ? {}
+              : { durableStaleDispatchTakeover: staleDispatchTakeover }),
+          },
+          dispatch,
+        );
+      }
     }
   }
 

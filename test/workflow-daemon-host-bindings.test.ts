@@ -988,4 +988,60 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
     ).not.toThrow();
     db.close();
   });
+
+  it("reattaches completed delegate evidence without a bindings source", async () => {
+    const repoPath = initRepo();
+    const db = openDb(makeTempDir("momentum-daemon-completed-delegate-data-"));
+    const runId = "delegate-completed-without-bindings-run";
+    startApprovedRun(
+      db,
+      {
+        key: "daemon-completed-delegate-without-bindings",
+        title: "Daemon Completed Delegate Without Bindings",
+        version: 1,
+        steps: [
+          {
+            key: "handoff",
+            kind: "implementation",
+            executor: "delegate-supervisor",
+            config: { tool: "gnhf" },
+            order: 0,
+            required: true,
+          },
+        ],
+      },
+      runId,
+      repoPath,
+    );
+    seedCompletedMechanismAttempt(db, runId, "handoff", "delegate-supervisor");
+
+    const production = resolveDaemonWorkflowStepDispatch(
+      {},
+      executeWorkflowStepDispatch,
+      {},
+    );
+    expect(production.ok, production.ok ? "" : production.message).toBe(true);
+    if (!production.ok) return;
+
+    const result = await runWorkflowSchedulerOnceAsync({
+      db,
+      runId,
+      workerId: "delegate-completed-without-bindings-worker",
+      dispatch: production.dispatch,
+      ...(production.preClaim === undefined
+        ? {}
+        : { preClaim: production.preClaim }),
+      now: () => NOW + 1,
+    });
+
+    expect(result.code).toBe("dispatched");
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ count: 1 });
+    db.close();
+  });
 });

@@ -1355,6 +1355,23 @@ export function createPersistedProfileDelegateToolAdapter(input: {
   argsPrefix: readonly string[];
   env: Record<string, string | undefined>;
 }): DelegateSupervisorToolAdapter {
+  if (input.tool === "no-mistakes" && input.command.length === 0) {
+    return {
+      name: input.tool,
+      handoff: () => {
+        throw new Error("durable no-mistakes handoff must not be repeated");
+      },
+      readExternalState: ({ handoff }) =>
+        readRepoBoundPersistedDelegateState(
+          input.repoPath,
+          handoff.artifactPaths,
+          {
+            tool: input.tool,
+            identity: handoff.externalIdentity,
+          },
+        ),
+    };
+  }
   if (input.tool === "no-mistakes") {
     return createNoMistakesToolAdapter({
       handoff: () => {
@@ -2621,9 +2638,18 @@ function readRepoBoundPersistedDelegateState(
   );
   const read =
     finalizedReceiptState ?? readPersistedDelegateState(artifactPaths);
-  if (!read.ok || delegateStateHeadMatchesRepo(repoPath, read.value.headSha)) {
-    return read;
+  if (!read.ok) return read;
+  if (
+    read.value.externalRunId !== expected.identity.externalRunId ||
+    read.value.branch !== expected.identity.branch
+  ) {
+    return {
+      ok: false,
+      error:
+        "delegated external state does not match its durable external identity",
+    };
   }
+  if (delegateStateHeadMatchesRepo(repoPath, read.value.headSha)) return read;
   return {
     ok: false,
     error: `delegated external state head ${read.value.headSha} does not match the current repository head`,

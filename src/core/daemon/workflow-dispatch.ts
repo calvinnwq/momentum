@@ -539,11 +539,10 @@ export function resolveDaemonWorkflowStepDispatch(
             claim.stepId,
           );
           if (
-            canonicalExecutorIdentity(runtime.executorName) !==
-              DELEGATE_SUPERVISOR_EXECUTOR_NAME &&
             attempt !== undefined &&
-            hasUnclassifiedCompletedNativeMechanism(
+            hasCompletedNativeHostBindingEvidence(
               context.db,
+              runtime.executorName,
               attempt.attemptId,
             ) &&
             missingHostBindingsDispatch !== undefined
@@ -641,11 +640,10 @@ export function resolveDaemonWorkflowStepDispatch(
           claim.stepId,
         );
         if (
-          canonicalExecutorIdentity(runtime.executorName) !==
-            DELEGATE_SUPERVISOR_EXECUTOR_NAME &&
           attempt !== undefined &&
-          hasUnclassifiedCompletedNativeMechanism(
+          hasCompletedNativeHostBindingEvidence(
             context.db,
+            runtime.executorName,
             attempt.attemptId,
           ) &&
           missingHostBindingsDispatch !== undefined
@@ -674,12 +672,78 @@ function createMissingHostBindingsNativeDispatch(
   return createRegisteredExecutorWorkflowDispatch(baseDispatch, {
     registry,
     canonicalBuiltInExecutorNames: new Set(NATIVE_HOST_BINDING_EXECUTORS),
-    resolveHostBindings: ({ claim, context, executorName }) => {
+    resolveHostBindings: ({
+      claim,
+      context,
+      executorName,
+      config,
+    }) => {
       const attempt = loadLatestExecutorAttemptForStep(
         context.db,
         claim.runId,
         claim.stepId,
       );
+      if (
+        canonicalExecutorIdentity(executorName) ===
+        DELEGATE_SUPERVISOR_EXECUTOR_NAME
+      ) {
+        const completedLiveStep =
+          attempt !== undefined &&
+          hasCompletedLiveStepMechanism(context.db, attempt.attemptId);
+        const completedHandoff =
+          attempt !== undefined &&
+          hasCompletedDelegateHandoff(context.db, attempt.attemptId);
+        if (completedLiveStep || completedHandoff) {
+          const settleHandoff =
+            attempt === undefined
+              ? undefined
+              : recoverCompletedLiveStepRepoOwnership(
+                  context.db,
+                  claim.runId,
+                  claim.stepId,
+                  attempt.attemptNumber,
+                  context.now,
+                );
+          if (completedLiveStep) {
+            return {
+              tools: new Map(),
+              ...(settleHandoff === undefined ? {} : { settleHandoff }),
+            };
+          }
+          const delegateTool = resolveDelegateToolName(config);
+          const provenance = loadDispatchedStepRunProvenance(
+            context.db,
+            claim.runId,
+          );
+          if (provenance === undefined) {
+            throw new RegisteredExecutorHostBindingsError(
+              "runtime_unavailable",
+              "run_not_found",
+            );
+          }
+          const resolved = resolveDispatchedStepExecutorContext(
+            claim.runId,
+            provenance,
+          );
+          if (!resolved.ok) {
+            throw new RegisteredExecutorHostBindingsError(
+              "runtime_unavailable",
+              resolved.reason,
+            );
+          }
+          const adapter = createPersistedProfileDelegateToolAdapter({
+            tool: delegateTool,
+            repoPath: resolved.exec.repoPath,
+            command: "",
+            argsPrefix: [],
+            env: {},
+          });
+          return {
+            tools: new Map([[adapter.name, adapter]]),
+            ...(settleHandoff === undefined ? {} : { settleHandoff }),
+          };
+        }
+      }
       const settleRepoOwnership =
         attempt !== undefined &&
         hasUnclassifiedCompletedNativeMechanism(context.db, attempt.attemptId)
