@@ -2182,6 +2182,165 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     }
   });
 
+  it("preflights only the winner: a refused non-urgent active candidate does not abort dispatching runnable work (NGX-668)", () => {
+    const db = openDb(makeTempDir());
+    try {
+      // A due-but-not-urgent active delegate continuation whose candidate the
+      // pre-claim guard would refuse...
+      seedCheckpointedDelegateHandoff(db, "run-continuation", "implementation");
+      seedLease(db, {
+        runId: "run-continuation",
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "scheduler-1",
+        acquiredAt: NOW,
+        heartbeatAt: NOW,
+        expiresAt: NOW + 7_235_000,
+      });
+      // ...plus a valid runnable candidate in another run.
+      seedRun(db, { runId: "run-runnable", state: "approved" });
+      seedStep(db, {
+        runId: "run-runnable",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0,
+      });
+      const recorder = recordingDispatch();
+      const preClaimed: string[] = [];
+
+      // Due (20s >= 15s) but not urgent (< 30s): the tick dispatches the
+      // runnable candidate, so the active candidate must not be preflighted.
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        leaseDurationMs: 7_235_000,
+        continuationPollIntervalMs: 15_000,
+        dispatch: recorder.dispatch,
+        preClaim: ({ candidate }) => {
+          preClaimed.push(candidate.runId);
+          if (candidate.runId === "run-continuation") {
+            throw new Error("host bindings refuse the continuation candidate");
+          }
+        },
+        now: () => NOW + 20_000,
+      });
+
+      expect(result).toMatchObject({
+        code: "dispatched",
+        claim: { runId: "run-runnable" },
+      });
+      expect(preClaimed).not.toContain("run-continuation");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses a terminal-reconciliation successor via preClaim before recovery finalizes the step (NGX-668)", () => {
+    const db = openDb(makeTempDir());
+    try {
+      // A dead worker's stale auto-release dispatch lease over a running step
+      // whose latest executor attempt is terminal (succeeded): recovery would
+      // reconcile the step and surface the approved successor.
+      seedRun(db, {
+        runId: "run-terminal",
+        state: "running",
+        repoPath: "/repos/fixture",
+      });
+      seedStep(db, {
+        runId: "run-terminal",
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 0,
+      });
+      seedStep(db, {
+        runId: "run-terminal",
+        stepId: "postflight",
+        kind: "postflight",
+        state: "approved",
+        order: 1,
+      });
+      seedLease(db, {
+        runId: "run-terminal",
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        acquiredAt: NOW - 60_000,
+        heartbeatAt: NOW - 60_000,
+        expiresAt: NOW - 10_000,
+        stalePolicy: "auto-release",
+      });
+      insertExecutorAttempt(
+        db,
+        {
+          attemptId: deriveDispatchAttemptId(
+            "run-terminal",
+            "implementation",
+            1,
+          ),
+          workflowRunId: "run-terminal",
+          stepRunId: "implementation",
+          stepKey: "implementation",
+          executor: "agent-once",
+          state: "succeeded",
+          attemptNumber: 1,
+          startedAt: NOW - 60_000,
+          heartbeatAt: NOW - 60_000,
+          finishedAt: NOW - 50_000,
+        },
+        { now: NOW - 50_000 },
+      );
+      const recorder = recordingDispatch();
+      const refusal = new Error(
+        "host bindings have no postflight binding for native agent-once",
+      );
+
+      expect(() =>
+        runWorkflowSchedulerOnce({
+          db,
+          workerId: "scheduler-1",
+          dispatch: recorder.dispatch,
+          preClaim: ({ candidate }) => {
+            if (candidate.stepId === "postflight") throw refusal;
+          },
+          now: () => NOW,
+        }),
+      ).toThrow(refusal);
+
+      // The refusal fired BEFORE recovery mutated durable state: the step is
+      // not finalized, the stale lease is not released, the run is not parked,
+      // and nothing was dispatched.
+      expect(getWorkflowStep(db, "run-terminal", "implementation")?.state).toBe(
+        "running",
+      );
+      expect(getWorkflowStep(db, "run-terminal", "postflight")?.state).toBe(
+        "approved",
+      );
+      const lease = getWorkflowLease(db, "run-terminal", "dispatch");
+      expect(lease?.releasedAt).toBeNull();
+      expect(
+        getWorkflowRunManualRecoveryState(db, "run-terminal"),
+      ).toMatchObject({ needsManualRecovery: false });
+      expect(recorder.calls).toEqual([]);
+
+      // Without the refusing guard the same tick reconciles and dispatches the
+      // successor — the preflight's predicted candidate matches reality.
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW,
+      });
+      expect(result).toMatchObject({
+        code: "dispatched",
+        claim: { runId: "run-terminal", stepId: "postflight" },
+      });
+      expect(getWorkflowStep(db, "run-terminal", "implementation")?.state).toBe(
+        "succeeded",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("alternates overdue continuations with runnable work independently of lease duration", () => {
     const db = openDb(makeTempDir());
     try {

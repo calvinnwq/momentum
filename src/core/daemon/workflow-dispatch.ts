@@ -216,9 +216,14 @@ function isNativeHostBindingExecutorIdentity(executorName: string): boolean {
 
 /**
  * Whether the step's latest attempt already carries completed work whose
- * classification/settlement must never be blocked before a claim. Delegate
- * handoffs record their completion through the live-step mechanism and
- * handoff stages, not the unclassified native-mechanism shape.
+ * classification/settlement must never be blocked before a claim in the
+ * *not-configured* bindings lane, where
+ * `createMissingHostBindingsNativeDispatch` classifies completed native
+ * mechanisms without consulting any binding. When a bindings source *is*
+ * resolved, completed native evidence does not bypass selected-binding
+ * presence validation: the post-claim resolver still looks the binding up.
+ * Delegate handoffs record their completion through the live-step mechanism
+ * and handoff stages, not the unclassified native-mechanism shape.
  */
 function hasCompletedNativeHostBindingEvidence(
   db: MomentumDb,
@@ -271,12 +276,15 @@ function assertNativeHostBindingsConfigured(
 
 /**
  * Pre-claim guard for a *resolved* bindings source that still cannot serve the
- * selected native step kind: claiming would only create attempt/round state
- * for the post-claim binding lookup to reject with `runtime_unavailable`.
- * Delegate handoffs select their binding through tool config, which the
- * post-claim resolver validates, so only kind-selected native executors are
- * checked here. Read-only: mirrors the resolver's rejection without mutating
- * any workflow, attempt, or round state.
+ * selected native step: claiming would only create attempt/round state for
+ * the post-claim binding lookup to reject with `runtime_unavailable`.
+ * Kind-selected native executors validate the step-kind binding; delegate
+ * handoffs validate the binding their tool config selects, mirroring the
+ * post-claim resolver's tool-to-binding mapping. Completed evidence never
+ * bypasses this presence check unless the matching post-claim resolver path
+ * also settles without consulting any binding. Read-only: mirrors the
+ * resolver's rejection without mutating any workflow, attempt, or round
+ * state.
  */
 function assertSelectedNativeHostBindingPresent(
   db: MomentumDb,
@@ -287,25 +295,20 @@ function assertSelectedNativeHostBindingPresent(
   if (
     !runtime.ok ||
     hasExecutorDefinition(db, runtime.executorName) ||
-    !isNativeHostBindingExecutorIdentity(runtime.executorName) ||
-    canonicalExecutorIdentity(runtime.executorName) ===
-      DELEGATE_SUPERVISOR_EXECUTOR_NAME
+    !isNativeHostBindingExecutorIdentity(runtime.executorName)
   ) {
     return;
   }
-  const attempt = loadLatestExecutorAttemptForStep(
-    db,
-    target.runId,
-    target.stepId,
-  );
   if (
-    attempt !== undefined &&
-    hasCompletedNativeHostBindingEvidence(
-      db,
-      runtime.executorName,
-      attempt.attemptId,
-    )
+    canonicalExecutorIdentity(runtime.executorName) ===
+    DELEGATE_SUPERVISOR_EXECUTOR_NAME
   ) {
+    assertSelectedDelegateToolHostBindingPresent(
+      db,
+      target,
+      hostBindings,
+      runtime.config,
+    );
     return;
   }
   const step = getWorkflowStep(db, target.runId, target.stepId);
@@ -317,6 +320,61 @@ function assertSelectedNativeHostBindingPresent(
   throw new RegisteredExecutorHostBindingsError(
     "runtime_unavailable",
     `host bindings have no ${step.kind} binding for native ${runtime.executorName}`,
+  );
+}
+
+/**
+ * Delegate arm of {@link assertSelectedNativeHostBindingPresent}: a delegated
+ * tool selects its binding through step config, so mirror exactly the
+ * post-claim resolver paths that consult bindings. Exempt only the paths the
+ * resolver settles without a binding lookup: an unmapped tool (empty tools),
+ * a completed live-step mechanism, and a completed handoff replayed through
+ * the persisted adapter (which for `no-mistakes` still resolves the status
+ * runtime first, so that tool stays validated). Invalid tool config is owned
+ * by route validation and the post-claim `invalid_input` refusal, not a
+ * host-bindings refusal.
+ */
+function assertSelectedDelegateToolHostBindingPresent(
+  db: MomentumDb,
+  target: { runId: string; stepId: string },
+  hostBindings: HostBindings,
+  config: Readonly<Record<string, unknown>>,
+): void {
+  const tool = config["tool"];
+  if (typeof tool !== "string" || tool.trim().length === 0) return;
+  const stepKind = resolveProfileBackedDelegateToolStepKind(tool);
+  if (stepKind === null) return;
+  const attempt = loadLatestExecutorAttemptForStep(
+    db,
+    target.runId,
+    target.stepId,
+  );
+  if (attempt !== undefined) {
+    if (hasCompletedLiveStepMechanism(db, attempt.attemptId)) return;
+    if (
+      tool !== "no-mistakes" &&
+      hasCompletedDelegateHandoff(db, attempt.attemptId)
+    ) {
+      return;
+    }
+  }
+  // New host-binding files key the no-mistakes status wrapper under the
+  // canonical `validate` kind; the tool's own legacy spelling stays readable.
+  const bound =
+    tool === "no-mistakes"
+      ? hostBindings.bindings.has(stepKind) ||
+        (hostBindings.bindings as ReadonlyMap<string, HostBindingConfig>).has(
+          "no-mistakes",
+        )
+      : hostBindings.bindings.has(stepKind);
+  if (bound) return;
+  // Route validation owns precedence: an invalid route must reach dispatch so
+  // the run parks behind a durable route_config_invalid gate instead of a
+  // pre-claim host-binding refusal.
+  if (!resolveWorkflowStepDispatchRouteSelection(db, target).ok) return;
+  throw new RegisteredExecutorHostBindingsError(
+    "runtime_unavailable",
+    `host bindings have no ${stepKind} binding for delegated ${tool} tool`,
   );
 }
 
