@@ -329,6 +329,38 @@ export class SingleShotExecutor implements Executor<
         return resumed;
       } catch (error) {
         hostBindings.settleRepoOwnership?.(false);
+        if (hostBindings.replayOnly === true) {
+          const round = currentAttemptRounds[0]?.round;
+          if (round !== undefined) {
+            return {
+              roundId: round.roundId,
+              recommendation: "manual_recovery_required",
+              recommendedRoundState: "manual_recovery_required",
+              recommendedAttemptState: "manual_recovery_required",
+              recoveryCode: "runtime_unavailable",
+              humanGate: "manual_recovery_required",
+              reason: `Completed native round could not be reclassified without host bindings: ${error instanceof Error ? error.message : String(error)}`,
+              decision: {
+                classification: "manual_recovery_required",
+                roundState: "manual_recovery_required",
+                attemptState: "manual_recovery_required",
+                recoveryCode: "runtime_unavailable",
+                humanGate: "manual_recovery_required",
+                reason:
+                  "Host bindings are unavailable for completed native work.",
+              },
+              artifacts: [],
+              checkpoints: [],
+              classificationCheckpoint: {
+                checkpointId: `${round.roundId}-checkpoint-recovery-unavailable`,
+                roundId: round.roundId,
+                sequence: 0,
+                stage: "classified",
+                detail: "classification: manual_recovery_required",
+              },
+            };
+          }
+        }
         throw error;
       }
     }

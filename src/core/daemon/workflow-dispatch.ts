@@ -731,7 +731,7 @@ function createMissingHostBindingsNativeDispatch(
           inputDigest: round.inputDigest,
           artifactRoot: round.artifactRoot,
           logPaths: [...round.logPaths],
-          startedAt: round.startedAt,
+          startedAt: round.startedAt ?? context.now,
         };
         if (executorName === "agent-loop") {
           return {

@@ -141,6 +141,17 @@ export class GoalLoopSdkExecutor implements Executor<
         return resumed;
       } catch (error) {
         context.hostBindings.settleRepoOwnership?.(false);
+        if (context.hostBindings.replayOnly === true) {
+          return {
+            roundId: current.round.roundId,
+            recommendation: "manual_recovery_required",
+            recommendedRoundState: "manual_recovery_required",
+            recommendedAttemptState: "manual_recovery_required",
+            recoveryCode: "runtime_unavailable",
+            humanGate: "manual_recovery_required",
+            reason: `Completed native round could not be reclassified without host bindings: ${error instanceof Error ? error.message : String(error)}`,
+          };
+        }
         throw error;
       }
     }
