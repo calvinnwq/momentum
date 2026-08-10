@@ -204,8 +204,7 @@ export function readDaemonHostBindingsSource(
     if (stat.size > DAEMON_HOST_BINDINGS_SOURCE_MAX_BYTES) {
       return {
         ok: false,
-        error:
-          `host-bindings source exceeds ${DAEMON_HOST_BINDINGS_SOURCE_MAX_BYTES} bytes`,
+        error: `host-bindings source exceeds ${DAEMON_HOST_BINDINGS_SOURCE_MAX_BYTES} bytes`,
       };
     }
     return { ok: true, contents: fs.readFileSync(sourcePath, "utf8") };

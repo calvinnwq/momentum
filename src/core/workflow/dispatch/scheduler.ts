@@ -2384,173 +2384,172 @@ function runWorkflowSchedulerOnceCore(
   if (ownsPreClaimTransaction) db.exec("BEGIN IMMEDIATE");
 
   try {
+    // Refuse before any durable mutation: when a pre-claim guard is wired, run
+    // the read-only preflight ahead of stale-lease recovery so a refusal (e.g.
+    // unconfigured native host bindings) leaves stale leases and recovery state
+    // untouched. Skipped entirely when no guard is wired — no extra scan cost.
+    if (input.preClaim !== undefined) {
+      runWorkflowPreClaimPreflight(db, {
+        now: tickNow,
+        graceMs,
+        holder: workerId,
+        continuationPollIntervalMs,
+        preClaim: input.preClaim,
+        ...(input.claimedExecutorNames === undefined
+          ? {}
+          : { claimedExecutorNames: input.claimedExecutorNames }),
+        ...runScope,
+      });
+    }
 
-  // Refuse before any durable mutation: when a pre-claim guard is wired, run
-  // the read-only preflight ahead of stale-lease recovery so a refusal (e.g.
-  // unconfigured native host bindings) leaves stale leases and recovery state
-  // untouched. Skipped entirely when no guard is wired — no extra scan cost.
-  if (input.preClaim !== undefined) {
-    runWorkflowPreClaimPreflight(db, {
+    const recovery = recoverStaleLeases(db, {
       now: tickNow,
       graceMs,
-      holder: workerId,
-      continuationPollIntervalMs,
-      preClaim: input.preClaim,
       ...(input.claimedExecutorNames === undefined
         ? {}
         : { claimedExecutorNames: input.claimedExecutorNames }),
       ...runScope,
     });
-  }
-
-  const recovery = recoverStaleLeases(db, {
-    now: tickNow,
-    graceMs,
-    ...(input.claimedExecutorNames === undefined
-      ? {}
-      : { claimedExecutorNames: input.claimedExecutorNames }),
-    ...runScope,
-  });
-  const recoveredDispatchLeases = new Map<string, WorkflowLeaseRecord>();
-  for (const recovered of recovery.recovered) {
-    if (
-      recovered.action !== "released" ||
-      recovered.leaseKind !== WORKFLOW_DISPATCH_LEASE_KIND
-    ) {
-      continue;
-    }
-    const released = getWorkflowLease(
-      db,
-      recovered.runId,
-      WORKFLOW_DISPATCH_LEASE_KIND,
-    );
-    if (released !== undefined && released.releasedAt !== null) {
-      recoveredDispatchLeases.set(recovered.runId, released);
-    }
-  }
-
-  const activeSelection = selectActiveSubworkflowDispatchRecheck(db, {
-    now: tickNow,
-    graceMs,
-    holder: workerId,
-    continuationPollIntervalMs,
-    ...(input.claimedExecutorNames === undefined
-      ? {}
-      : { claimedExecutorNames: input.claimedExecutorNames }),
-    ...runScope,
-  });
-  const scan = selectRunnableWork(db, { now: tickNow, graceMs, ...runScope });
-  const candidate = scan.runnable[0];
-  const activeClaim = activeSelection.claim;
-  const pendingActiveCandidate = activeSelection.pendingCandidate;
-  const activeCandidate = activeClaim ?? pendingActiveCandidate;
-  if (
-    activeCandidate !== undefined &&
-    (candidate === undefined ||
-      (activeClaim !== undefined &&
-        isActiveSubworkflowRecheckUrgent(activeClaim.lease, {
-          now: tickNow,
-          continuationPollIntervalMs,
-        })))
-  ) {
-    input.preClaim?.({ db, candidate: activeCandidate });
-    let activeClaimForDispatch = activeClaim;
-    let staleDispatchTakeover:
-      | NonNullable<WorkflowStepDispatchContext["staleDispatchTakeover"]>
-      | undefined;
-    if (activeClaimForDispatch === undefined) {
-      const acquired = acquireActiveSubworkflowDispatchClaim(
+    const recoveredDispatchLeases = new Map<string, WorkflowLeaseRecord>();
+    for (const recovered of recovery.recovered) {
+      if (
+        recovered.action !== "released" ||
+        recovered.leaseKind !== WORKFLOW_DISPATCH_LEASE_KIND
+      ) {
+        continue;
+      }
+      const released = getWorkflowLease(
         db,
-        activeCandidate.runId,
-        {
-          now: tickNow,
-          graceMs,
-          holder: workerId,
-          leaseDurationMs,
-          stalePolicy,
-          expectedStepId: activeCandidate.stepId,
-          ...(input.claimedExecutorNames === undefined
-            ? {}
-            : { claimedExecutorNames: input.claimedExecutorNames }),
-        },
+        recovered.runId,
+        WORKFLOW_DISPATCH_LEASE_KIND,
       );
-      activeClaimForDispatch = acquired?.claim;
-      staleDispatchTakeover = acquired?.staleDispatchTakeover;
-    }
-    if (activeClaimForDispatch !== undefined) {
-      const dispatchClaimCandidate =
-        activeClaim === undefined
-          ? activeClaimForDispatch
-          : heartbeatActiveDispatchClaim(db, {
-              claim: activeClaimForDispatch,
-              now: tickNow,
-              leaseDurationMs,
-            });
-      if (dispatchClaimCandidate !== undefined) {
-        if (ownsPreClaimTransaction) db.exec("COMMIT");
-        return dispatchClaim(
-          {
-            db,
-            workerId,
-            recovery,
-            claim: dispatchClaimCandidate,
-            tickNow,
-            now,
-            leaseDurationMs,
-            recoveredDispatchLeases,
-            ...(staleDispatchTakeover === undefined
-              ? {}
-              : { durableStaleDispatchTakeover: staleDispatchTakeover }),
-          },
-          dispatch,
-        );
+      if (released !== undefined && released.releasedAt !== null) {
+        recoveredDispatchLeases.set(recovered.runId, released);
       }
     }
-  }
 
-  if (candidate === undefined) {
+    const activeSelection = selectActiveSubworkflowDispatchRecheck(db, {
+      now: tickNow,
+      graceMs,
+      holder: workerId,
+      continuationPollIntervalMs,
+      ...(input.claimedExecutorNames === undefined
+        ? {}
+        : { claimedExecutorNames: input.claimedExecutorNames }),
+      ...runScope,
+    });
+    const scan = selectRunnableWork(db, { now: tickNow, graceMs, ...runScope });
+    const candidate = scan.runnable[0];
+    const activeClaim = activeSelection.claim;
+    const pendingActiveCandidate = activeSelection.pendingCandidate;
+    const activeCandidate = activeClaim ?? pendingActiveCandidate;
+    if (
+      activeCandidate !== undefined &&
+      (candidate === undefined ||
+        (activeClaim !== undefined &&
+          isActiveSubworkflowRecheckUrgent(activeClaim.lease, {
+            now: tickNow,
+            continuationPollIntervalMs,
+          })))
+    ) {
+      input.preClaim?.({ db, candidate: activeCandidate });
+      let activeClaimForDispatch = activeClaim;
+      let staleDispatchTakeover:
+        | NonNullable<WorkflowStepDispatchContext["staleDispatchTakeover"]>
+        | undefined;
+      if (activeClaimForDispatch === undefined) {
+        const acquired = acquireActiveSubworkflowDispatchClaim(
+          db,
+          activeCandidate.runId,
+          {
+            now: tickNow,
+            graceMs,
+            holder: workerId,
+            leaseDurationMs,
+            stalePolicy,
+            expectedStepId: activeCandidate.stepId,
+            ...(input.claimedExecutorNames === undefined
+              ? {}
+              : { claimedExecutorNames: input.claimedExecutorNames }),
+          },
+        );
+        activeClaimForDispatch = acquired?.claim;
+        staleDispatchTakeover = acquired?.staleDispatchTakeover;
+      }
+      if (activeClaimForDispatch !== undefined) {
+        const dispatchClaimCandidate =
+          activeClaim === undefined
+            ? activeClaimForDispatch
+            : heartbeatActiveDispatchClaim(db, {
+                claim: activeClaimForDispatch,
+                now: tickNow,
+                leaseDurationMs,
+              });
+        if (dispatchClaimCandidate !== undefined) {
+          if (ownsPreClaimTransaction) db.exec("COMMIT");
+          return dispatchClaim(
+            {
+              db,
+              workerId,
+              recovery,
+              claim: dispatchClaimCandidate,
+              tickNow,
+              now,
+              leaseDurationMs,
+              recoveredDispatchLeases,
+              ...(staleDispatchTakeover === undefined
+                ? {}
+                : { durableStaleDispatchTakeover: staleDispatchTakeover }),
+            },
+            dispatch,
+          );
+        }
+      }
+    }
+
+    if (candidate === undefined) {
+      if (ownsPreClaimTransaction) db.exec("COMMIT");
+      return {
+        code: "idle",
+        workerId,
+        recovery,
+        ...(activeSelection.continuationPending
+          ? { continuationPending: true as const }
+          : {}),
+      };
+    }
+
+    input.preClaim?.({ db, candidate });
+
+    const claimResult = claimStep(db, {
+      runId: candidate.runId,
+      stepId: candidate.stepId,
+      holder: workerId,
+      leaseExpiresAt: tickNow + leaseDurationMs,
+      now: tickNow,
+      graceMs,
+      stalePolicy,
+    });
+    if (!claimResult.ok) {
+      if (ownsPreClaimTransaction) db.exec("COMMIT");
+      return { code: "claim_contended", workerId, recovery, claimResult };
+    }
+
+    const claim = claimResult.claim;
     if (ownsPreClaimTransaction) db.exec("COMMIT");
-    return {
-      code: "idle",
-      workerId,
-      recovery,
-      ...(activeSelection.continuationPending
-        ? { continuationPending: true as const }
-        : {}),
-    };
-  }
-
-  input.preClaim?.({ db, candidate });
-
-  const claimResult = claimStep(db, {
-    runId: candidate.runId,
-    stepId: candidate.stepId,
-    holder: workerId,
-    leaseExpiresAt: tickNow + leaseDurationMs,
-    now: tickNow,
-    graceMs,
-    stalePolicy,
-  });
-  if (!claimResult.ok) {
-    if (ownsPreClaimTransaction) db.exec("COMMIT");
-    return { code: "claim_contended", workerId, recovery, claimResult };
-  }
-
-  const claim = claimResult.claim;
-  if (ownsPreClaimTransaction) db.exec("COMMIT");
-  return dispatchClaim(
-    {
-      db,
-      workerId,
-      recovery,
-      claim,
-      tickNow,
-      now,
-      leaseDurationMs,
-      recoveredDispatchLeases,
-    },
-    dispatch,
-  );
+    return dispatchClaim(
+      {
+        db,
+        workerId,
+        recovery,
+        claim,
+        tickNow,
+        now,
+        leaseDurationMs,
+        recoveredDispatchLeases,
+      },
+      dispatch,
+    );
   } catch (error) {
     if (ownsPreClaimTransaction) {
       try {

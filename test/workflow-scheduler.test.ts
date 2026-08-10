@@ -2223,11 +2223,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       });
       expect(preClaimed).not.toContain("run-continuation");
       expect(
-        getWorkflowLease(
-          db,
-          "run-continuation",
-          WORKFLOW_DISPATCH_LEASE_KIND,
-        ),
+        getWorkflowLease(db, "run-continuation", WORKFLOW_DISPATCH_LEASE_KIND),
       ).toBeUndefined();
     } finally {
       db.close();

@@ -686,12 +686,7 @@ function createMissingHostBindingsNativeDispatch(
             )
           ? 1
           : 2,
-    resolveHostBindings: ({
-      claim,
-      context,
-      executorName,
-      config,
-    }) => {
+    resolveHostBindings: ({ claim, context, executorName, config }) => {
       const attempt = loadLatestExecutorAttemptForStep(
         context.db,
         claim.runId,
@@ -699,10 +694,7 @@ function createMissingHostBindingsNativeDispatch(
       );
       const completedNativeMechanism =
         attempt !== undefined &&
-        hasUnclassifiedCompletedNativeMechanism(
-          context.db,
-          attempt.attemptId,
-        );
+        hasUnclassifiedCompletedNativeMechanism(context.db, attempt.attemptId);
       if (
         completedNativeMechanism &&
         (executorName === "agent-loop" ||
@@ -723,7 +715,9 @@ function createMissingHostBindingsNativeDispatch(
               listExecutorCheckpointsForRound(
                 context.db,
                 candidate.roundId,
-              ).some((checkpoint) => checkpoint.stage === "mechanism_completed"),
+              ).some(
+                (checkpoint) => checkpoint.stage === "mechanism_completed",
+              ),
           );
         if (attempt === undefined || round === undefined) {
           throw new RegisteredExecutorHostBindingsError(
@@ -767,9 +761,7 @@ function createMissingHostBindingsNativeDispatch(
           start: { ...start, executor: singleShotExecutor },
           selection: resolveSingleShotRoundSelection({}),
           replayOnly: true,
-          ...(settleRepoOwnership === undefined
-            ? {}
-            : { settleRepoOwnership }),
+          ...(settleRepoOwnership === undefined ? {} : { settleRepoOwnership }),
         } satisfies SingleShotExecutorHostBindings;
       }
       if (

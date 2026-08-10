@@ -250,9 +250,7 @@ function dispatchExecutorScaffold(
         detail: `${executor} ${retried.attemptId} attempt ${retried.attemptNumber}`,
       };
     }
-    if (
-      getWorkflowStep(db, claim.runId, claim.stepId)?.state === "approved"
-    ) {
+    if (getWorkflowStep(db, claim.runId, claim.stepId)?.state === "approved") {
       db.exec("BEGIN IMMEDIATE");
       try {
         const started = startWorkflowStep(db, {

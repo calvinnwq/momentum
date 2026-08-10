@@ -2673,9 +2673,10 @@ function readBindingFreeNoMistakesDelegateState(
   }
   try {
     const stored = JSON.parse(
-      readBoundedRegularFile(receiptPath, "no-mistakes handoff receipt").toString(
-        "utf8",
-      ),
+      readBoundedRegularFile(
+        receiptPath,
+        "no-mistakes handoff receipt",
+      ).toString("utf8"),
     ) as Partial<NoMistakesDelegateReceipt>;
     const identity = stored.externalIdentity;
     if (
@@ -2691,7 +2692,8 @@ function readBindingFreeNoMistakesDelegateState(
     ) {
       return {
         ok: false,
-        error: "no-mistakes handoff receipt does not match its durable identity",
+        error:
+          "no-mistakes handoff receipt does not match its durable identity",
       };
     }
   } catch (error) {

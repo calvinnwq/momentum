@@ -3035,7 +3035,14 @@ describe("profile-backed persisted delegate state", () => {
     ]);
     fs.writeFileSync(path.join(root, "README.md"), "fixture\n");
     execFileSync("git", ["-C", root, "add", "README.md"]);
-    execFileSync("git", ["-C", root, "commit", "--quiet", "-m", "test: fixture"]);
+    execFileSync("git", [
+      "-C",
+      root,
+      "commit",
+      "--quiet",
+      "-m",
+      "test: fixture",
+    ]);
     const branch = execFileSync(
       "git",
       ["-C", root, "branch", "--show-current"],
