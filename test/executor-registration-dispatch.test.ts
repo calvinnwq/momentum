@@ -2747,7 +2747,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     db.close();
   });
 
-  it("classifies a checkpointed native round and settles its lock when host bindings disappear", async () => {
+  it("classifies a checkpointed native round and settles its invalid lock when host bindings disappear", async () => {
     const repoPath = initNativeDispatchRepo();
     const definition: WorkflowDefinition = {
       key: "missing-binding-native-recovery-workflow",
@@ -2828,7 +2828,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       detail: "durable native completion",
     });
     const retained = acquireRepoLock(db, {
-      repoRoot: repoPath,
+      repoRoot: tempDir(),
       holder: "crashed-native-worker",
       goalId: runId,
       iteration: 1,
