@@ -5,6 +5,7 @@ import type {
   WorkflowRunLogRound,
   WorkflowRunLogsEnvelope,
 } from "../core/workflow/run/logs.js";
+
 import type { WorkflowMonitorEnvelope } from "../core/workflow/monitor/envelope.js";
 import type { WorkflowMonitorProgressTick } from "../core/workflow/monitor/progress.js";
 import type { WorkflowMonitorState } from "../core/workflow/monitor/state.js";
@@ -338,7 +339,7 @@ export function emitWorkflowStatusList(
     ok: true,
     command: "workflow status",
     dataDir,
-    schemaVersion: 3,
+    schemaVersion: 4,
     state: parsed.state ?? null,
     filter: parsed.filter ?? null,
     count: summaries.length,
@@ -384,7 +385,7 @@ export function emitWorkflowStatusDetail(
     ok: true,
     command: "workflow status",
     dataDir,
-    schemaVersion: 3,
+    schemaVersion: 4,
     run: workflowRunToJsonShape(detail.run),
     steps: detail.steps.map(workflowStepToJsonShape),
     approvals: detail.approvals.map(workflowApprovalToJsonShape),

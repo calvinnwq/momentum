@@ -482,6 +482,9 @@ export function readWorkflowRunLineages(
   const readbacks = new Map<string, WorkflowRunLineageReadback>();
   if (!tableExists(db, "workflow_run_lineage")) return readbacks;
   const ids = [...new Set(runIds)];
+  for (const runId of ids) {
+    validateCanonicalWorkflowRunLineage(db, runId);
+  }
   for (
     let offset = 0;
     offset < ids.length;
@@ -1670,6 +1673,31 @@ export function auditCanonicalRouteState(db: MomentumDb): void {
       definitionVersion: run.workflow_definition_version,
     })),
   );
+}
+
+/** Validate canonical route state for one runtime run before native dispatch. */
+export function validateCanonicalWorkflowRunRouteState(
+  db: MomentumDb,
+  runId: string,
+): void {
+  const run = db
+    .prepare(
+      `SELECT id, source, ${workflowRunsRouteJsonSelect(db)},
+              workflow_definition_key,
+              workflow_definition_version, created_at, updated_at
+         FROM workflow_runs
+        WHERE id = ?`,
+    )
+    .get(runId) as RunRow | undefined;
+  if (run === undefined) return;
+  validateCanonicalRouteStateForRuns(db, [
+    {
+      runId: run.id,
+      source: run.source,
+      definitionKey: run.workflow_definition_key,
+      definitionVersion: run.workflow_definition_version,
+    },
+  ]);
 }
 
 function loadCanonicalValidationRunClosure(

@@ -88,6 +88,7 @@ import {
   canonicalWorkflowStepExecutorSelection,
   readCanonicalWorkflowStepAgentConfigs,
 } from "../route/canonical-agent-config.js";
+import { validateCanonicalWorkflowRunRouteState } from "../../../adapters/db/route-state.js";
 import { insertWorkflowGate, loadWorkflowGate } from "../gate/persist.js";
 import type { WorkflowGateType } from "../gate/gate.js";
 import { releaseWorkflowLease } from "../leases.js";
@@ -691,6 +692,7 @@ export function resolveWorkflowStepDispatchRoute(
         },
       };
     }
+    validateCanonicalWorkflowRunRouteState(db, claim.runId);
     return {
       nativeCoding: true,
       selection: {

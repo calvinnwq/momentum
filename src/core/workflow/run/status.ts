@@ -64,6 +64,9 @@ import type {
 } from "./reducer.js";
 import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "./start.js";
 
+/** Shared version for status, handoff, and logs envelopes that embed run shape. */
+export const WORKFLOW_RUN_SURFACE_SCHEMA_VERSION = 4;
+
 export type WorkflowRunRow = {
   runId: string;
   state: WorkflowRunState;

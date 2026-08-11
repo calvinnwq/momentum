@@ -427,8 +427,8 @@ describe("momentum workflow run logs", () => {
         schemaVersion: number;
         steps: Array<{ kind: string }>;
       };
-      expect(payload.schemaVersion).toBe(3);
       expect(payload.steps[0]?.kind).toBe("validate");
+      expect(payload.schemaVersion).toBe(4);
     } finally {
       await releaseWriter();
     }
@@ -544,7 +544,7 @@ describe("momentum workflow run logs", () => {
     };
     expect(payload.ok).toBe(true);
     expect(payload.command).toBe("workflow run logs");
-    expect(payload.schemaVersion).toBe(3);
+    expect(payload.schemaVersion).toBe(4);
     expect(Object.keys(payload).sort()).toEqual(
       [
         "approvals",
@@ -1254,7 +1254,7 @@ describe("momentum workflow run logs", () => {
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Workflow run logs: cwfp-logs-text");
-    expect(result.stdout).toContain("Schema version: 3");
+    expect(result.stdout).toContain("Schema version: 4");
     expect(result.stdout).toContain("round-1");
     expect(result.stdout).toContain("implemented the slice");
     expect(result.stdout).toContain("key changes: added reader");
@@ -1357,7 +1357,7 @@ describe("momentum workflow run logs", () => {
         roundId: string | null;
       }>;
     };
-    expect(payload.schemaVersion).toBe(3);
+    expect(payload.schemaVersion).toBe(4);
     expect(
       payload.gates.find((gate) => gate.gateId === "gate-invocation"),
     ).toEqual(

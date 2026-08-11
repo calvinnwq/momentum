@@ -869,6 +869,38 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     expect(stepState(db, RUN_ID, "implementation")).toBe("approved");
   });
 
+  it("routes source-conflicting canonical metadata to manual recovery", () => {
+    const db = openNativeCodingDbWithRoute({});
+    db.prepare(
+      `INSERT INTO workflow_run_import_metadata
+         (run_id, mode, profile, risk, quota_policy_json, source_format,
+          created_at, updated_at)
+       VALUES (?, NULL, NULL, NULL, NULL, ?, ?, ?)`,
+    ).run(RUN_ID, "legacy-route", NOW, NOW);
+    const claim = approveAndClaim(db, "implementation");
+
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 1,
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
+    expect(listWorkflowGatesForRun(db, RUN_ID)).toEqual([
+      expect.objectContaining({
+        evidence: "route_config_invalid",
+        reason: expect.stringContaining(
+          "$canonical.workflow_run_import_metadata",
+        ),
+      }),
+    ]);
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
+    ).toBe(true);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
+    expect(stepState(db, RUN_ID, "implementation")).toBe("approved");
+  });
+
   it("holds the dispatch lease on a successful dispatch (owns the lifecycle)", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");

@@ -289,8 +289,8 @@ describe("momentum workflow status", () => {
     };
     expect(payload.ok).toBe(true);
     expect(payload.command).toBe("workflow status");
-    expect(payload.schemaVersion).toBe(3);
     expect(payload.count).toBe(0);
+    expect(payload.schemaVersion).toBe(4);
     expect(payload.runs).toEqual([]);
   });
 
@@ -807,8 +807,8 @@ describe("momentum workflow status", () => {
     };
     expect(payload.ok).toBe(true);
     expect(payload.command).toBe("workflow status");
-    expect(payload.schemaVersion).toBe(3);
     expect(payload.run.runId).toBe("cwfp-detail001");
+    expect(payload.schemaVersion).toBe(4);
     expect(payload.steps.map((s) => s.stepId)).toEqual([
       "preflight",
       "implementation",
@@ -934,7 +934,7 @@ describe("momentum workflow status", () => {
         chosenAction: string | null;
       }>;
     };
-    expect(payload.schemaVersion).toBe(3);
+    expect(payload.schemaVersion).toBe(4);
     expect(Object.keys(payload).sort()).toEqual(
       [
         "approvals",

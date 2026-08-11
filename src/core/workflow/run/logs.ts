@@ -30,6 +30,7 @@ import type {
   ExecutorRoundRecord,
 } from "../../executors/loop/reducer.js";
 import {
+  WORKFLOW_RUN_SURFACE_SCHEMA_VERSION,
   loadWorkflowRunDetail,
   type LoadWorkflowRunDetailOptions,
   type WorkflowRunDetail,
@@ -40,7 +41,8 @@ import {
  * an `attempt` counter) with immutable `attempts` (`attemptId` /
  * `attemptNumber`), and re-keyed rounds by `attemptId` / `attemptNumber`.
  */
-export const WORKFLOW_RUN_LOGS_SCHEMA_VERSION = 3;
+export const WORKFLOW_RUN_LOGS_SCHEMA_VERSION =
+  WORKFLOW_RUN_SURFACE_SCHEMA_VERSION;
 
 export type LoadWorkflowRunLogsOptions = LoadWorkflowRunDetailOptions & {
   generatedAt?: number;
