@@ -20,6 +20,8 @@ import {
   insertExecutorCheckpoint,
   insertExecutorRound,
 } from "../src/core/executors/loop/persist.js";
+import { deriveDispatchCorrelationId } from "../src/core/workflow/dispatch/attempt-ids.js";
+import { acquireRepoLock } from "../src/core/repo/locks.js";
 
 type RunResult = {
   code: number;
@@ -849,6 +851,16 @@ describe("momentum workflow run watch", () => {
         "preflight",
         runGit(repoPath, ["rev-parse", "HEAD"]),
       );
+      const lock = acquireRepoLock(db, {
+        repoRoot: repoPath,
+        holder: "workflow-watch-completed-preflight-worker",
+        goalId: runId,
+        iteration: 1,
+        jobId: deriveDispatchCorrelationId(runId, "preflight"),
+        leaseExpiresAt: SEED_NOW + 30_000,
+        now: SEED_NOW,
+      });
+      expect(lock.ok).toBe(true);
     } finally {
       db.close();
     }

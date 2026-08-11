@@ -143,6 +143,7 @@ export type DaemonStartFailurePayload = {
     | "daemon_already_active"
     | "data_dir_failed"
     | "daemon_host_bindings_invalid"
+    | "daemon_host_bindings_required"
     | "executor_config_invalid";
   message: string;
   existing?: {

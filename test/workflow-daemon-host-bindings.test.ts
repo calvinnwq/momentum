@@ -1293,6 +1293,16 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
     db.prepare(
       "UPDATE executor_rounds SET commit_sha = ? WHERE round_id = ?",
     ).run(currentHead, evidence.roundId);
+    const lock = acquireRepoLock(db, {
+      repoRoot: repoPath,
+      holder: "native-completed-without-bindings-worker",
+      goalId: runId,
+      iteration: 1,
+      jobId: deriveDispatchCorrelationId(runId, "preflight"),
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    expect(lock.ok).toBe(true);
 
     const production = resolveDaemonWorkflowStepDispatch(
       {},
@@ -1326,6 +1336,84 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
         )
         .get(runId),
     ).toEqual({ count: 1 });
+    db.close();
+  });
+
+  it("fails closed when binding-free native reattachment has no repository ownership", async () => {
+    const repoPath = initRepo();
+    const db = openDb(makeTempDir("momentum-daemon-completed-native-data-"));
+    const runId = "native-completed-without-repo-ownership-run";
+    startApprovedRun(
+      db,
+      {
+        key: "daemon-completed-native-without-repo-ownership",
+        title: "Daemon Completed Native Without Repo Ownership",
+        version: 1,
+        steps: [
+          {
+            key: "preflight",
+            kind: "preflight",
+            executor: "agent-once",
+            config: {},
+            order: 0,
+            required: true,
+          },
+        ],
+      },
+      runId,
+      repoPath,
+    );
+    const evidence = seedCompletedMechanismAttempt(
+      db,
+      runId,
+      "preflight",
+      "agent-once",
+      { state: "capturing_result", detail: "attempt outcome: ok" },
+    );
+    const currentHead = execFileSync(
+      "git",
+      ["-C", repoPath, "rev-parse", "HEAD"],
+      { encoding: "utf8" },
+    ).trim();
+    db.prepare(
+      "UPDATE executor_rounds SET commit_sha = ? WHERE round_id = ?",
+    ).run(currentHead, evidence.roundId);
+
+    const production = resolveDaemonWorkflowStepDispatch(
+      {},
+      executeWorkflowStepDispatch,
+      {},
+    );
+    expect(production.ok, production.ok ? "" : production.message).toBe(true);
+    if (!production.ok) return;
+
+    const result = await runWorkflowSchedulerOnceAsync({
+      db,
+      runId,
+      workerId: "native-completed-without-repo-ownership-worker",
+      dispatch: production.dispatch,
+      ...(production.preClaim === undefined
+        ? {}
+        : { preClaim: production.preClaim }),
+      now: () => NOW + 1,
+    });
+
+    expect(result.code).toBe("dispatched");
+    expect(
+      db
+        .prepare("SELECT state FROM executor_attempts WHERE attempt_id = ?")
+        .get(evidence.attemptId),
+    ).toEqual({ state: "manual_recovery_required" });
+    expect(
+      db
+        .prepare(
+          "SELECT state, recovery_code FROM executor_rounds WHERE round_id = ?",
+        )
+        .get(evidence.roundId),
+    ).toEqual({
+      state: "manual_recovery_required",
+      recovery_code: "repo_ownership_unproven",
+    });
     db.close();
   });
 

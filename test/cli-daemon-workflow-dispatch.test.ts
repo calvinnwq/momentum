@@ -298,6 +298,65 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     }
   });
 
+  it("refuses missing native bindings before stale startup recovery mutates state", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    initRepo(repoDir);
+    const runId = "daemon-missing-bindings-before-startup-recovery";
+    await startApprovedCodingRun(dataDir, repoDir, runId);
+    const { getActiveDaemonRun, startDaemonRun } =
+      await import("../src/core/daemon/runs.js");
+    let staleRunId: string;
+    const db = openDb(dataDir);
+    try {
+      ({ runId: staleRunId } = startDaemonRun(db, { pid: 78, now: 100 }));
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon",
+      "start",
+      "--max-idle-cycles",
+      "1",
+      "--json",
+      "--data-dir",
+      dataDir,
+    ]);
+
+    expect(result.code).toBe(1);
+    const failure = JSON.parse(result.stdout || result.stderr) as {
+      code: string;
+      message: string;
+    };
+    expect(failure.code).toBe("daemon_host_bindings_required");
+    expect(failure.message).toContain("MOMENTUM_HOST_BINDINGS_FILE");
+
+    const after = openDb(dataDir);
+    try {
+      expect(getActiveDaemonRun(after)?.id).toBe(staleRunId);
+      expect(
+        after
+          .prepare("SELECT state FROM daemon_runs WHERE id = ?")
+          .get(staleRunId),
+      ).toEqual({ state: "running" });
+      expect(
+        after
+          .prepare("SELECT state FROM workflow_steps WHERE run_id = ?")
+          .get(runId),
+      ).toEqual({ state: "approved" });
+      expect(
+        after
+          .prepare(
+            "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ count: 0 });
+    } finally {
+      after.close();
+    }
+  });
+
   it("surfaces malformed executor config with its own refusal code before opening state", async () => {
     const dataDir = makeTempDir();
     const bindingsPath = writeSucceedingPreflightProfile(makeTempDir());
@@ -2057,10 +2116,10 @@ describe("daemon start production workflow lane (NGX-367)", () => {
 
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
-    const loop = payload["loop"] as Record<string, unknown>;
-    expect(loop["workflowStepsDispatched"]).toBe(0);
-    expect(loop["lastWorkflowCode"]).toBeNull();
-    expect(loop["error"]).toContain("runtime_unavailable");
+    expect(payload).toMatchObject({
+      code: "daemon_host_bindings_required",
+    });
+    expect(payload["message"]).toContain("MOMENTUM_HOST_BINDINGS_FILE");
 
     const db = openDb(dataDir);
     try {
@@ -2108,9 +2167,9 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "--json",
     ]);
     expect(firstDispatch.code).toBe(1);
-    expect(JSON.parse(firstDispatch.stderr).loop.workflowStepsDispatched).toBe(
-      0,
-    );
+    expect(JSON.parse(firstDispatch.stderr)).toMatchObject({
+      code: "daemon_host_bindings_required",
+    });
 
     const recoverLease = await run([
       "daemon",
@@ -2124,13 +2183,9 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "--json",
     ]);
     expect(recoverLease.code).toBe(1);
-    const loop = JSON.parse(recoverLease.stderr).loop as Record<
-      string,
-      unknown
-    >;
-    expect(loop["exitReason"]).toBe("internal_error");
-    expect(loop["iterations"]).toBe(1);
-    expect(loop["workflowStepsDispatched"]).toBe(0);
+    expect(JSON.parse(recoverLease.stderr)).toMatchObject({
+      code: "daemon_host_bindings_required",
+    });
 
     const finalDb = openDb(dataDir);
     try {
@@ -2181,10 +2236,9 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     );
 
     expect(result.code).toBe(1);
-    const loop = JSON.parse(result.stderr).loop as Record<string, unknown>;
-    expect(loop["workflowStepsDispatched"]).toBe(0);
-    expect(loop["exitReason"]).toBe("internal_error");
-    expect(loop["error"]).toContain("runtime_unavailable");
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      code: "daemon_host_bindings_required",
+    });
 
     const db = openDb(dataDir);
     try {
@@ -2225,9 +2279,9 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     ]);
 
     expect(result.code).toBe(1);
-    const loop = JSON.parse(result.stderr).loop as Record<string, unknown>;
-    expect(loop["workflowStepsDispatched"]).toBe(0);
-    expect(loop["error"]).toContain("runtime_unavailable");
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      code: "daemon_host_bindings_required",
+    });
 
     const db = openDb(dataDir);
     try {

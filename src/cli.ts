@@ -63,6 +63,11 @@ import {
   DEFAULT_DAEMON_POLL_INTERVAL_MS,
   DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS,
 } from "./core/daemon/loop.js";
+import { RegisteredExecutorHostBindingsError } from "./core/workflow/dispatch/registered-executor.js";
+import {
+  DEFAULT_REGISTERED_SDK_CONTINUATION_POLL_MS,
+  runWorkflowPreClaimPreflight,
+} from "./core/workflow/dispatch/scheduler.js";
 import {
   runStartupRecovery,
   type StartupRecoveryResult,
@@ -490,6 +495,30 @@ async function daemonStart(
 
   const db = openDb(dataDir);
   try {
+    if (workflowDispatchResolution.preClaim !== undefined) {
+      try {
+        runWorkflowPreClaimPreflight(db, {
+          now,
+          graceMs: DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS,
+          holder: `daemon-${pid}`,
+          continuationPollIntervalMs: Math.max(
+            1,
+            parsed.pollIntervalMs ??
+              DEFAULT_REGISTERED_SDK_CONTINUATION_POLL_MS,
+          ),
+          preClaim: workflowDispatchResolution.preClaim,
+          claimedExecutorNames: configuredExecutorNames(io.env ?? process.env),
+        });
+      } catch (error) {
+        if (error instanceof RegisteredExecutorHostBindingsError) {
+          return emitDaemonStartFailure(parsed, io, {
+            code: "daemon_host_bindings_required",
+            message: error.message,
+          });
+        }
+        throw error;
+      }
+    }
     let existing = getActiveDaemonRun(db);
     let preLoopStartupRecovery: StartupRecoveryResult | null = null;
     if (existing && loopRequested && isExistingDaemonRunStale(existing, now)) {

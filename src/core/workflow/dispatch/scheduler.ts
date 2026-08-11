@@ -2246,7 +2246,7 @@ export async function runWorkflowSchedulerOnceAsync(
  * dispatch never aborts it. The in-tick `preClaim` calls stay in place as the
  * final guards against scan/claim races.
  */
-function runWorkflowPreClaimPreflight(
+export function runWorkflowPreClaimPreflight(
   db: MomentumDb,
   input: {
     now: number;

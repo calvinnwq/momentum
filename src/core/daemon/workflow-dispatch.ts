@@ -756,6 +756,8 @@ function createMissingHostBindingsNativeDispatch(
         try {
           assertCompletedNativeMechanismRepositoryProof({
             db: context.db,
+            runId: claim.runId,
+            stepId: claim.stepId,
             attemptId: attempt.attemptId,
             attemptNumber: attempt.attemptNumber,
             repoPath: resolved.exec.repoPath,
@@ -1199,6 +1201,8 @@ function createLiveStepHostBindingsResolver(
       try {
         assertCompletedNativeMechanismRepositoryProof({
           db: context.db,
+          runId: claim.runId,
+          stepId: claim.stepId,
           attemptId: attempt.attemptId,
           attemptNumber: attempt.attemptNumber,
           repoPath: resolved.exec.repoPath,
@@ -1476,6 +1480,8 @@ function createLiveStepHostBindingsResolver(
     ) {
       assertCompletedNativeMechanismRepositoryProof({
         db: context.db,
+        runId: claim.runId,
+        stepId: claim.stepId,
         attemptId: attempt.attemptId,
         attemptNumber: attempt.attemptNumber,
         repoPath: safety.repoPath,
@@ -2148,11 +2154,27 @@ function expectedSettledRepoHeadFromSingleShotMechanism(
  */
 function assertCompletedNativeMechanismRepositoryProof(input: {
   db: MomentumDb;
+  runId: string;
+  stepId: string;
   attemptId: string;
   attemptNumber: number;
   repoPath: string;
   baseHead?: string;
 }): void {
+  const repoLock = getActiveRepoLockForJob(
+    input.db,
+    deriveDispatchCorrelationId(input.runId, input.stepId),
+  );
+  if (
+    repoLock === undefined ||
+    repoLock.goal_id !== input.runId ||
+    repoLock.iteration !== input.attemptNumber
+  ) {
+    throw new RegisteredExecutorHostBindingsError(
+      "repo_ownership_unproven",
+      "completed native mechanism cannot be reattached because repository ownership is no longer proven",
+    );
+  }
   const completedRound = [
     ...listExecutorRoundsForAttempt(input.db, input.attemptId),
   ]
