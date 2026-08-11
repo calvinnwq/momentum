@@ -150,20 +150,20 @@ committed as work.
 Process-backed live-wrapper dispatch is supported on Linux and macOS.
 On native Windows, the wrapper launches no supervised command, parks the run
 with `unsupported_platform`, and preserves the refused round for recovery.
-When the variable is unset or blank, native `agent-loop`, `agent-once`,
-`script`, and `delegate-supervisor` dispatches fail honestly with
-`runtime_unavailable` instead of using
-another execution mechanism. For a new native dispatch, that refusal occurs
-before the scheduler claims the step, creates an attempt or round, or launches
-a process. If the current attempt already has durable completed-mechanism or
-handoff evidence, the daemon reattaches and classifies that evidence without
-rerunning the mechanism; the reattachment contract is owned by [Executor SDK](executor-sdk.md#envelope-facade).
+When the variable is unset or blank, new native `agent-loop`, `agent-once`,
+`script`, and `delegate-supervisor` dispatches fail closed with
+`daemon_host_bindings_required` before the scheduler claims the step, creates an
+attempt or round, or launches a process, instead of using another execution
+mechanism.
+If the current attempt already has durable completed-mechanism or handoff
+evidence, the daemon reattaches and classifies that evidence without rerunning
+the mechanism; the reattachment contract is owned by [Executor SDK](executor-sdk.md#envelope-facade).
 Other supported live-wrapper-owned steps keep the durable start scaffold for a
 later executor path.
 A configured host-binding file that omits the dispatched step-kind binding for
 new work also fails closed before a scheduler claim or process launch with
-`runtime_unavailable`, without falling back to another mechanism or recording
-fake success.
+`daemon_host_bindings_required`, without falling back to another mechanism or
+recording fake success.
 If a claimed step cannot be resolved or carries an invalid executor identity,
 the dispatcher parks the run behind a
 `manual_recovery_required` workflow gate instead of silently dropping the claim;
