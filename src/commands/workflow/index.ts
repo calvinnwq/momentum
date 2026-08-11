@@ -80,6 +80,7 @@ import {
 } from "../../core/workflow/definition/legacy.js";
 import { resolveWorkflowGateAndResumeRegisteredExecutor } from "../../core/workflow/dispatch/executor-gate.js";
 import {
+  hasCompletedNativeHostBindingEvidenceForStep,
   resolveDaemonWorkflowStepDispatch,
   type DaemonWorkflowDispatchDeps,
 } from "../../core/daemon/workflow-dispatch.js";
@@ -2904,7 +2905,16 @@ function isWorkflowWatchHostBindingsRequired(
   if (envelope.nextAction.code !== "advance_to_step" || stepId === null) {
     return false;
   }
-  if (stepId === "preflight" || stepId === "postflight") return true;
+  const hasCompletedEvidence = hasCompletedNativeHostBindingEvidenceForStep(
+    db,
+    {
+      runId: envelope.runId,
+      stepId,
+    },
+  );
+  if (stepId === "preflight" || stepId === "postflight") {
+    return !hasCompletedEvidence;
+  }
 
   const resolution = resolveClaimedWorkflowStepExecutor(db, {
     runId: envelope.runId,
@@ -2912,6 +2922,7 @@ function isWorkflowWatchHostBindingsRequired(
   });
   return (
     resolution.ok &&
+    !hasCompletedEvidence &&
     (resolution.executor === "delegate-supervisor" ||
       ["agent-loop", "agent-once", "script"].includes(
         canonicalExecutorIdentity(resolution.executor),
@@ -2993,7 +3004,7 @@ async function runWorkflowWatchDispatcherTick(
   );
   if (!dispatchResolution.ok) {
     return {
-      code: "daemon_host_bindings_invalid",
+      code: dispatchResolution.code,
       message: dispatchResolution.message,
     };
   }

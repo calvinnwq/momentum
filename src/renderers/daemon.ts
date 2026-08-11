@@ -142,7 +142,8 @@ export type DaemonStartFailurePayload = {
   code:
     | "daemon_already_active"
     | "data_dir_failed"
-    | "daemon_host_bindings_invalid";
+    | "daemon_host_bindings_invalid"
+    | "executor_config_invalid";
   message: string;
   existing?: {
     runId: string;

@@ -482,7 +482,7 @@ async function daemonStart(
     );
     if (!workflowDispatchResolution.ok) {
       return emitDaemonStartFailure(parsed, io, {
-        code: "daemon_host_bindings_invalid",
+        code: workflowDispatchResolution.code,
         message: workflowDispatchResolution.message,
       });
     }

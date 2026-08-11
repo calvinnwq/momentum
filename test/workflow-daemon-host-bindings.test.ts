@@ -20,8 +20,10 @@ import {
   insertExecutorCheckpoint,
   insertExecutorRound,
 } from "../src/core/executors/loop/persist.js";
+import { deriveDispatchCorrelationId } from "../src/core/workflow/dispatch/attempt-ids.js";
 import { executeWorkflowStepDispatch } from "../src/core/workflow/dispatch/execute.js";
 import { runWorkflowSchedulerOnceAsync } from "../src/core/workflow/dispatch/scheduler.js";
+import { acquireRepoLock } from "../src/core/repo/locks.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import { buildRealWorkflowStepExecutorRegistry } from "../src/core/workflow/step/executor-real-adapters.js";
 
@@ -324,6 +326,16 @@ describe("readDaemonHostBindingsSource", () => {
     });
   });
 
+  it("rejects a symlink source instead of following it", () => {
+    const dir = makeTempDir();
+    const target = path.join(dir, "target.json");
+    const source = path.join(dir, "bindings.json");
+    fs.writeFileSync(target, VALID_HOST_BINDINGS_JSON, "utf8");
+    fs.symlinkSync(target, source);
+
+    expect(readDaemonHostBindingsSource(source)).toMatchObject({ ok: false });
+  });
+
   it("rejects an oversized source before reading its contents", () => {
     const dir = makeTempDir();
     const file = path.join(dir, "bindings.json");
@@ -377,7 +389,8 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
       "momentum@example.test",
     ]);
     fs.writeFileSync(path.join(repoPath, "README.md"), "fixture\n");
-    execFileSync("git", ["-C", repoPath, "add", "README.md"]);
+    fs.writeFileSync(path.join(repoPath, ".gitignore"), ".agent-workflows/\n");
+    execFileSync("git", ["-C", repoPath, "add", "README.md", ".gitignore"]);
     execFileSync("git", [
       "-C",
       repoPath,
@@ -818,13 +831,17 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
       repoPath,
     );
     // Completed evidence suppresses relaunch, not binding presence validation:
-    // the post-claim resolver would still look the binding up, fail with
-    // `runtime_unavailable`, and settle the recovered repo lock as unclean.
+    // the configured resolver still needs the selected binding to validate the
+    // durable reattachment identity.
     const { attemptId, roundId } = seedCompletedMechanismAttempt(
       db,
       runId,
       "preflight",
       "agent-once",
+      {
+        state: "capturing_result",
+        detail: "attempt outcome: ok",
+      },
     );
 
     const production = resolveDaemonWorkflowStepDispatch(
@@ -851,8 +868,6 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
       "host bindings have no preflight binding for native agent-once",
     );
 
-    // Refused before any mutation: no lease, no new attempt/round rows, the
-    // seeded evidence untouched (no recovery-poisoned round), step approved.
     expect(
       db
         .prepare(
@@ -878,7 +893,7 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
           "SELECT state, recovery_code FROM executor_rounds WHERE round_id = ?",
         )
         .get(roundId),
-    ).toEqual({ state: "running", recovery_code: null });
+    ).toEqual({ state: "capturing_result", recovery_code: null });
     expect(
       db
         .prepare("SELECT state FROM workflow_steps WHERE run_id = ?")
@@ -1260,10 +1275,24 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
       runId,
       repoPath,
     );
-    seedCompletedMechanismAttempt(db, runId, "preflight", "agent-once", {
-      state: "capturing_result",
-      detail: "attempt outcome: ok",
-    });
+    const evidence = seedCompletedMechanismAttempt(
+      db,
+      runId,
+      "preflight",
+      "agent-once",
+      {
+        state: "capturing_result",
+        detail: "attempt outcome: ok",
+      },
+    );
+    const currentHead = execFileSync(
+      "git",
+      ["-C", repoPath, "rev-parse", "HEAD"],
+      { encoding: "utf8" },
+    ).trim();
+    db.prepare(
+      "UPDATE executor_rounds SET commit_sha = ? WHERE round_id = ?",
+    ).run(currentHead, evidence.roundId);
 
     const production = resolveDaemonWorkflowStepDispatch(
       {},
@@ -1297,6 +1326,91 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
         )
         .get(runId),
     ).toEqual({ count: 1 });
+    db.close();
+  });
+
+  it("fails closed when binding-free native reattachment loses its recorded repository head", async () => {
+    const repoPath = initRepo();
+    const db = openDb(makeTempDir("momentum-daemon-completed-native-data-"));
+    const runId = "native-completed-lost-head-without-bindings-run";
+    startApprovedRun(
+      db,
+      {
+        key: "daemon-completed-native-lost-head-without-bindings",
+        title: "Daemon Completed Native Lost Head Without Bindings",
+        version: 1,
+        steps: [
+          {
+            key: "preflight",
+            kind: "preflight",
+            executor: "agent-once",
+            config: {},
+            order: 0,
+            required: true,
+          },
+        ],
+      },
+      runId,
+      repoPath,
+    );
+    const evidence = seedCompletedMechanismAttempt(
+      db,
+      runId,
+      "preflight",
+      "agent-once",
+      { state: "capturing_result", detail: "attempt outcome: ok" },
+    );
+    const lock = acquireRepoLock(db, {
+      repoRoot: repoPath,
+      holder: "native-completed-lost-head-worker",
+      goalId: runId,
+      iteration: 1,
+      jobId: deriveDispatchCorrelationId(runId, "preflight"),
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    expect(lock.ok).toBe(true);
+    const production = resolveDaemonWorkflowStepDispatch(
+      {},
+      executeWorkflowStepDispatch,
+      {},
+    );
+    expect(production.ok, production.ok ? "" : production.message).toBe(true);
+    if (!production.ok) return;
+
+    await runWorkflowSchedulerOnceAsync({
+      db,
+      runId,
+      workerId: "native-completed-lost-head-worker",
+      dispatch: production.dispatch,
+      ...(production.preClaim === undefined
+        ? {}
+        : { preClaim: production.preClaim }),
+      now: () => NOW + 1,
+    });
+
+    expect(
+      db
+        .prepare("SELECT state FROM executor_attempts WHERE attempt_id = ?")
+        .get(evidence.attemptId),
+    ).toEqual({ state: "manual_recovery_required" });
+    expect(
+      db
+        .prepare(
+          "SELECT state, recovery_code FROM executor_rounds WHERE round_id = ?",
+        )
+        .get(evidence.roundId),
+    ).toEqual({
+      state: "manual_recovery_required",
+      recovery_code: "head_mismatch",
+    });
+    if (lock.ok) {
+      expect(
+        db
+          .prepare("SELECT state FROM repo_locks WHERE id = ?")
+          .get(lock.lockId),
+      ).toEqual({ state: "needs_manual_recovery" });
+    }
     db.close();
   });
 });

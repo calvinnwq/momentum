@@ -298,6 +298,33 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     }
   });
 
+  it("surfaces malformed executor config with its own refusal code before opening state", async () => {
+    const dataDir = makeTempDir();
+    const bindingsPath = writeSucceedingPreflightProfile(makeTempDir());
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--json",
+        "--data-dir",
+        dataDir,
+      ],
+      {
+        [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: bindingsPath,
+        MOMENTUM_EXECUTOR_CONFIG: "{ malformed",
+      },
+    );
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout || result.stderr)).toMatchObject({
+      code: "executor_config_invalid",
+    });
+    expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(false);
+  });
+
   it("uses a configured daemon live-wrapper profile to execute and reconcile a dispatched step", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

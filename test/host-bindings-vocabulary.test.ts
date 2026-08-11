@@ -2,17 +2,18 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-/**
- * NGX-668 (NAM-03E) current-source / current-doc vocabulary guard.
- *
- * `MOMENTUM_HOST_BINDINGS_FILE` is the only active selector for machine-local
- * execution bindings. Active source, diagnostics, checked-in configuration,
- * and current operator documentation must not teach live-wrapper-profile
- * vocabulary; the retired selector and profile shape may be named only where
- * they are detected and refused with a migration diagnostic.
- */
+import {
+  DAEMON_HOST_BINDINGS_FILE_ENV_VAR,
+  readDaemonHostBindingsSource,
+  resolveDaemonHostBindings,
+  RETIRED_LIVE_WRAPPER_PROFILE_ENV_VAR,
+} from "../src/core/workflow/live-wrapper/daemon-host-bindings.js";
 
 const REPO_ROOT = process.cwd();
+const bindingsPath = path.join(
+  REPO_ROOT,
+  "bindings/coding-workflow.host-bindings.json",
+);
 
 describe("host-binding vocabulary guard (NGX-668)", () => {
   it("keeps the retired checked-in profile path out of the repository", () => {
@@ -24,20 +25,40 @@ describe("host-binding vocabulary guard (NGX-668)", () => {
         ),
       ),
     ).toBe(false);
-    expect(
-      fs.existsSync(
-        path.join(REPO_ROOT, "bindings/coding-workflow.host-bindings.json"),
-      ),
-    ).toBe(true);
+    expect(fs.existsSync(bindingsPath)).toBe(true);
   });
 
   it("ships the checked-in host bindings in the strict { bindings } shape", () => {
-    const doc = JSON.parse(
-      fs.readFileSync(
-        path.join(REPO_ROOT, "bindings/coding-workflow.host-bindings.json"),
-        "utf8",
-      ),
+    const document = JSON.parse(
+      fs.readFileSync(bindingsPath, "utf8"),
     ) as Record<string, unknown>;
-    expect(Object.keys(doc)).toEqual(["bindings"]);
+    expect(Object.keys(document)).toEqual(["bindings"]);
+  });
+
+  it("resolves the checked-in source through the production environment path", () => {
+    const resolution = resolveDaemonHostBindings(
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: bindingsPath },
+      { loadSource: readDaemonHostBindingsSource },
+    );
+
+    expect(resolution.status).toBe("resolved");
+    if (resolution.status !== "resolved") return;
+    expect(resolution.source).toBe(bindingsPath);
+    expect(resolution.bindings.bindings.has("implementation")).toBe(true);
+    expect(resolution.bindings.bindings.has("validate")).toBe(true);
+  });
+
+  it("refuses the retired selector without consulting a legacy source", () => {
+    const resolution = resolveDaemonHostBindings(
+      { [RETIRED_LIVE_WRAPPER_PROFILE_ENV_VAR]: "retired.profile.json" },
+      {
+        loadSource: () => ({ ok: true as const, contents: "{}" }),
+      },
+    );
+
+    expect(resolution).toMatchObject({
+      status: "invalid",
+      code: "retired_selector",
+    });
   });
 });

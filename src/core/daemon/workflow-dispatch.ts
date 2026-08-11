@@ -198,7 +198,11 @@ export type DaemonWorkflowDispatchResolution =
       leaseDurationMs?: number;
       preClaim?: WorkflowStepPreClaim;
     }
-  | { ok: false; message: string };
+  | {
+      ok: false;
+      code: "daemon_host_bindings_invalid" | "executor_config_invalid";
+      message: string;
+    };
 
 const NATIVE_HOST_BINDING_EXECUTORS: ReadonlySet<string> = new Set([
   "agent-loop",
@@ -415,6 +419,7 @@ export function resolveDaemonWorkflowStepDispatch(
   if (hostBindings.status === "invalid") {
     return {
       ok: false,
+      code: "daemon_host_bindings_invalid",
       message:
         hostBindings.code === "retired_selector"
           ? hostBindings.error
@@ -429,6 +434,7 @@ export function resolveDaemonWorkflowStepDispatch(
   if (executorConfig.status === "invalid") {
     return {
       ok: false,
+      code: "executor_config_invalid",
       message: `Invalid ${DAEMON_EXECUTOR_CONFIG_ENV_VAR} (${executorConfig.source}): ${executorConfig.message}`,
     };
   }
@@ -732,6 +738,32 @@ function createMissingHostBindingsNativeDispatch(
           attempt.attemptNumber,
           context.now,
         );
+        const provenance = loadDispatchedStepRunProvenance(
+          context.db,
+          claim.runId,
+        );
+        const resolved =
+          provenance === undefined
+            ? { ok: false as const, reason: "run_not_found" }
+            : resolveDispatchedStepExecutorContext(claim.runId, provenance);
+        if (!resolved.ok) {
+          settleRepoOwnership?.(false);
+          throw new RegisteredExecutorHostBindingsError(
+            "runtime_unavailable",
+            resolved.reason,
+          );
+        }
+        try {
+          assertCompletedNativeMechanismRepositoryProof({
+            db: context.db,
+            attemptId: attempt.attemptId,
+            attemptNumber: attempt.attemptNumber,
+            repoPath: resolved.exec.repoPath,
+          });
+        } catch (error) {
+          settleRepoOwnership?.(false);
+          throw error;
+        }
         const start = {
           roundId: round.roundId,
           attemptId: round.attemptId,
@@ -1164,6 +1196,17 @@ function createLiveStepHostBindingsResolver(
         attempt.attemptNumber,
         context.now,
       );
+      try {
+        assertCompletedNativeMechanismRepositoryProof({
+          db: context.db,
+          attemptId: attempt.attemptId,
+          attemptNumber: attempt.attemptNumber,
+          repoPath: resolved.exec.repoPath,
+        });
+      } catch (error) {
+        settleRepoOwnership?.(false);
+        throw error;
+      }
       return {
         repoPath: resolved.exec.repoPath,
         run: () => {
@@ -1224,7 +1267,7 @@ function createLiveStepHostBindingsResolver(
       const adapter = createPersistedProfileDelegateToolAdapter({
         tool: delegateTool!,
         repoPath: resolved.exec.repoPath,
-        command: noMistakesRuntime?.command ?? "no-mistakes",
+        command: noMistakesRuntime?.command ?? "",
         argsPrefix: noMistakesRuntime?.argsPrefix ?? [],
         env: noMistakesRuntime?.env ?? {},
       });
@@ -2108,7 +2151,7 @@ function assertCompletedNativeMechanismRepositoryProof(input: {
   attemptId: string;
   attemptNumber: number;
   repoPath: string;
-  baseHead: string;
+  baseHead?: string;
 }): void {
   const completedRound = [
     ...listExecutorRoundsForAttempt(input.db, input.attemptId),
@@ -2122,7 +2165,12 @@ function assertCompletedNativeMechanismRepositoryProof(input: {
           (checkpoint) => checkpoint.stage === "mechanism_completed",
         ),
     );
-  const expectedHead = expectedSettledRepoHead(completedRound, input.baseHead);
+  const expectedHead =
+    completedRound?.commitSha !== null && completedRound !== undefined
+      ? completedRound.commitSha
+      : input.baseHead === undefined
+        ? null
+        : expectedSettledRepoHead(completedRound, input.baseHead);
   const repo = inspectRepo(input.repoPath);
   if (repo.ok && expectedHead !== null && repo.head === expectedHead) return;
   throw new RegisteredExecutorHostBindingsError(
@@ -2168,6 +2216,35 @@ function hasCompletedLiveStepMechanism(
   attemptId: string,
 ): boolean {
   return hasExecutorCheckpoint(db, attemptId, "mechanism_completed");
+}
+
+/** Whether a native step has durable completion evidence that can reattach
+ * without consulting a machine-local host binding. */
+export function hasCompletedNativeHostBindingEvidenceForStep(
+  db: MomentumDb,
+  target: { runId: string; stepId: string },
+): boolean {
+  const runtime = resolveWorkflowStepExecutorRuntime(db, target);
+  if (
+    !runtime.ok ||
+    hasExecutorDefinition(db, runtime.executorName) ||
+    !isNativeHostBindingExecutorIdentity(runtime.executorName)
+  ) {
+    return false;
+  }
+  const attempt = loadLatestExecutorAttemptForStep(
+    db,
+    target.runId,
+    target.stepId,
+  );
+  return (
+    attempt !== undefined &&
+    hasCompletedNativeHostBindingEvidence(
+      db,
+      runtime.executorName,
+      attempt.attemptId,
+    )
+  );
 }
 
 function hasUnclassifiedCompletedNativeMechanism(

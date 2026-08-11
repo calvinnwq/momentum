@@ -2866,7 +2866,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         .get(round.roundId),
     ).toEqual({
       state: "manual_recovery_required",
-      recovery_code: "runtime_unavailable",
+      recovery_code: "head_mismatch",
     });
     expect(
       db

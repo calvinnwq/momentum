@@ -15,6 +15,11 @@ import {
 } from "../src/core/workflow/definition/definition.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import { insertWorkflowGate } from "../src/core/workflow/gate/persist.js";
+import {
+  insertExecutorAttempt,
+  insertExecutorCheckpoint,
+  insertExecutorRound,
+} from "../src/core/executors/loop/persist.js";
 
 type RunResult = {
   code: number;
@@ -64,6 +69,89 @@ function initRepo(repoPath: string): void {
   );
   runGit(repoPath, ["add", "README.md", ".gitignore"]);
   runGit(repoPath, ["commit", "-m", "init", "--quiet"]);
+}
+
+function seedCompletedNativeEvidence(
+  db: MomentumDb,
+  runId: string,
+  stepId: string,
+  commitSha: string | null,
+): void {
+  const attemptId = `${runId}::${stepId}::attempt-1`;
+  const roundId = `${attemptId}::round::0`;
+  insertExecutorAttempt(
+    db,
+    {
+      attemptId,
+      workflowRunId: runId,
+      stepRunId: stepId,
+      stepKey: stepId,
+      executor: "agent-once",
+      state: "running",
+      attemptNumber: 1,
+      startedAt: SEED_NOW,
+      heartbeatAt: SEED_NOW,
+      finishedAt: null,
+    },
+    { now: SEED_NOW },
+  );
+  insertExecutorRound(
+    db,
+    {
+      roundId,
+      attemptId,
+      workflowRunId: runId,
+      stepRunId: stepId,
+      stepKey: stepId,
+      executor: "agent-once",
+      attemptNumber: 1,
+      roundIndex: 0,
+      state: "capturing_result",
+      classification: null,
+      startedAt: SEED_NOW,
+      heartbeatAt: SEED_NOW,
+      finishedAt: null,
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: null,
+      resultDigest: null,
+      artifactRoot: "/artifacts/round-0",
+      logPaths: [],
+      summary: null,
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: null,
+      commitSha,
+      recoveryCode: null,
+      humanGate: null,
+    },
+    { now: SEED_NOW },
+  );
+  insertExecutorCheckpoint(
+    db,
+    {
+      checkpointId: `${roundId}-started`,
+      roundId,
+      sequence: 0,
+      stage: "round_started",
+      detail: null,
+    },
+    { now: SEED_NOW },
+  );
+  insertExecutorCheckpoint(
+    db,
+    {
+      checkpointId: `${roundId}-completed`,
+      roundId,
+      sequence: 1,
+      stage: "mechanism_completed",
+      detail: "attempt outcome: ok",
+    },
+    { now: SEED_NOW },
+  );
 }
 
 async function run(
@@ -731,6 +819,129 @@ describe("momentum workflow run watch", () => {
         )
         .get(runId) as { count: number };
       expect(leaseCount.count).toBe(0);
+    } finally {
+      after.close();
+    }
+  });
+
+  it("reattaches completed preflight evidence from watch without launching a host binding", async () => {
+    const dataDir = makeTempDir();
+    const repoPath = path.join(dataDir, "repo");
+    fs.mkdirSync(repoPath, { recursive: true });
+    initRepo(repoPath);
+    const runId = "mwf-watch-completed-preflight-evidence";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath,
+        objective: "Exercise watch completed native evidence reattachment",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'preflight'",
+      ).run(runId);
+      seedCompletedNativeEvidence(
+        db,
+        runId,
+        "preflight",
+        runGit(repoPath, ["rev-parse", "HEAD"]),
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      emit: true,
+      phase: "awaiting_approval",
+    });
+
+    const after = openDb(dataDir);
+    try {
+      expect(
+        after
+          .prepare(
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'preflight'",
+          )
+          .get(runId),
+      ).toEqual({ state: "succeeded" });
+      expect(
+        after
+          .prepare(
+            "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ count: 1 });
+    } finally {
+      after.close();
+    }
+  });
+
+  it("surfaces malformed executor config from watch before claiming a step", async () => {
+    const dataDir = makeTempDir();
+    const profilePath = writeHostBindings(dataDir, "preflight");
+    const runId = "mwf-watch-invalid-executor-config";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise watch executor-config refusal",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'preflight'",
+      ).run(runId);
+    } finally {
+      db.close();
+    }
+
+    const result = await run(
+      [
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ],
+      {
+        MOMENTUM_HOST_BINDINGS_FILE: profilePath,
+        MOMENTUM_EXECUTOR_CONFIG: "{ malformed",
+      },
+    );
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stderr || result.stdout)).toMatchObject({
+      code: "executor_config_invalid",
+    });
+    const after = openDb(dataDir);
+    try {
+      expect(
+        after
+          .prepare(
+            "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ count: 0 });
     } finally {
       after.close();
     }

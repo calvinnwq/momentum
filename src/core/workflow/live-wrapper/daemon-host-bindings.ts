@@ -193,8 +193,13 @@ export function resolveDaemonHostBindings(
 export function readDaemonHostBindingsSource(
   sourcePath: string,
 ): DaemonHostBindingsSourceLoad {
+  let descriptor: number | undefined;
   try {
-    const stat = fs.statSync(sourcePath);
+    descriptor = fs.openSync(
+      sourcePath,
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
+    );
+    const stat = fs.fstatSync(descriptor);
     if (!stat.isFile()) {
       return {
         ok: false,
@@ -207,11 +212,34 @@ export function readDaemonHostBindingsSource(
         error: `host-bindings source exceeds ${DAEMON_HOST_BINDINGS_SOURCE_MAX_BYTES} bytes`,
       };
     }
-    return { ok: true, contents: fs.readFileSync(sourcePath, "utf8") };
+    const buffer = Buffer.allocUnsafe(
+      DAEMON_HOST_BINDINGS_SOURCE_MAX_BYTES + 1,
+    );
+    let offset = 0;
+    while (offset < buffer.length) {
+      const bytesRead = fs.readSync(
+        descriptor,
+        buffer,
+        offset,
+        buffer.length - offset,
+        null,
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    if (offset > DAEMON_HOST_BINDINGS_SOURCE_MAX_BYTES) {
+      return {
+        ok: false,
+        error: `host-bindings source exceeds ${DAEMON_HOST_BINDINGS_SOURCE_MAX_BYTES} bytes`,
+      };
+    }
+    return { ok: true, contents: buffer.subarray(0, offset).toString("utf8") };
   } catch (error) {
     return {
       ok: false,
       error: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
   }
 }
