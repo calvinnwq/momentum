@@ -6,10 +6,8 @@ import { fileURLToPath } from "node:url";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
-import { readWorkflowRunCodingCompatibility } from "../src/adapters/db/route-state.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import type { WorkflowDefinition } from "../src/core/workflow/definition/definition.js";
-import { loadCanonicalWorkflowRunRoute } from "./support/canonical-route-state.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -141,88 +139,6 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     } finally {
       db.close();
     }
-  });
-
-  it("persists the current GNHF/CWFP implementation engine when explicitly selected", async () => {
-    const dataDir = makeTempDir();
-    const repoDir = makeTempDir();
-    const result = await run(
-      startCodingArgs({
-        dataDir,
-        repoDir,
-        runId: "ngx-568-current-engine",
-        objective: "Start the current fallback route",
-        extra: ["--implementation-engine", "current-gnhf-cwfp"],
-      }),
-    );
-
-    expect(result.code).toBe(0);
-    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
-    expect(payload).toMatchObject({
-      ok: true,
-      command: "workflow run start-coding",
-      runId: "ngx-568-current-engine",
-      implementationEngine: "current-gnhf-cwfp",
-      route: {
-        implementationEngine: "current-gnhf-cwfp",
-      },
-    });
-
-    const db = openDb(dataDir);
-    try {
-      expect(
-        loadCanonicalWorkflowRunRoute(db, "ngx-568-current-engine"),
-      ).toEqual({
-        implementationEngine: "current-gnhf-cwfp",
-      });
-    } finally {
-      db.close();
-    }
-  });
-
-  it("keeps the legacy native-goal-loop route label accepted", async () => {
-    const dataDir = makeTempDir();
-    const repoDir = makeTempDir();
-    const result = await run(
-      startCodingArgs({
-        dataDir,
-        repoDir,
-        runId: "ngx-610-legacy-engine",
-        objective: "Resume a legacy route selection",
-        extra: ["--implementation-engine", "native-goal-loop"],
-      }),
-    );
-
-    expect(result.code).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      definitionVersion: 3,
-      implementationEngine: "native-goal-loop",
-      route: { implementationEngine: "native-goal-loop" },
-    });
-  });
-
-  it("renders the selected implementation engine in text success output", async () => {
-    const dataDir = makeTempDir();
-    const repoDir = makeTempDir();
-    const result = await run([
-      "workflow",
-      "run",
-      "start-coding",
-      "--run-id",
-      "ngx-568-text-engine",
-      "--repo",
-      repoDir,
-      "--objective",
-      "Show the operator which implementation path started",
-      "--data-dir",
-      dataDir,
-      "--implementation-engine",
-      "current-gnhf-cwfp",
-    ]);
-
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("Implementation engine: current-gnhf-cwfp");
-    expect(result.stderr).toBe("");
   });
 
   it("ignores persisted coding-workflow overrides and starts the built-in six-step definition", async () => {
@@ -446,80 +362,6 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         identifier: "NGX-508",
       });
       expect(runRow.skill_revision).toBe("rev-42");
-    } finally {
-      db.close();
-    }
-  });
-
-  it("captures the selected runtime/profile into the durable run route", async () => {
-    const dataDir = makeTempDir();
-    const repoDir = makeTempDir();
-    const result = await run(
-      startCodingArgs({
-        dataDir,
-        repoDir,
-        runId: "ngx-508-profile",
-        objective: "Capture the selected runtime profile",
-        extra: ["--profile", "coding-workflow-live-wrapper"],
-      }),
-    );
-    expect(result.code).toBe(0);
-
-    const db = openDb(dataDir);
-    try {
-      expect(
-        loadCanonicalWorkflowRunRoute(db, "ngx-508-profile"),
-      ).toMatchObject({
-        profile: "coding-workflow-live-wrapper",
-      });
-    } finally {
-      db.close();
-    }
-
-    // The captured profile is explainable from Momentum state alone through
-    // the canonical compatibility reader; the status projection no longer
-    // carries the retired route.profile key.
-    const status = await run([
-      "workflow",
-      "status",
-      "ngx-508-profile",
-      "--data-dir",
-      dataDir,
-      "--json",
-    ]);
-    expect(status.code).toBe(0);
-    const statusPayload = JSON.parse(status.stdout) as {
-      run: { route: Record<string, unknown> };
-    };
-    expect(statusPayload.run.route).not.toHaveProperty("profile");
-    const readbackDb = openDb(dataDir);
-    try {
-      expect(
-        readWorkflowRunCodingCompatibility(readbackDb, "ngx-508-profile"),
-      ).toMatchObject({ selectedProfile: "coding-workflow-live-wrapper" });
-    } finally {
-      readbackDb.close();
-    }
-  });
-
-  it("records the honest GNHF implementation engine when no runtime profile is selected", async () => {
-    const dataDir = makeTempDir();
-    const repoDir = makeTempDir();
-    const result = await run(
-      startCodingArgs({
-        dataDir,
-        repoDir,
-        runId: "ngx-508-no-profile",
-        objective: "No profile selected",
-      }),
-    );
-    expect(result.code).toBe(0);
-
-    const db = openDb(dataDir);
-    try {
-      expect(loadCanonicalWorkflowRunRoute(db, "ngx-508-no-profile")).toEqual({
-        implementationEngine: "gnhf",
-      });
     } finally {
       db.close();
     }
@@ -960,8 +802,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
   });
 });
 
-describe("momentum workflow run start-coding route reconfiguration (NGX-510)", () => {
-  it("captures per-step route overrides into the durable run route", async () => {
+describe("momentum workflow run start-coding agent-config reconfiguration", () => {
+  it("captures per-step agent config into the frozen step rows", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const result = await run(
@@ -969,9 +811,9 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         dataDir,
         repoDir,
         runId: "ngx-510-steps",
-        objective: "Reconfigure per-step route before kickoff",
+        objective: "Reconfigure per-step agent config before kickoff",
         extra: [
-          "--steps-json",
+          "--agent-config-json",
           JSON.stringify({
             validate: { effort: "high" },
             implementation: { model: "  claude-opus-4-8  ", harness: "gnhf" },
@@ -983,18 +825,25 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
 
     const db = openDb(dataDir);
     try {
-      // Trimmed, and normalized to canonical step + field order (byte-stable).
-      const route = loadCanonicalWorkflowRunRoute(db, "ngx-510-steps");
-      expect(route).toEqual({
-        implementationEngine: "gnhf",
-        steps: {
-          implementation: { harness: "gnhf", model: "claude-opus-4-8" },
-          validate: { effort: "high" },
+      // Trimmed, and normalized to canonical field order (byte-stable) in the
+      // frozen step-owned rows.
+      const rows = db
+        .prepare(
+          `SELECT step_id, agent_config_json FROM workflow_steps
+            WHERE run_id = ? AND agent_config_json <> '{}'
+            ORDER BY step_order`,
+        )
+        .all("ngx-510-steps") as Array<{
+        step_id: string;
+        agent_config_json: string;
+      }>;
+      expect(rows).toEqual([
+        {
+          step_id: "implementation",
+          agent_config_json: '{"harness":"gnhf","model":"claude-opus-4-8"}',
         },
-      });
-      expect(JSON.stringify(route)).toContain(
-        '"steps":{"implementation":{"harness":"gnhf","model":"claude-opus-4-8"},"validate":{"effort":"high"}}',
-      );
+        { step_id: "validate", agent_config_json: '{"effort":"high"}' },
+      ]);
     } finally {
       db.close();
     }
@@ -1022,40 +871,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
     });
   });
 
-  it("combines --profile and --steps-json into a single durable route", async () => {
-    const dataDir = makeTempDir();
-    const repoDir = makeTempDir();
-    const result = await run(
-      startCodingArgs({
-        dataDir,
-        repoDir,
-        runId: "ngx-510-profile-steps",
-        objective: "Profile plus per-step overrides",
-        extra: [
-          "--profile",
-          "coding-workflow-live-wrapper",
-          "--steps-json",
-          JSON.stringify({ postflight: { harness: "claude" } }),
-        ],
-      }),
-    );
-    expect(result.code).toBe(0);
-
-    const db = openDb(dataDir);
-    try {
-      expect(
-        loadCanonicalWorkflowRunRoute(db, "ngx-510-profile-steps"),
-      ).toEqual({
-        implementationEngine: "gnhf",
-        profile: "coding-workflow-live-wrapper",
-        steps: { postflight: { harness: "claude" } },
-      });
-    } finally {
-      db.close();
-    }
-  });
-
-  it("persists provider-normalized model strings in route.steps", async () => {
+  it("persists provider-normalized model strings in the frozen step rows", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const result = await run(
@@ -1065,7 +881,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         runId: "ngx-510-model-alias",
         objective: "Normalize model aliases before dispatch",
         extra: [
-          "--steps-json",
+          "--agent-config-json",
           JSON.stringify({
             implementation: {
               harness: "claude",
@@ -1089,31 +905,35 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
 
     const db = openDb(dataDir);
     try {
-      expect(loadCanonicalWorkflowRunRoute(db, "ngx-510-model-alias")).toEqual({
-        implementationEngine: "gnhf",
-        steps: {
-          implementation: {
-            harness: "claude",
-            model: "claude-sonnet-4-6",
-            effort: "high",
-          },
-          postflight: {
-            harness: "opencode",
-            model: "openai/gpt-5.5",
-          },
-          validate: {
-            harness: "codex",
-            model: "gpt-5.5",
-            effort: "high",
-          },
+      const rows = db
+        .prepare(
+          `SELECT step_id, agent_config_json FROM workflow_steps
+            WHERE run_id = ? AND agent_config_json <> '{}'
+            ORDER BY step_order`,
+        )
+        .all("ngx-510-model-alias") as Array<{
+        step_id: string;
+        agent_config_json: string;
+      }>;
+      expect(
+        Object.fromEntries(
+          rows.map((row) => [row.step_id, JSON.parse(row.agent_config_json)]),
+        ),
+      ).toEqual({
+        implementation: {
+          harness: "claude",
+          model: "claude-sonnet-4-6",
+          effort: "high",
         },
+        postflight: { harness: "opencode", model: "openai/gpt-5.5" },
+        validate: { harness: "codex", model: "gpt-5.5", effort: "high" },
       });
     } finally {
       db.close();
     }
   });
 
-  it("fails closed on a misconfigured --steps-json and writes nothing", async () => {
+  it("fails closed on a misconfigured --agent-config-json and writes nothing", async () => {
     const cases = [
       {
         label: "unsupported step",
@@ -1143,7 +963,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
           repoDir,
           runId,
           objective: testCase.label,
-          extra: ["--steps-json", testCase.json],
+          extra: ["--agent-config-json", testCase.json],
         }),
       );
       expect(result.code, testCase.label).toBe(1);
@@ -1167,7 +987,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
     }
   });
 
-  it("refuses --steps-json on the generic workflow run start door", async () => {
+  it("refuses --agent-config-json on the generic workflow run start door", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const result = await run([
@@ -1179,11 +999,11 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
       "--repo",
       repoDir,
       "--objective",
-      "Generic start refuses per-step coding overrides",
+      "Generic start refuses per-step coding agent config",
       "--data-dir",
       dataDir,
       "--json",
-      "--steps-json",
+      "--agent-config-json",
       JSON.stringify({ implementation: { model: "opus" } }),
     ]);
     expect(result.code).toBe(1);
@@ -1276,14 +1096,9 @@ describe("workflow run start-coding public docs (NGX-508)", () => {
     }
   });
 
-  it("documents the --profile runtime/profile capture and its route.profile target", () => {
-    expect(doc).toContain("`--profile <name>`");
-    expect(doc).toContain("`route.profile`");
-  });
-
-  it("documents the --steps-json per-step route override capture and its route.steps target", () => {
-    expect(doc).toContain("`--steps-json <json>`");
-    expect(doc).toContain("`route.steps`");
+  it("documents the --agent-config-json per-step selection and its frozen step target", () => {
+    expect(doc).toContain("`--agent-config-json <json>`");
+    expect(doc).toContain("`workflow_steps.agent_config_json`");
     expect(doc).toContain("route_config_invalid");
   });
 });

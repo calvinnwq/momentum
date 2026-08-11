@@ -8,7 +8,7 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   insertWorkflowGate,
   loadWorkflowGate,
-  type NewWorkflowGate
+  type NewWorkflowGate,
 } from "../src/core/workflow/gate/persist.js";
 
 type RunResult = {
@@ -42,15 +42,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
   return { code, stdout, stderr };
 }
@@ -61,12 +61,12 @@ function seedRun(db: MomentumDb, runId: string): void {
   db.prepare(
     `INSERT INTO workflow_runs
        (id, state, source, source_artifact_path, plan_json,
-        repo_path, objective, issue_scope_json, route_json,
+        repo_path, objective, issue_scope_json,
         approval_boundary, skill_revision,
         needs_manual_recovery, manual_recovery_reason, manual_recovery_at,
         started_at, finished_at,
         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     runId,
     "running",
@@ -76,7 +76,6 @@ function seedRun(db: MomentumDb, runId: string): void {
     null,
     null,
     "{}",
-    "{}",
     null,
     null,
     0,
@@ -85,13 +84,16 @@ function seedRun(db: MomentumDb, runId: string): void {
     null,
     null,
     SEED_NOW,
-    SEED_NOW
+    SEED_NOW,
   );
 }
 
 function seedGate(
   dataDir: string,
-  overrides: Partial<NewWorkflowGate> & { gateId: string; workflowRunId: string }
+  overrides: Partial<NewWorkflowGate> & {
+    gateId: string;
+    workflowRunId: string;
+  },
 ): void {
   const db = openDb(dataDir);
   try {
@@ -102,12 +104,16 @@ function seedGate(
       stepRunId: overrides.stepRunId ?? "step-1",
       targetScope: overrides.targetScope ?? "step",
       gateType: overrides.gateType ?? "operator_decision_required",
-      reason: overrides.reason ?? "no-mistakes review found an important finding",
+      reason:
+        overrides.reason ?? "no-mistakes review found an important finding",
       evidence: overrides.evidence ?? "finding://nm-1",
-      allowedActions:
-        overrides.allowedActions ?? ["fix", "skip", "approve_as_is"],
+      allowedActions: overrides.allowedActions ?? [
+        "fix",
+        "skip",
+        "approve_as_is",
+      ],
       recommendedAction: overrides.recommendedAction ?? "fix",
-      policyEnvelope: overrides.policyEnvelope ?? ["fix"]
+      policyEnvelope: overrides.policyEnvelope ?? ["fix"],
     };
     insertWorkflowGate(db, gate, { now: SEED_NOW });
   } finally {
@@ -137,14 +143,14 @@ describe("momentum workflow run decide (NGX-352)", () => {
       "calvin",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run decide",
-      code: "gate_id_required"
+      code: "gate_id_required",
     });
   });
 
@@ -160,14 +166,14 @@ describe("momentum workflow run decide (NGX-352)", () => {
       "calvin",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run decide",
-      code: "action_required"
+      code: "action_required",
     });
   });
 
@@ -183,14 +189,14 @@ describe("momentum workflow run decide (NGX-352)", () => {
       "fix",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run decide",
-      code: "actor_required"
+      code: "actor_required",
     });
   });
 
@@ -210,14 +216,14 @@ describe("momentum workflow run decide (NGX-352)", () => {
       "robot",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run decide",
-      code: "invalid_mode"
+      code: "invalid_mode",
     });
   });
 
@@ -234,7 +240,7 @@ describe("momentum workflow run decide (NGX-352)", () => {
       "calvin",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -242,7 +248,7 @@ describe("momentum workflow run decide (NGX-352)", () => {
       ok: false,
       command: "workflow run decide",
       code: "gate_not_found",
-      gateId: "gate-missing"
+      gateId: "gate-missing",
     });
   });
 
@@ -262,7 +268,7 @@ describe("momentum workflow run decide (NGX-352)", () => {
       "deferring to follow-up",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -276,7 +282,7 @@ describe("momentum workflow run decide (NGX-352)", () => {
       chosenAction: "skip",
       resolvedBy: "calvin",
       mode: "operator",
-      resolution: "deferring to follow-up"
+      resolution: "deferring to follow-up",
     });
     expect(typeof payload["resolvedAt"]).toBe("number");
 
@@ -302,7 +308,7 @@ describe("momentum workflow run decide (NGX-352)", () => {
       "calvin",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -323,7 +329,7 @@ describe("momentum workflow run decide (NGX-352)", () => {
       "calvin",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -331,7 +337,7 @@ describe("momentum workflow run decide (NGX-352)", () => {
       ok: false,
       command: "workflow run decide",
       code: "action_not_allowed",
-      gateId: "gate-1"
+      gateId: "gate-1",
     });
     expect(loadGate(dataDir, "gate-1")?.resolvedAt).toBeNull();
   });
@@ -352,7 +358,7 @@ describe("momentum workflow run decide (NGX-352)", () => {
       "delegated",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -360,7 +366,7 @@ describe("momentum workflow run decide (NGX-352)", () => {
       ok: true,
       chosenAction: "fix",
       mode: "delegated",
-      resolvedBy: "agent-recommended-important"
+      resolvedBy: "agent-recommended-important",
     });
   });
 
@@ -380,7 +386,7 @@ describe("momentum workflow run decide (NGX-352)", () => {
       "delegated",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -388,7 +394,7 @@ describe("momentum workflow run decide (NGX-352)", () => {
       ok: false,
       command: "workflow run decide",
       code: "delegated_action_outside_envelope",
-      gateId: "gate-1"
+      gateId: "gate-1",
     });
     expect(loadGate(dataDir, "gate-1")?.resolvedAt).toBeNull();
   });
@@ -407,7 +413,7 @@ describe("momentum workflow run decide (NGX-352)", () => {
       "calvin",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(first.code).toBe(0);
     const second = await run([
@@ -421,14 +427,14 @@ describe("momentum workflow run decide (NGX-352)", () => {
       "calvin",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(second.code).toBe(1);
     const payload = JSON.parse(second.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run decide",
-      code: "gate_already_resolved"
+      code: "gate_already_resolved",
     });
     // The first decision is preserved.
     expect(loadGate(dataDir, "gate-1")?.chosenAction).toBe("fix");
@@ -447,7 +453,7 @@ describe("momentum workflow run decide (NGX-352)", () => {
       "--actor",
       "calvin",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("gate-1");

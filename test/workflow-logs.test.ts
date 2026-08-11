@@ -43,9 +43,9 @@ function openTempDb(): MomentumDb {
 function seedRun(db: MomentumDb, runId: string): void {
   db.prepare(
     `INSERT INTO workflow_runs
-       (id, state, source, plan_json, objective, issue_scope_json, route_json,
+       (id, state, source, plan_json, objective, issue_scope_json,
         needs_manual_recovery, created_at, updated_at)
-       VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
+       VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', 0, 1, 1)`,
   ).run(runId);
   db.prepare(
     `INSERT INTO workflow_steps

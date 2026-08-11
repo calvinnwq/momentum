@@ -86,9 +86,9 @@ type SeedRunInput = {
 function seedRun(db: MomentumDb, input: SeedRunInput): void {
   db.prepare(
     `INSERT INTO workflow_runs
-       (id, state, source, plan_json, repo_path, issue_scope_json, route_json,
+       (id, state, source, plan_json, repo_path, issue_scope_json,
         needs_manual_recovery, created_at, updated_at)
-     VALUES (?, ?, 'workflow-run-start', '{}', ?, '{}', '{}', ?, ?, ?)`,
+     VALUES (?, ?, 'workflow-run-start', '{}', ?, '{}', ?, ?, ?)`,
   ).run(
     input.runId,
     input.state,

@@ -83,8 +83,6 @@ export function emitWorkflowRunStartSuccess(
     approvalBoundary: summary.approvalBoundary,
     definitionKey: summary.definitionKey,
     definitionVersion: summary.definitionVersion,
-    route: summary.route,
-    implementationEngine: summary.implementationEngine,
     repoPath: result.repoPath,
     objective: result.objective,
     counts: { steps: summary.stepCount },
@@ -101,9 +99,6 @@ export function emitWorkflowRunStartSuccess(
     `Definition: ${summary.definitionKey} v${summary.definitionVersion}`,
     `State: ${summary.state}`,
     `Approval boundary: ${summary.approvalBoundary ?? "(none)"}`,
-    ...(summary.implementationEngine !== null
-      ? [`Implementation engine: ${summary.implementationEngine}`]
-      : []),
     `Steps: ${summary.stepCount}`,
     `Repo: ${result.repoPath}`,
     `Objective: ${result.objective}`,
@@ -186,8 +181,6 @@ export function emitWorkflowRunPreviewCodingSuccess(
     repoPath: preview.repoPath,
     objective: preview.objective,
     issueScope: preview.issueScope,
-    route: preview.route,
-    implementationEngine: preview.implementationEngine,
     skillRevision: preview.skillRevision,
     steps,
     counts: { steps: steps.length },
@@ -199,25 +192,18 @@ export function emitWorkflowRunPreviewCodingSuccess(
     return 0;
   }
 
-  const profile =
-    typeof preview.route["profile"] === "string"
-      ? preview.route["profile"]
-      : "(none)";
-  // The per-step route.steps selections are surfaced alongside the
-  // run-level profile so an operator reading the default (non-JSON) preview can
-  // audit the effective per-step harness/model/effort selections and any changes
-  // before approving. The lines are computed by the command from the same
-  // validated overrides and definition defaults that built the preview route
-  // (renderers accept computed results rather than importing the core route-config
-  // projection).
+  // The effective per-step agent-config selections are surfaced so an operator
+  // reading the default (non-JSON) preview can audit the effective per-step
+  // harness/model/effort selections and any changes before approving. The lines
+  // are computed by the command from the same validated overrides and
+  // definition defaults that built the preview (renderers accept computed
+  // results rather than importing the core agent-config projection).
   const lines = [
     `Coding workflow plan preview (not started): ${preview.runId}`,
     `Definition: ${preview.definitionKey} v${preview.definitionVersion}`,
     `Source: ${preview.source}`,
     `State on start: ${preview.state}`,
     `Approval boundary: ${preview.approvalBoundary ?? "(none)"}`,
-    `Profile: ${profile}`,
-    `Implementation engine: ${preview.implementationEngine ?? "(none)"}`,
     ...result.stepRouteLines,
     `Repo: ${preview.repoPath}`,
     `Objective: ${preview.objective}`,
@@ -1686,11 +1672,12 @@ export function renderWorkflowRunLogsText(
   lines.push(`Schema version: ${envelope.schemaVersion}`);
   lines.push(`Generated at (epoch ms): ${envelope.generatedAt}`);
   lines.push(`Run state: ${envelope.detail.run.state}`);
-  // Historical read-back from the canonical compatibility reader, never from
-  // the retired route projection keys.
-  if (envelope.detail.run.implementationEngine !== null) {
+  // Historical read-back from the canonical compatibility reader; present only
+  // for runs whose marker row records historical labels.
+  if (envelope.detail.run.compatibility !== null) {
+    const coding = envelope.detail.run.compatibility.coding;
     lines.push(
-      `Implementation engine: ${envelope.detail.run.implementationEngine}`,
+      `Compatibility (coding): engine=${coding.implementationEngine ?? "(none)"}, profile=${coding.selectedProfile ?? "(none)"}`,
     );
   }
   lines.push(`Steps: ${envelope.detail.steps.length}`);
@@ -1928,15 +1915,30 @@ export function workflowRunToJsonShape(
     repoPath: run.repoPath,
     objective: run.objective,
     issueScope: run.issueScope,
-    route: run.route,
-    // Canonical read-back replacing the retired route projection keys: the
-    // historical engine label and imported audit metadata come from their
-    // direct typed canonical readers. Envelope schema versions deliberately do
-    // not change here: shrinking the compatibility `route` object follows the
-    // subworkflow-key precedent, and the final route/profile surface and
-    // schema cleanup is owned by the follow-up surface-removal issue.
-    implementationEngine: run.implementationEngine,
-    selectedProfile: run.selectedProfile,
+    // Canonical read-back only: subworkflow ancestry from
+    // `workflow_run_lineage`, historical coding labels under
+    // `compatibility.coding` (only when labels exist), and imported audit
+    // metadata from `workflow_run_import_metadata`. The retired route
+    // compatibility projection and its flat engine/profile keys are gone.
+    lineage:
+      run.lineage === null
+        ? null
+        : {
+            parentRunId: run.lineage.parentRunId,
+            parentStepId: run.lineage.parentStepId,
+            depth: run.lineage.depth,
+            ancestorDefinitionKeys: [...run.lineage.ancestorDefinitionKeys],
+          },
+    compatibility:
+      run.compatibility === null
+        ? null
+        : {
+            coding: {
+              implementationEngine:
+                run.compatibility.coding.implementationEngine,
+              selectedProfile: run.compatibility.coding.selectedProfile,
+            },
+          },
     importMetadata:
       run.importMetadata === null
         ? null

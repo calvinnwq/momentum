@@ -1,5 +1,5 @@
 import type { MomentumDb } from "../../src/adapters/db.js";
-import { projectLegacyWorkflowRunRoute } from "../../src/adapters/db/route-projection.js";
+import { projectLegacyWorkflowRunRoute } from "../../src/adapters/db/legacy-route-migration.js";
 import {
   readWorkflowRunCodingCompatibility,
   readWorkflowRunImportMetadata,
@@ -32,8 +32,7 @@ export function loadCanonicalWorkflowRunRoute(
 ): Record<string, unknown> | undefined {
   const run = db
     .prepare(
-      `SELECT source, workflow_definition_key, workflow_definition_version,
-              route_json
+      `SELECT source, workflow_definition_key, workflow_definition_version
          FROM workflow_runs
         WHERE id = ?`,
     )
@@ -42,15 +41,9 @@ export function loadCanonicalWorkflowRunRoute(
         source: string;
         workflow_definition_key: string | null;
         workflow_definition_version: number | null;
-        route_json: string | null;
       }
     | undefined;
   if (run === undefined) return undefined;
-  if (run.route_json !== "{}") {
-    throw new Error(
-      `Expected canonical-only route persistence for run '${runId}', got ${String(run.route_json)}`,
-    );
-  }
   const route = projectLegacyWorkflowRunRoute(db, runId, {
     source: run.source,
     definitionKey: run.workflow_definition_key,

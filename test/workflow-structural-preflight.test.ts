@@ -2,11 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
+  preflightCodingWorkflowAgentConfig,
   preflightCodingWorkflowBuiltInDefinition,
-  preflightCodingWorkflowRouteProfile,
   preflightCodingWorkflowRunStartInput,
   preflightCodingWorkflowWrapperConfig,
-  preflightCodingWorkflowRouteSteps,
 } from "../src/core/workflow/preflight/structural.js";
 import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
 
@@ -61,8 +60,8 @@ describe("coding workflow structural preflight", () => {
     );
   });
 
-  it("returns normalized route step overrides with compact passed evidence", () => {
-    const result = preflightCodingWorkflowRouteSteps({
+  it("returns normalized per-step agent config with compact passed evidence", () => {
+    const result = preflightCodingWorkflowAgentConfig({
       implementation: { model: " opus " },
     });
 
@@ -73,12 +72,12 @@ describe("coding workflow structural preflight", () => {
     });
     expect(result.evidence).toEqual([
       {
-        checkId: "route.steps",
+        checkId: "workflow.agent_config",
         status: "passed",
         severity: "info",
-        path: "route.steps",
-        key: "steps",
-        message: "Coding route steps are structurally valid.",
+        path: "agentConfig",
+        key: "agentConfig",
+        message: "Coding per-step agent config is structurally valid.",
         recommendedAction: "No action required.",
       },
     ]);
@@ -87,8 +86,8 @@ describe("coding workflow structural preflight", () => {
     );
   });
 
-  it("refuses unsupported route steps with stable compact evidence fields", () => {
-    const result = preflightCodingWorkflowRouteSteps({
+  it("refuses unsupported agent-config steps with stable compact evidence fields", () => {
+    const result = preflightCodingWorkflowAgentConfig({
       "tracker-refresh": { model: "opus" },
     });
 
@@ -96,60 +95,15 @@ describe("coding workflow structural preflight", () => {
     if (result.ok) throw new Error("expected failed preflight");
     expect(result.evidence).toEqual([
       {
-        checkId: "route.steps",
+        checkId: "workflow.agent_config",
         status: "failed",
         severity: "error",
-        path: "route.steps.tracker-refresh",
+        path: "agentConfig.tracker-refresh",
         key: "tracker-refresh",
         message:
           'Coding route step "tracker-refresh" is not configurable; supported steps: implementation, postflight, validate, merge-cleanup.',
         recommendedAction:
-          "Use route.steps only for implementation, postflight, validate, or merge-cleanup, or remove the unsupported step key.",
-      },
-    ]);
-    expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
-    );
-  });
-
-  it("returns compact passed evidence for valid route profiles", () => {
-    const result = preflightCodingWorkflowRouteProfile(" live-wrapper ");
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error("expected passed preflight");
-    expect(result.profile).toBe("live-wrapper");
-    expect(result.evidence).toEqual([
-      {
-        checkId: "route.profile",
-        status: "passed",
-        severity: "info",
-        path: "route.profile",
-        key: "profile",
-        message: "Coding route profile is structurally valid.",
-        recommendedAction: "No action required.",
-      },
-    ]);
-    expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
-    );
-  });
-
-  it("refuses blank route profiles with stable compact evidence fields", () => {
-    const result = preflightCodingWorkflowRouteProfile("   ");
-
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error("expected failed preflight");
-    expect(result.evidence).toEqual([
-      {
-        checkId: "route.profile",
-        status: "failed",
-        severity: "error",
-        path: "route.profile",
-        key: "profile",
-        message:
-          "Coding route profile must be a non-empty string when provided.",
-        recommendedAction:
-          "Set route.profile to a non-empty runtime/profile name, or remove --profile to use the default route.",
+          "Use --agent-config-json only for implementation, postflight, validate, or merge-cleanup, or remove the unsupported step key.",
       },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(

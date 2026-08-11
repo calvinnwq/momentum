@@ -1,43 +1,31 @@
 /**
- * Native coding route/config selection for the Momentum-native coding workflow.
- *
- * `workflow run start-coding` and `workflow run
- * preview-coding` gave operators an explicit native door and a read-only frozen
- * plan, but the historical implementation label and harness/model/effort
- * selections were not yet explicit: the run-level `route.profile` was the only
- * operator route input, and nothing per-step. CWFP already lets an operator
- * inspect the intended implementation path plus planned harness/model choices
- * before approving execution; this module is the keystone that lets the native
- * door carry the same compatibility inputs while keeping canonical persistence
- * separate from the compatibility route projection.
+ * Native per-step agent-config selection for the Momentum-native coding
+ * workflow.
  *
  * This module owns ONLY the pure representation + validation half (no SQLite, no
  * file system, no clock, no network), the same discipline
  * `validateSubworkflowChildConfig` (`route/subworkflow-child-config.ts`) and
  * `readSubworkflowCanonicalLineage` (`route/subworkflow.ts`) follow, so the
  * fail-closed contract is exhaustively testable on its own. The CLI
- * start/preview doors build overrides from `--steps-json`, the detail/read-back
- * surfaces expose the selected config through canonical run state and the
- * compatibility route projection, while executor rounds freeze it, and daemon
+ * start/preview doors build overrides from `--agent-config-json`, the
+ * detail/read-back surfaces expose the selected config as step-level
+ * `agentConfig` from canonical run state, executor rounds freeze it, and daemon
  * dispatch consumes the same canonical step row when it freezes per-step
  * agent/model/effort selection for execution or fails closed when the row is
  * corrupt.
  *
  * Home and namespace. A {@link import("../definition/definition.js").StepDefinition} may carry
- * portable recipe-level executor and agent config, while the selected
- * historical implementation label and operator harness/model/effort overrides
- * are run-specific.
- * Canonical run state is owned by the database adapter: per-step overrides live in
- * `workflow_steps.agent_config_json`, and the historical implementation
- * label/profile live in the coding-compatibility destination. This module operates on the start-time
- * operator route input under `route.implementationEngine`, `route.steps`, and
- * `route.profile` plus the projected `route.steps` namespace; the persisted
- * implementation-engine / profile values are canonical-only (read through the
- * direct compatibility reader), and canonical subworkflow state is owned by the
- * workflow step and lineage destinations.
- * `route.profile` (the recorded operator profile) stays distinct from these
- * per-step selections and from the daemon's `MOMENTUM_HOST_BINDINGS_FILE`
- * execution host bindings; none of them are conflated here.
+ * portable recipe-level executor and agent config, while operator
+ * harness/model/effort overrides are run-specific.
+ * Canonical run state is owned by the database adapter: per-step overrides live
+ * in `workflow_steps.agent_config_json`, and historical implementation-label /
+ * profile values recorded by earlier releases live in the canonical-only
+ * coding-compatibility destination (read through the direct compatibility
+ * reader). Canonical subworkflow state is owned by the workflow step and
+ * lineage destinations. The retired legacy `route.steps` spelling survives only
+ * as this module's internal validation-path prefix and as migration input for
+ * pre-rebuild databases; per-step selections stay distinct from the daemon's
+ * `MOMENTUM_HOST_BINDINGS_FILE` execution host bindings.
  *
  * Field mapping. Each per-step override carries the operator-facing
  * harness/model/effort vocabulary (the same `harness`/`model` keys the workflow
@@ -168,7 +156,7 @@ export function resolveCodingStepAgentConfigs(
 }
 
 /**
- * The per-step override map carried under the compatibility `route.steps` namespace.
+ * The per-step override map (persisted historically under the legacy `route.steps` namespace).
  * Start and preview inputs contain only operator-supplied fields, while native
  * read-back may expose the effective canonical value; absent fields resolve from
  * the lower-precedence defaults during plan/start materialization.
@@ -419,7 +407,7 @@ export function validateCodingStepRouteOverrides(
 
 /**
  * Read back per-step coding route overrides from the projected run `route`. Pure and
- * total: an absent `route.steps` namespace is a legitimate run with no per-step
+ * total: an absent steps namespace is a legitimate run with no per-step
  * overrides; a present-but-corrupt namespace fails closed with the same refusal
  * taxonomy as {@link validateCodingStepRouteOverrides} so a hand-edited or
  * stale-shape route can never silently drop or misread an operator's selection.
@@ -490,7 +478,7 @@ function mergePersistedRouteOverrideValues(
 /**
  * Embed per-step coding route overrides into a compatibility-projection `route`,
  * returning a new route object (the input is never mutated). When there are no
- * overrides the `route.steps` namespace is omitted entirely so the projection stays minimal;
+ * overrides the steps namespace is omitted entirely so the value stays minimal;
  * all other caller-supplied route fields are preserved; active run-start
  * validation rejects the retired `route.subworkflow` namespace.
  */
@@ -571,21 +559,20 @@ export const CODING_STEP_ROUTE_DEFAULT_LABEL = "(default)";
 
 /**
  * Render the effective per-step coding route selections as human-readable text
- * lines for an audit surface, parallel to the run-level `Profile:` line the coding
- * plan preview already prints. Pure and byte-stable: a header line followed by
+ * lines for an audit surface. Pure and byte-stable: a header line followed by
  * every configurable step in {@link CONFIGURABLE_CODING_STEP_KEYS} order, each
  * field in {@link CODING_STEP_ROUTE_FIELDS} order showing the effective value or
  * the {@link CODING_STEP_ROUTE_DEFAULT_LABEL} sentinel where no value was selected.
- * This is the text-mode counterpart to the JSON `route.steps` projection, so an
+ * This is the text-mode counterpart to the JSON step-level `agentConfig` read-back, so an
  * operator reading the default (non-JSON) preview can audit the effective
- * per-step selections and any `--steps-json` changes before approving execution. The command
+ * per-step selections and any `--agent-config-json` changes before approving execution. The command
  * layer calls this and hands the lines to the renderer (renderers accept computed
  * results rather than importing this projection).
  */
 export function formatCodingRouteStepSelectionLines(
   selections: CodingRouteStepSelections,
 ): string[] {
-  const lines = ["Per-step route:"];
+  const lines = ["Per-step agent config:"];
   for (const stepKey of CONFIGURABLE_CODING_STEP_KEYS) {
     const selection = selections[stepKey];
     const fields = CODING_STEP_ROUTE_FIELDS.map(

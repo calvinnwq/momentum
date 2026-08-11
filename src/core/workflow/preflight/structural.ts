@@ -66,7 +66,7 @@ export type StructuralPreflightEvidence = Record<
   severity: StructuralPreflightSeverity;
 };
 
-export type CodingWorkflowRouteStepsPreflightResult =
+export type CodingWorkflowAgentConfigPreflightResult =
   | {
       ok: true;
       overrides: CodingStepRouteOverrides;
@@ -77,19 +77,8 @@ export type CodingWorkflowRouteStepsPreflightResult =
       evidence: readonly [StructuralPreflightEvidence];
     };
 
-export type CodingWorkflowRouteStepsJsonPreflightResult =
-  CodingWorkflowRouteStepsPreflightResult;
-
-export type CodingWorkflowRouteProfilePreflightResult =
-  | {
-      ok: true;
-      profile: string;
-      evidence: readonly [StructuralPreflightEvidence];
-    }
-  | {
-      ok: false;
-      evidence: readonly [StructuralPreflightEvidence];
-    };
+export type CodingWorkflowAgentConfigJsonPreflightResult =
+  CodingWorkflowAgentConfigPreflightResult;
 
 export type CodingWorkflowWrapperConfigPreflightResult =
   | {
@@ -214,8 +203,8 @@ export function preflightWorkflowExecutorConfigs(
 
 const WORKFLOW_DEFINITION_CHECK_ID = "workflow.definition";
 const RUN_SHAPE_CHECK_ID = "workflow.run_shape";
-const ROUTE_STEPS_CHECK_ID = "route.steps";
-const ROUTE_PROFILE_CHECK_ID = "route.profile";
+const AGENT_CONFIG_CHECK_ID = "workflow.agent_config";
+const AGENT_CONFIG_EVIDENCE_PATH = "agentConfig";
 const WRAPPER_CONFIG_CHECK_ID = "wrapper.config";
 const WRAPPER_CONFIG_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set(["steps"]);
 const WRAPPER_CONFIG_STEP_KIND_SET: ReadonlySet<string> = new Set(
@@ -348,9 +337,9 @@ function validateCodingWorkflowIssueScopeIdentifier(
   };
 }
 
-export function preflightCodingWorkflowRouteSteps(
+export function preflightCodingWorkflowAgentConfig(
   value: unknown,
-): CodingWorkflowRouteStepsPreflightResult {
+): CodingWorkflowAgentConfigPreflightResult {
   const validated = validateCodingStepRouteOverrides(value);
   if (validated.ok) {
     return {
@@ -358,12 +347,12 @@ export function preflightCodingWorkflowRouteSteps(
       overrides: validated.overrides,
       evidence: [
         buildStructuralPreflightEvidence({
-          checkId: ROUTE_STEPS_CHECK_ID,
+          checkId: AGENT_CONFIG_CHECK_ID,
           status: "passed",
           severity: "info",
-          path: "route.steps",
-          key: CODING_ROUTE_STEPS_KEY,
-          message: "Coding route steps are structurally valid.",
+          path: AGENT_CONFIG_EVIDENCE_PATH,
+          key: AGENT_CONFIG_EVIDENCE_PATH,
+          message: "Coding per-step agent config is structurally valid.",
           recommendedAction: "No action required.",
         }),
       ],
@@ -374,11 +363,11 @@ export function preflightCodingWorkflowRouteSteps(
     ok: false,
     evidence: [
       buildStructuralPreflightEvidence({
-        checkId: ROUTE_STEPS_CHECK_ID,
+        checkId: AGENT_CONFIG_CHECK_ID,
         status: "failed",
         severity: "error",
-        path: normalizeRouteStepsPath(validated.path),
-        key: routeStepsEvidenceKey(validated.path),
+        path: normalizeAgentConfigEvidencePath(validated.path),
+        key: agentConfigEvidenceKey(validated.path),
         message: validated.reason,
         recommendedAction: recommendedActionForRouteStepsRefusal(
           validated.refusal,
@@ -388,9 +377,9 @@ export function preflightCodingWorkflowRouteSteps(
   };
 }
 
-export function preflightCodingWorkflowRouteStepsJson(
+export function preflightCodingWorkflowAgentConfigJson(
   value: string,
-): CodingWorkflowRouteStepsJsonPreflightResult {
+): CodingWorkflowAgentConfigJsonPreflightResult {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
@@ -399,59 +388,20 @@ export function preflightCodingWorkflowRouteStepsJson(
       ok: false,
       evidence: [
         buildStructuralPreflightEvidence({
-          checkId: ROUTE_STEPS_CHECK_ID,
+          checkId: AGENT_CONFIG_CHECK_ID,
           status: "failed",
           severity: "error",
-          path: "route.steps",
-          key: CODING_ROUTE_STEPS_KEY,
-          message: "Coding route steps must be valid JSON.",
+          path: AGENT_CONFIG_EVIDENCE_PATH,
+          key: AGENT_CONFIG_EVIDENCE_PATH,
+          message: "Coding per-step agent config must be valid JSON.",
           recommendedAction:
-            "Pass --steps-json as a JSON object keyed by configurable coding steps, or remove it to use the default route.",
+            "Pass --agent-config-json as a JSON object keyed by configurable coding steps, or remove it to use the definition defaults.",
         }),
       ],
     };
   }
 
-  return preflightCodingWorkflowRouteSteps(parsed);
-}
-
-export function preflightCodingWorkflowRouteProfile(
-  value: unknown,
-): CodingWorkflowRouteProfilePreflightResult {
-  if (typeof value === "string" && value.trim().length > 0) {
-    return {
-      ok: true,
-      profile: value.trim(),
-      evidence: [
-        buildStructuralPreflightEvidence({
-          checkId: ROUTE_PROFILE_CHECK_ID,
-          status: "passed",
-          severity: "info",
-          path: "route.profile",
-          key: "profile",
-          message: "Coding route profile is structurally valid.",
-          recommendedAction: "No action required.",
-        }),
-      ],
-    };
-  }
-
-  return {
-    ok: false,
-    evidence: [
-      buildStructuralPreflightEvidence({
-        checkId: ROUTE_PROFILE_CHECK_ID,
-        status: "failed",
-        severity: "error",
-        path: "route.profile",
-        key: "profile",
-        message:
-          "Coding route profile must be a non-empty string when provided.",
-        recommendedAction:
-          "Set route.profile to a non-empty runtime/profile name, or remove --profile to use the default route.",
-      }),
-    ],
-  };
+  return preflightCodingWorkflowAgentConfig(parsed);
 }
 
 export function preflightCodingWorkflowWrapperConfig(
@@ -882,15 +832,34 @@ function isNonBlankString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function normalizeRouteStepsPath(path: string | undefined): string {
-  if (path === undefined || path.length === 0) return "route.steps";
-  return `route.${path}`;
+/**
+ * The validator reports refusal paths under its internal `steps.*` namespace;
+ * evidence rewrites that prefix onto the operator-facing `agentConfig.*`
+ * namespace so diagnostics match the `--agent-config-json` input vocabulary.
+ */
+function normalizeAgentConfigEvidencePath(path: string | undefined): string {
+  if (path === undefined || path.length === 0) {
+    return AGENT_CONFIG_EVIDENCE_PATH;
+  }
+  if (path === CODING_ROUTE_STEPS_KEY) return AGENT_CONFIG_EVIDENCE_PATH;
+  if (path.startsWith(`${CODING_ROUTE_STEPS_KEY}.`)) {
+    return `${AGENT_CONFIG_EVIDENCE_PATH}${path.slice(
+      CODING_ROUTE_STEPS_KEY.length,
+    )}`;
+  }
+  return `${AGENT_CONFIG_EVIDENCE_PATH}.${path}`;
 }
 
-function routeStepsEvidenceKey(path: string | undefined): string {
-  if (path === undefined || path.length === 0) return CODING_ROUTE_STEPS_KEY;
+function agentConfigEvidenceKey(path: string | undefined): string {
+  if (path === undefined || path.length === 0) {
+    return AGENT_CONFIG_EVIDENCE_PATH;
+  }
   const parts = path.split(".").filter((part) => part.length > 0);
-  return parts[parts.length - 1] ?? CODING_ROUTE_STEPS_KEY;
+  const last = parts[parts.length - 1];
+  if (last === undefined || last === CODING_ROUTE_STEPS_KEY) {
+    return AGENT_CONFIG_EVIDENCE_PATH;
+  }
+  return last;
 }
 
 function recommendedActionForRouteStepsRefusal(
@@ -898,15 +867,15 @@ function recommendedActionForRouteStepsRefusal(
 ): string {
   switch (refusal) {
     case "step_unsupported":
-      return `Use route.steps only for ${formatSupportedCodingStepKeys()}, or remove the unsupported step key.`;
+      return `Use --agent-config-json only for ${formatSupportedCodingStepKeys()}, or remove the unsupported step key.`;
     case "field_unsupported":
-      return "Use only harness, model, and effort fields for each route.steps entry.";
+      return "Use only harness, model, and effort fields for each agent-config step entry.";
     case "step_config_invalid":
-      return "Set each route.steps entry to an object of harness, model, and effort fields.";
+      return "Set each agent-config step entry to an object of harness, model, and effort fields.";
     case "value_invalid":
-      return "Set each route.steps field value to a non-empty string.";
+      return "Set each agent-config field value to a non-empty string.";
     case "overrides_invalid":
-      return "Set route.steps to an object keyed by configurable coding workflow step.";
+      return "Set --agent-config-json to an object keyed by configurable coding workflow step.";
   }
 }
 

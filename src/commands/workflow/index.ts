@@ -133,21 +133,14 @@ import {
   type WorkflowRunStartInput,
 } from "../../core/workflow/run/start.js";
 import {
-  CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
-  CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE,
-  GNHF_IMPLEMENTATION_ENGINE,
-  NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
   formatCodingRouteStepSelectionLines,
-  isCodingImplementationEngine,
   resolveCodingRouteStepSelectionsFromDefinition,
   writeCodingStepRouteOverrides,
-  type CodingImplementationEngine,
   type CodingStepRouteOverrides,
 } from "../../core/workflow/route/coding.js";
 import {
+  preflightCodingWorkflowAgentConfigJson,
   preflightCodingWorkflowBuiltInDefinition,
-  preflightCodingWorkflowRouteProfile,
-  preflightCodingWorkflowRouteStepsJson,
   preflightCodingWorkflowRunStartInput,
   preflightWorkflowExecutorConfigs,
   type StructuralPreflightEvidence,
@@ -245,9 +238,7 @@ type ParsedFlags = {
   objective?: string;
   runId?: string;
   skillRevision?: string;
-  implementationEngine?: string;
-  profile?: string;
-  stepsJson?: string;
+  agentConfigJson?: string;
   error?: string;
 };
 
@@ -480,20 +471,19 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): Promise<number> {
  *   - it records the run with the {@link MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE}
  *     provenance so status / handoff / monitor / logs surface it as
  *     Momentum-owned;
- *   - it builds the historical coding implementation label exposed as
- *     `route.implementationEngine`, defaulting to the honest `gnhf` label while
- *     retaining persisted `native-goal-loop` compatibility and
- *     preserving `current-gnhf-cwfp` as an explicit compatibility selection;
- *   - it accepts the coding-only `--steps-json` route override and builds
+ *   - it writes the required coding-compatibility marker row with no historical
+ *     labels (labels recorded by earlier releases stay readable under
+ *     `run.compatibility.coding`);
+ *   - it accepts the coding-only `--agent-config-json` selection and builds
  *     validated per-step harness/model/effort overrides whose effective merged
  *     selections are normalized and frozen by canonical persistence, exposed
- *     through the compatibility `route.steps` projection, with provider-aware
+ *     through the step-level `agentConfig` read-back, with provider-aware
  *     model aliases normalized before persistence; and
- *   - it runs structural preflight for built-in definition lookup, route
- *     profile, route steps, and run-start shape before any durable write.
+ *   - it runs structural preflight for built-in definition lookup, per-step
+ *     agent config, and run-start shape before any durable write.
  *
- * The ordinary `workflow run start` path shares the structural route-profile and
- * run-shape checks, while imported CWFP read/compat paths are left as they were.
+ * The ordinary `workflow run start` path shares the structural run-shape
+ * checks, while imported CWFP read/compat paths are left as they were.
  */
 function workflowRunStartCoding(
   parsed: ParsedFlags,
@@ -512,10 +502,9 @@ function workflowRunStartCoding(
  * instead of persisting a run it materializes a frozen
  * {@link materializeWorkflowCodingPlanPreview} projection and emits it so an
  * operator can inspect the proposed run - run id, repo, objective, issue scope,
- * approval boundary, compatibility route/profile and implementation label, and per-step route
- * selections, definition key/version, and every step with its executor identity,
- * optional portable config, and effective agent config - before approving or
- * executing it. The preview is a pure projection of the version-pinned built-in
+ * approval boundary, definition key/version, and every step with its executor
+ * identity, optional portable config, and effective agent config - before
+ * approving or executing it. The preview is a pure projection of the version-pinned built-in
  * definition plus inputs, so the durable run a later `start-coding` persists
  * matches it exactly.
  */
@@ -543,8 +532,8 @@ type WorkflowStartCommandOptions = {
  * the coding preconditions but returns a read-only plan before the durable
  * persistence point. The `coding` option toggles the coding-specific guards
  * (forced definition, reserved-run-id refusal, native source provenance,
- * implementation-engine route selection, `--steps-json` support) while `preview`
- * keeps the materialized plan on the read-only path.
+ * `--agent-config-json` support) while `preview` keeps the materialized plan on
+ * the read-only path.
  */
 function buildCodingRequiredInputPreflightEvidence(
   parsed: ParsedFlags,
@@ -569,6 +558,32 @@ function buildCodingRequiredInputPreflightEvidence(
   );
 }
 
+/**
+ * Retired run-start flags refuse with a targeted usage diagnostic before any
+ * durable write or process launch. There are no aliases and no fallback: the
+ * per-step selection moved to `--agent-config-json`, while the operator
+ * profile and implementation-engine compatibility inputs have no current
+ * replacement (machine-local executable selection is owned by
+ * `MOMENTUM_HOST_BINDINGS_FILE`; the recorded definition version and
+ * step-owned agent config select what runs).
+ */
+const RETIRED_RUN_START_FLAG_DIAGNOSTICS: ReadonlyMap<string, string> = new Map(
+  [
+    [
+      "--steps-json",
+      "--steps-json was replaced by --agent-config-json; pass the same per-step JSON object to --agent-config-json.",
+    ],
+    [
+      "--profile",
+      "--profile was removed; Momentum records no operator route profile. Machine-local executable selection is owned by MOMENTUM_HOST_BINDINGS_FILE.",
+    ],
+    [
+      "--implementation-engine",
+      "--implementation-engine was removed; the recorded definition key/version and step-owned agent config select what runs.",
+    ],
+  ],
+);
+
 async function runWorkflowStartCommand(
   parsed: ParsedFlags,
   io: CliIo,
@@ -577,8 +592,12 @@ async function runWorkflowStartCommand(
   const { command } = options;
   const positional = parsed.args.slice(3);
   if (positional.length > 0) {
+    const retiredDiagnostic = RETIRED_RUN_START_FLAG_DIAGNOSTICS.get(
+      positional[0] ?? "",
+    );
     return usageError(
-      `Unexpected argument for ${command}: ${positional[0]}`,
+      retiredDiagnostic ??
+        `Unexpected argument for ${command}: ${positional[0]}`,
       parsed,
       io,
     );
@@ -647,80 +666,36 @@ async function runWorkflowStartCommand(
     });
   }
 
-  let implementationEngine: CodingImplementationEngine =
-    GNHF_IMPLEMENTATION_ENGINE;
-  if (parsed.implementationEngine !== undefined) {
-    if (!options.coding) {
-      return emitWorkflowRunStartFailure(parsed, io, {
-        command,
-        code: "route_config_not_allowed",
-        message: `--implementation-engine is only supported on the coding doors (\`workflow run start-coding\` / \`workflow run preview-coding\`); the generic \`workflow run start\` does not accept coding implementation engine routes.`,
-        runId,
-      });
-    }
-    const normalizedEngine = parsed.implementationEngine.trim();
-    if (!isCodingImplementationEngine(normalizedEngine)) {
-      return emitWorkflowRunStartFailure(parsed, io, {
-        command,
-        code: "route_config_invalid",
-        message: `--implementation-engine must be one of: ${[
-          GNHF_IMPLEMENTATION_ENGINE,
-          NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
-          CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE,
-        ].join(", ")}.`,
-        runId,
-      });
-    }
-    implementationEngine = normalizedEngine;
-  }
-
-  // Native per-step coding route reconfiguration: an operator can adjust
-  // the planned harness/model/effort selections per step before kickoff via
-  // --steps-json. The validated, normalized overrides, including provider-aware
-  // model alias rewrites for known harness mappings, are handed to canonical
-  // persistence and exposed through route.steps so status/handoff/logs can audit
-  // the effective selection; native execution reads the frozen step row (or
-  // fails closed). The per-step namespace is coding-door specific,
-  // so the generic `workflow run start` refuses it rather than silently dropping
-  // a coding-only selection; a malformed or unsupported selection fails closed
+  // Native per-step coding agent-config selection: an operator can adjust the
+  // planned harness/model/effort selections per step before kickoff via
+  // --agent-config-json. The validated, normalized overrides, including
+  // provider-aware model alias rewrites for known harness mappings, are handed
+  // to canonical persistence and frozen into the matching
+  // `workflow_steps.agent_config_json` rows, exposed through the step-level
+  // `agentConfig` read-back; native execution reads the frozen step row (or
+  // fails closed). The per-step selection is coding-door specific, so the
+  // generic `workflow run start` refuses it rather than silently dropping a
+  // coding-only selection; a malformed or unsupported selection fails closed
   // before any durable write.
-  let routeProfile: string | undefined;
-  if (parsed.profile !== undefined) {
-    const structuralPreflight = preflightCodingWorkflowRouteProfile(
-      parsed.profile,
-    );
-    if (!structuralPreflight.ok) {
-      const failedCheck = structuralPreflight.evidence[0];
-      return emitWorkflowRunStartFailure(parsed, io, {
-        command,
-        code: "route_config_invalid",
-        message: `--profile is invalid (${failedCheck.path}): ${failedCheck.message}`,
-        runId,
-        preflightEvidence: structuralPreflight.evidence,
-      });
-    }
-    routeProfile = structuralPreflight.profile;
-  }
-
   let stepRouteOverrides: CodingStepRouteOverrides = {};
-  if (parsed.stepsJson !== undefined) {
+  if (parsed.agentConfigJson !== undefined) {
     if (!options.coding) {
       return emitWorkflowRunStartFailure(parsed, io, {
         command,
         code: "route_config_not_allowed",
-        message: `--steps-json is only supported on the coding doors (\`workflow run start-coding\` / \`workflow run preview-coding\`); the generic \`workflow run start\` does not accept per-step coding route overrides.`,
+        message: `--agent-config-json is only supported on the coding doors (\`workflow run start-coding\` / \`workflow run preview-coding\`); the generic \`workflow run start\` does not accept per-step coding agent config.`,
         runId,
       });
     }
-    const structuralPreflight = preflightCodingWorkflowRouteStepsJson(
-      parsed.stepsJson,
+    const structuralPreflight = preflightCodingWorkflowAgentConfigJson(
+      parsed.agentConfigJson,
     );
     if (!structuralPreflight.ok) {
       const failedCheck = structuralPreflight.evidence[0];
       return emitWorkflowRunStartFailure(parsed, io, {
         command,
         code: "route_config_invalid",
-        message: `--steps-json is invalid (${failedCheck.path}): ${failedCheck.message}`,
+        message: `--agent-config-json is invalid (${failedCheck.path}): ${failedCheck.message}`,
         runId,
         preflightEvidence: structuralPreflight.evidence,
       });
@@ -845,8 +820,6 @@ async function runWorkflowStartCommand(
       coding: options.coding,
       parsed,
       stepRouteOverrides,
-      routeProfile,
-      implementationEngine,
     });
     const structuralPreflight = preflightCodingWorkflowRunStartInput(input);
     if (!structuralPreflight.ok) {
@@ -985,8 +958,6 @@ async function runWorkflowStartCommand(
         coding: options.coding,
         parsed,
         stepRouteOverrides,
-        routeProfile,
-        implementationEngine,
       });
 
     if (!options.coding) {
@@ -1108,8 +1079,6 @@ function buildWorkflowRunStartInput(args: {
   coding: boolean;
   parsed: ParsedFlags;
   stepRouteOverrides: CodingStepRouteOverrides;
-  routeProfile: string | undefined;
-  implementationEngine: CodingImplementationEngine;
 }): WorkflowRunStartInput {
   const {
     definition,
@@ -1120,8 +1089,6 @@ function buildWorkflowRunStartInput(args: {
     coding,
     parsed,
     stepRouteOverrides,
-    routeProfile,
-    implementationEngine,
   } = args;
   const input: WorkflowRunStartInput = {
     definition,
@@ -1142,21 +1109,11 @@ function buildWorkflowRunStartInput(args: {
   if (parsed.issueScope !== undefined) {
     input.issueScope = { identifier: parsed.issueScope };
   }
-  // Compose the compatibility input from the historical implementation label
-  // (route.implementationEngine), operator profile (route.profile), and
-  // validated per-step overrides (route.steps). Canonical persistence owns the
-  // destination rows; the engine marker is still built for native coding starts
-  // even when profile and per-step overrides are omitted, so read-back can
-  // preserve the operator's compatibility evidence without making it executor
-  // authority.
-  let route: Record<string, unknown> = {};
-  if (coding) {
-    route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY] = implementationEngine;
-  }
-  if (routeProfile !== undefined) {
-    route.profile = routeProfile;
-  }
-  route = writeCodingStepRouteOverrides(route, stepRouteOverrides);
+  // The only remaining start-input namespace is the validated per-step agent
+  // config; canonical persistence freezes it into the matching
+  // `workflow_steps.agent_config_json` rows. Native coding starts still write
+  // the required compatibility marker row with no historical labels.
+  const route = writeCodingStepRouteOverrides({}, stepRouteOverrides);
   if (Object.keys(route).length > 0) {
     input.route = route;
   }

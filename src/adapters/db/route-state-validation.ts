@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import {
   LEGACY_ROUTE_TOP_LEVEL_KEYS,
   LEGACY_WORKFLOW_STEP_KIND_ALIASES,
-} from "./route-projection.js";
+} from "./legacy-route-migration.js";
 import { RouteStateMigrationError } from "./route-state-errors.js";
 
 const IMPLEMENTATION_ENGINES = new Set([

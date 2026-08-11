@@ -16,7 +16,7 @@ import {
   LEGACY_WORKFLOW_STEP_KIND_ALIASES,
   projectLegacyWorkflowRunRoutes,
   projectLegacyWorkflowRunRoute,
-} from "../src/adapters/db/route-projection.js";
+} from "../src/adapters/db/legacy-route-migration.js";
 import {
   assertWorkflowRouteStatePlanCurrent,
   auditCanonicalRouteState,
@@ -323,11 +323,8 @@ describe("workflow route-state migration", () => {
           )
           .get(),
       ).toEqual({ implementation_engine: "gnhf" });
-      expect(
-        db
-          .prepare("SELECT route_json FROM workflow_runs WHERE id = ?")
-          .get("native-simple"),
-      ).toEqual({ route_json: "{}" });
+      // The rebuild removes the emptied compatibility column entirely.
+      expect(columnNames(db, "workflow_runs")).not.toContain("route_json");
     } finally {
       db.close();
     }
@@ -504,13 +501,8 @@ describe("workflow route-state migration", () => {
           },
         },
       ]);
-      expect(
-        db
-          .prepare(
-            "SELECT DISTINCT route_json FROM workflow_runs ORDER BY route_json",
-          )
-          .all(),
-      ).toEqual([{ route_json: "{}" }]);
+      // The transactional rebuild leaves no route_json column behind.
+      expect(columnNames(db, "workflow_runs")).not.toContain("route_json");
       expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     } finally {
       db.close();
@@ -748,19 +740,25 @@ describe("workflow route-state migration", () => {
         );
       }
       const nativeFullDetail = loadWorkflowRunDetail(db, "native-full");
-      expect(nativeFullDetail?.run.route).toEqual(
-        stripCanonicalOnlyNamespaces(legacy.get("native-full")?.route ?? {}),
-      );
-      // Historical engine read-back survives the retired projection keys
-      // through the direct canonical compatibility reader.
-      expect(nativeFullDetail?.run.implementationEngine).toBe(
-        "native-goal-loop",
-      );
+      // The run shape carries no route object; historical labels read back
+      // under compatibility.coding from the canonical marker row, and the
+      // migrated step selection reads back per step.
+      expect(nativeFullDetail?.run).not.toHaveProperty("route");
+      expect(nativeFullDetail?.run.compatibility).toEqual({
+        coding: {
+          implementationEngine: "native-goal-loop",
+          selectedProfile: "fixture-native",
+        },
+      });
       const importedSummary = listWorkflowRunSummaries(db).find(
         (summary) => summary.run.runId === "cwfp-imported",
       );
-      expect(importedSummary?.run.route).toEqual({});
-      expect(importedSummary?.run.implementationEngine).toBeNull();
+      expect(importedSummary?.run).not.toHaveProperty("route");
+      expect(importedSummary?.run.compatibility).toBeNull();
+      expect(importedSummary?.run.importMetadata).toMatchObject({
+        mode: "implementation",
+        profile: "fixture-import",
+      });
       expect(
         resolveWorkflowStepDispatchRouteSelection(db, {
           runId: "native-full",
@@ -926,8 +924,11 @@ describe("workflow route-state migration", () => {
     expect(db).toBeDefined();
     try {
       const detail = loadWorkflowRunDetail(db!, "native-simple");
-      expect(detail?.run.route).toEqual({});
-      expect(detail?.run.implementationEngine).toBe("gnhf");
+      expect(detail?.run).not.toHaveProperty("route");
+      expect(detail?.run.compatibility).toEqual({
+        coding: { implementationEngine: "gnhf", selectedProfile: null },
+      });
+      expect(columnNames(db!, "workflow_runs")).not.toContain("route_json");
     } finally {
       db?.close();
     }
@@ -950,8 +951,13 @@ describe("workflow route-state migration", () => {
       expect(snapshot).toBeDefined();
       try {
         const detail = loadWorkflowRunDetail(snapshot!, "native-simple");
-        expect(detail?.run.route).toEqual({});
-        expect(detail?.run.implementationEngine).toBe("gnhf");
+        expect(detail?.run).not.toHaveProperty("route");
+        expect(detail?.run.compatibility).toEqual({
+          coding: { implementationEngine: "gnhf", selectedProfile: null },
+        });
+        expect(columnNames(snapshot!, "workflow_runs")).not.toContain(
+          "route_json",
+        );
       } finally {
         snapshot?.close();
       }
@@ -1678,7 +1684,7 @@ describe("workflow route-state migration", () => {
     }
   });
 
-  it("refuses invalid canonical agent config when serving a read-only compatibility route", () => {
+  it("refuses invalid canonical agent config on read-only detail read-back", () => {
     const dataDir = seedReleasedFixture();
     openDb(dataDir).close();
     withRawDb(dataDir, (db) => {
@@ -1693,7 +1699,7 @@ describe("workflow route-state migration", () => {
       expect(() => loadWorkflowRunDetail(db, "native-full")).toThrowError(
         expect.objectContaining({
           runId: "native-full",
-          jsonPath: "$.steps.implementation.model",
+          jsonPath: "$.steps.implementation.agentConfig",
           code: "route_state_value_invalid",
         }),
       );
@@ -1865,16 +1871,16 @@ describe("workflow route-state migration", () => {
     withRawDb(dataDir, (db) => {
       db.prepare(
         `INSERT INTO workflow_runs
-           (id, state, source, plan_json, route_json,
+           (id, state, source, plan_json,
             needs_manual_recovery, created_at, updated_at)
-         VALUES (?, 'running', 'agent-workflow', '{}', '{}', 0, 1, 1)`,
+         VALUES (?, 'running', 'agent-workflow', '{}', 0, 1, 1)`,
       ).run("generic-agent-workflow");
     });
     const db = openDb(dataDir);
     try {
       expect(
-        loadWorkflowRunDetail(db, "generic-agent-workflow")?.run.route,
-      ).toEqual({});
+        loadWorkflowRunDetail(db, "generic-agent-workflow")?.run.importMetadata,
+      ).toBeNull();
       expect(
         db
           .prepare(

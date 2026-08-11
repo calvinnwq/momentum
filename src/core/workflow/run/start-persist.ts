@@ -6,7 +6,7 @@
  * resulting `WorkflowRun` + `StepRun` plan into the durable `workflow_runs` /
  * `workflow_steps` tables, with a `workflow_approvals` row when the start has an
  * approval boundary, and persists route state through the adapter-owned canonical
- * destinations while leaving `workflow_runs.route_json` empty.
+ * destinations; `workflow_runs` carries no route column at all.
  * This is the storage twin of the pure materializer:
  * nothing here runs executors, schedules work, or starts a Goal loop. Scheduling
  * is owned separately by `dispatch/scheduler.ts`; the native agent-loop,
@@ -45,7 +45,6 @@ import {
   writeCanonicalWorkflowRunRouteState,
 } from "../../../adapters/db/route-state.js";
 import {
-  CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
   readCodingStepRouteOverrides,
   resolveCodingStepAgentConfigs,
 } from "../route/coding.js";
@@ -100,8 +99,6 @@ export type PersistWorkflowRunStartSummary = {
   approvalBoundary: WorkflowApprovalBoundary | null;
   definitionKey: string;
   definitionVersion: number;
-  route: Record<string, unknown>;
-  implementationEngine: string | null;
   stepCount: number;
   inserted: boolean;
 };
@@ -205,11 +202,11 @@ export function persistWorkflowRunStart(
     db.prepare(
       `INSERT INTO workflow_runs (
          id, state, source, plan_json,
-         repo_path, objective, issue_scope_json, route_json,
+         repo_path, objective, issue_scope_json,
          approval_boundary, skill_revision,
          workflow_definition_key, workflow_definition_version,
          started_at, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       run.runId,
       run.state,
@@ -218,7 +215,6 @@ export function persistWorkflowRunStart(
       run.repoPath,
       run.objective,
       JSON.stringify(run.issueScope),
-      "{}",
       run.approvalBoundary,
       run.skillRevision,
       run.definitionKey,
@@ -313,8 +309,6 @@ export function persistWorkflowRunStart(
     approvalBoundary: run.approvalBoundary,
     definitionKey: run.definitionKey,
     definitionVersion: run.definitionVersion,
-    route: run.route,
-    implementationEngine: readImplementationEngine(run.route),
     stepCount: steps.length,
     inserted: true,
   };
@@ -339,16 +333,6 @@ function invalidStartFromRouteStateError(error: unknown): unknown {
       path: error.jsonPath,
     },
   ]);
-}
-
-function readImplementationEngine(
-  route: Record<string, unknown>,
-): string | null {
-  const value = route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY];
-  if (typeof value === "string" && value.trim().length > 0) {
-    return value;
-  }
-  return null;
 }
 
 function safeRollback(db: MomentumDb): void {

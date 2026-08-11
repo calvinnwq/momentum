@@ -10,6 +10,7 @@ import {
   workflowRunImportMetadataSchemaMigrationNeeded,
   type WorkflowRouteStatePlan,
 } from "./route-state.js";
+import { RouteStateMigrationError } from "./route-state-errors.js";
 
 type MomentumDb = DatabaseSync;
 
@@ -57,7 +58,6 @@ const WORKFLOW_RUN_IDENTITY_COLUMNS: ColumnSpec[] = [
   { name: "repo_path", type: "TEXT" },
   { name: "objective", type: "TEXT" },
   { name: "issue_scope_json", type: "TEXT NOT NULL DEFAULT '{}'" },
-  { name: "route_json", type: "TEXT NOT NULL DEFAULT '{}'" },
   { name: "approval_boundary", type: "TEXT" },
   { name: "skill_revision", type: "TEXT" },
 ];
@@ -369,7 +369,6 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   repo_path TEXT,
   objective TEXT,
   issue_scope_json TEXT NOT NULL DEFAULT '{}',
-  route_json TEXT NOT NULL DEFAULT '{}',
   approval_boundary TEXT,
   skill_revision TEXT,
   workflow_definition_key TEXT,
@@ -2285,6 +2284,185 @@ export function applyQueueMigrations(
   // before the vocabulary rename inspects and rewrites rows.
   migratePartialLegacyExecutorInvocationSchema(db, options);
   migrateWorkflowVocabulary(db, options, routeStatePlan);
+  // Final NAM-03 closeout: once every durable route value lives in its explicit
+  // canonical destination, the emptied compatibility column is removed by a
+  // transactional table rebuild.
+  rebuildWorkflowRunsDropRouteJson(db);
+}
+
+/**
+ * Whether the durable `workflow_runs` table still carries the retired
+ * `route_json` compatibility column. Exported so read-only opens can route a
+ * pre-rebuild database through the full migration chain. Intentionally
+ * partial historical databases (missing the workflow base tables the
+ * route-state migration requires) are excluded: they cannot complete the
+ * NAM-03 sequence, so a read-only open must keep serving them unchanged
+ * rather than forcing a full migration that their partial schema cannot
+ * satisfy.
+ */
+export function workflowRunsRouteColumnRebuildNeeded(db: MomentumDb): boolean {
+  return (
+    columnExists(db, "workflow_runs", "route_json") &&
+    tableExists(db, "workflow_steps") &&
+    tableExists(db, "step_definitions")
+  );
+}
+
+/**
+ * The full current `workflow_runs` column set, in fresh-DDL order. The rebuild
+ * fails closed if the live table diverges from this contract (beyond the
+ * retired `route_json` column) so an unexpected schema is never silently
+ * truncated.
+ */
+const WORKFLOW_RUNS_REBUILD_COLUMNS = [
+  "id",
+  "state",
+  "goal_id",
+  "source",
+  "source_artifact_path",
+  "plan_json",
+  "repo_path",
+  "objective",
+  "issue_scope_json",
+  "approval_boundary",
+  "skill_revision",
+  "workflow_definition_key",
+  "workflow_definition_version",
+  "monitor_last_seen_state",
+  "monitor_terminal",
+  "monitor_step",
+  "monitor_last_seen_digest",
+  "monitor_last_emitted_digest",
+  "monitor_last_seen_at",
+  "monitor_last_emitted_at",
+  "batch_group",
+  "batch_role",
+  "needs_manual_recovery",
+  "manual_recovery_reason",
+  "manual_recovery_at",
+  "started_at",
+  "finished_at",
+  "created_at",
+  "updated_at",
+] as const;
+
+/**
+ * Transactionally rebuild `workflow_runs` without the retired `route_json`
+ * column. Runs only after the route-state migration has moved every legacy
+ * value to its canonical destination and cleared the column to `'{}'`; a
+ * non-empty leftover value, an unexpected column set, a row-count mismatch, or
+ * a foreign-key violation rolls the rebuild back and leaves the pre-rebuild
+ * database intact. Follows the executor-rebuild precedent: foreign keys are
+ * disabled outside the transaction (SQLite requires that), the copy/drop/rename
+ * happens inside `BEGIN IMMEDIATE`, and a full `PRAGMA foreign_key_check` must
+ * be empty before commit.
+ */
+function rebuildWorkflowRunsDropRouteJson(db: MomentumDb): void {
+  if (!tableExists(db, "workflow_runs")) return;
+  if (!columnExists(db, "workflow_runs", "route_json")) return;
+
+  const liveColumns = (
+    db.prepare("PRAGMA table_info(workflow_runs)").all() as PragmaColumnRow[]
+  ).map((row) => row.name);
+  const expected = new Set<string>(WORKFLOW_RUNS_REBUILD_COLUMNS);
+  // Columns outside the fresh contract would be silently truncated by the
+  // rebuild, so an unknown column fails closed. Missing optional columns are
+  // legitimate for old partial databases: the copy uses the intersection and
+  // the fresh DDL's defaults fill the rest (the base-schema contract already
+  // guarantees the NOT NULL columns without defaults exist).
+  const unexpected = liveColumns.filter(
+    (name) => name !== "route_json" && !expected.has(name),
+  );
+  if (unexpected.length > 0) {
+    throw new RouteStateMigrationError({
+      runId: "<schema>",
+      jsonPath: "$schema.workflow_runs",
+      code: "route_state_schema_partial",
+      detail: `workflow_runs rebuild refused: unexpected columns [${unexpected.join(", ")}]`,
+    });
+  }
+  const copyColumns = WORKFLOW_RUNS_REBUILD_COLUMNS.filter((name) =>
+    liveColumns.includes(name),
+  );
+
+  const leftover = db
+    .prepare(
+      `SELECT id FROM workflow_runs
+        WHERE route_json IS NOT NULL AND route_json <> '{}'
+        ORDER BY id LIMIT 1`,
+    )
+    .get() as { id: string } | undefined;
+  if (leftover !== undefined) {
+    throw new RouteStateMigrationError({
+      runId: leftover.id,
+      jsonPath: "$.route_json",
+      code: "route_state_canonical_conflict",
+      detail:
+        "workflow_runs rebuild refused: legacy route state was not cleared by the canonical migration",
+    });
+  }
+
+  const columnList = copyColumns.join(", ");
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(
+        WORKFLOW_RUNS_DDL.replace(
+          "CREATE TABLE IF NOT EXISTS workflow_runs (",
+          "CREATE TABLE workflow_runs_next (",
+        )
+          // Only the table itself is rebuilt here; its indexes are recreated
+          // against the renamed table below.
+          .split("CREATE INDEX")[0]!,
+      );
+      db.exec(
+        `INSERT INTO workflow_runs_next (${columnList})
+           SELECT ${columnList} FROM workflow_runs`,
+      );
+      const sourceCount = (
+        db.prepare("SELECT COUNT(*) AS n FROM workflow_runs").get() as {
+          n: number;
+        }
+      ).n;
+      const copiedCount = (
+        db.prepare("SELECT COUNT(*) AS n FROM workflow_runs_next").get() as {
+          n: number;
+        }
+      ).n;
+      if (sourceCount !== copiedCount) {
+        throw new RouteStateMigrationError({
+          runId: "<schema>",
+          jsonPath: "$schema.workflow_runs",
+          code: "route_state_canonical_conflict",
+          detail: `workflow_runs rebuild copied ${copiedCount} of ${sourceCount} rows`,
+        });
+      }
+      db.exec("DROP TABLE workflow_runs");
+      db.exec("ALTER TABLE workflow_runs_next RENAME TO workflow_runs");
+      db.exec(WORKFLOW_RUNS_DDL);
+      db.exec(WORKFLOW_RUNS_IDENTITY_INDEX_DDL);
+      const fkViolations = db.prepare("PRAGMA foreign_key_check").all();
+      if (fkViolations.length > 0) {
+        throw new RouteStateMigrationError({
+          runId: "<schema>",
+          jsonPath: "$schema.workflow_runs",
+          code: "route_state_foreign_key_invalid",
+          detail: `workflow_runs rebuild left ${fkViolations.length} foreign-key violations`,
+        });
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        // Not in a transaction; nothing to roll back.
+      }
+      throw error;
+    }
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
 }
 
 type PragmaColumnRow = { name: string };

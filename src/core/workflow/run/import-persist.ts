@@ -5,7 +5,7 @@
  * `parseWorkflowRunImport` and writes it into the durable
  * `workflow_runs` / `workflow_steps` / `workflow_approvals` tables pinned by
  * SPEC.md, while persisting imported route state through the adapter-owned
- * canonical destinations and leaving `workflow_runs.route_json` empty.
+ * canonical destinations; `workflow_runs` carries no route column at all.
  *
  * Stable contracts this slice locks in:
  *   - Upsert is keyed on the durable identity: `workflow_runs.id = runId`,
@@ -166,12 +166,12 @@ export function persistWorkflowRunImport(
     db.prepare(
       `INSERT INTO workflow_runs (
          id, state, source, source_artifact_path, plan_json,
-         repo_path, objective, issue_scope_json, route_json,
+         repo_path, objective, issue_scope_json,
          approval_boundary, skill_revision,
          monitor_last_seen_state, monitor_terminal, monitor_step,
          monitor_last_seen_digest, monitor_last_emitted_digest,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          state = excluded.state,
          source = excluded.source,
@@ -180,7 +180,6 @@ export function persistWorkflowRunImport(
          repo_path = excluded.repo_path,
          objective = excluded.objective,
          issue_scope_json = excluded.issue_scope_json,
-         route_json = excluded.route_json,
          workflow_definition_key = NULL,
          workflow_definition_version = NULL,
          approval_boundary = excluded.approval_boundary,
@@ -200,7 +199,6 @@ export function persistWorkflowRunImport(
       run.repoPath,
       run.objective,
       JSON.stringify(run.issueScope),
-      "{}",
       approvalBoundary,
       run.skillRevision,
       monitor?.runState ?? null,

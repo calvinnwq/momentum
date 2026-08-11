@@ -17,15 +17,17 @@
  * surfacing.
  */
 import type { MomentumDb } from "../../../adapters/db.js";
+import { RouteStateMigrationError } from "../../../adapters/db/route-state-errors.js";
 import {
-  projectValidatedLegacyWorkflowRunRoute,
-  projectValidatedLegacyWorkflowRunRoutes,
   readWorkflowRunCodingCompatibilities,
   readWorkflowRunCodingCompatibility,
   readWorkflowRunImportMetadata,
   readWorkflowRunImportMetadataForRuns,
+  readWorkflowRunLineage,
+  readWorkflowRunLineages,
   type WorkflowRunCodingCompatibilityReadback,
   type WorkflowRunImportMetadataReadback,
+  type WorkflowRunLineageReadback,
 } from "../../../adapters/db/route-state.js";
 import {
   listWorkflowGatesForRun,
@@ -71,20 +73,24 @@ export type WorkflowRunRow = {
   repoPath: string | null;
   objective: string | null;
   issueScope: Record<string, unknown>;
-  route: Record<string, unknown>;
   /**
-   * Historical implementation-engine label read directly from the canonical
+   * Subworkflow child ancestry read directly from the canonical
+   * `workflow_run_lineage` row — the run's parent, dispatching step, nesting
+   * depth, and root-first ancestry. `null` for root runs.
+   */
+  lineage: WorkflowRunLineageReadback | null;
+  /**
+   * Historical coding compatibility labels read directly from the canonical
    * `workflow_run_coding_compatibility` row — read-back only, never execution
-   * authority. `null` when no marker row or label exists.
+   * authority. `null` when the marker row records no historical labels (all
+   * fresh native runs) or no marker row exists.
    */
-  implementationEngine: string | null;
-  /**
-   * Historical selected profile read directly from the canonical
-   * `workflow_run_coding_compatibility` row — read-back only; it never
-   * influences host-binding or command selection. `null` when no marker row
-   * or profile exists.
-   */
-  selectedProfile: string | null;
+  compatibility: {
+    coding: {
+      implementationEngine: string | null;
+      selectedProfile: string | null;
+    };
+  } | null;
   /**
    * Imported audit metadata read directly from the canonical
    * `workflow_run_import_metadata` row — historical metadata only; it never
@@ -285,25 +291,17 @@ export function listWorkflowRunSummaries(
     query += ` LIMIT ${Math.floor(options.limit)}`;
   }
   const rows = db.prepare(query).all(...params) as RunRow[];
-  const projectedRoutes = projectValidatedLegacyWorkflowRunRoutes(
-    db,
-    rows.map((row) => ({
-      runId: row.id,
-      source: row.source,
-      definitionKey: row.workflow_definition_key,
-      definitionVersion: row.workflow_definition_version,
-    })),
-  );
   const runIds = rows.map((row) => row.id);
   const compatibilities = readWorkflowRunCodingCompatibilities(db, runIds);
   const importMetadataByRunId = readWorkflowRunImportMetadataForRuns(
     db,
     runIds,
   );
+  const lineagesByRunId = readWorkflowRunLineages(db, runIds);
   const runs = rows.map((row) =>
     parseRunRow(
       row,
-      projectedRoutes.get(row.id)!,
+      lineagesByRunId.get(row.id) ?? null,
       compatibilities.get(row.id),
       importMetadataByRunId.get(row.id) ?? null,
     ),
@@ -359,11 +357,7 @@ export function loadWorkflowRunDetail(
   if (!runRow) return null;
   const run = parseRunRow(
     runRow,
-    projectValidatedLegacyWorkflowRunRoute(db, runRow.id, {
-      source: runRow.source,
-      definitionKey: runRow.workflow_definition_key,
-      definitionVersion: runRow.workflow_definition_version,
-    }),
+    readWorkflowRunLineage(db, runRow.id) ?? null,
     readWorkflowRunCodingCompatibility(db, runRow.id),
     readWorkflowRunImportMetadata(db, runRow.id) ?? null,
   );
@@ -540,7 +534,6 @@ type RunRow = {
   repo_path: string | null;
   objective: string | null;
   issue_scope_json: string;
-  route_json: string;
   workflow_definition_key: string | null;
   workflow_definition_version: number | null;
   approval_boundary: string | null;
@@ -608,12 +601,64 @@ type LeaseRow = {
   updated_at: number;
 };
 
+/**
+ * The canonical marker rows keep their fail-closed read-back semantics after
+ * the route compatibility projection's removal: a native coding run without
+ * its compatibility marker, or an imported run with a source artifact but no
+ * import-metadata row, refuses rather than silently reading as unmarked.
+ */
+function assertCanonicalMarkersPresent(
+  row: RunRow,
+  compatibility: WorkflowRunCodingCompatibilityReadback | undefined,
+  importMetadata: WorkflowRunImportMetadataReadback | null,
+): void {
+  if (
+    row.source === MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE &&
+    compatibility === undefined
+  ) {
+    throw new RouteStateMigrationError({
+      runId: row.id,
+      jsonPath: "$canonical.workflow_run_coding_compatibility",
+      code: "route_state_canonical_conflict",
+      detail: "native coding run is missing its compatibility marker row",
+    });
+  }
+  if (
+    row.source === "agent-workflow" &&
+    row.source_artifact_path !== null &&
+    importMetadata === null
+  ) {
+    throw new RouteStateMigrationError({
+      runId: row.id,
+      jsonPath: "$canonical.workflow_run_import_metadata",
+      code: "route_state_canonical_conflict",
+      detail: "imported run is missing its canonical metadata marker row",
+    });
+  }
+}
+
 function parseRunRow(
   row: RunRow,
-  projectedRoute: Record<string, unknown>,
+  lineage: WorkflowRunLineageReadback | null,
   compatibility: WorkflowRunCodingCompatibilityReadback | undefined,
   importMetadata: WorkflowRunImportMetadataReadback | null,
 ): WorkflowRunRow {
+  assertCanonicalMarkersPresent(row, compatibility, importMetadata);
+  // The compatibility marker row exists for every native coding run as the
+  // fail-closed dispatch requirement, but only historical labels are worth
+  // projecting: a marker with null engine and null profile reads as no
+  // compatibility state at all.
+  const codingCompatibility =
+    compatibility !== undefined &&
+    (compatibility.implementationEngine !== null ||
+      compatibility.selectedProfile !== null)
+      ? {
+          coding: {
+            implementationEngine: compatibility.implementationEngine,
+            selectedProfile: compatibility.selectedProfile,
+          },
+        }
+      : null;
   return {
     runId: row.id,
     state: row.state as WorkflowRunState,
@@ -623,9 +668,8 @@ function parseRunRow(
     repoPath: row.repo_path,
     objective: row.objective,
     issueScope: parseJsonRecord(row.issue_scope_json) ?? {},
-    route: projectedRoute,
-    implementationEngine: compatibility?.implementationEngine ?? null,
-    selectedProfile: compatibility?.selectedProfile ?? null,
+    lineage,
+    compatibility: codingCompatibility,
     importMetadata,
     approvalBoundary:
       row.approval_boundary === null

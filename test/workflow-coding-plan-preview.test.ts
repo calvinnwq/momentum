@@ -86,7 +86,7 @@ describe("materializeWorkflowCodingPlanPreview", () => {
     ]);
   });
 
-  it("captures run identity, definition pin, route, engine, and issue scope", () => {
+  it("captures run identity, definition pin, and issue scope", () => {
     const result = materializeWorkflowCodingPlanPreview(
       baseInput({
         issueScope: { identifier: "NGX-509" },
@@ -108,13 +108,10 @@ describe("materializeWorkflowCodingPlanPreview", () => {
       definitionKey: "coding-workflow",
       definitionVersion: 3,
       issueScope: { identifier: "NGX-509" },
-      route: {
-        profile: "live-wrapper",
-        implementationEngine: "native-goal-loop",
-      },
-      implementationEngine: "native-goal-loop",
       skillRevision: null,
     });
+    expect(result.preview).not.toHaveProperty("route");
+    expect(result.preview).not.toHaveProperty("implementationEngine");
   });
 
   it("promotes approval-covered steps and opens approved with a boundary", () => {

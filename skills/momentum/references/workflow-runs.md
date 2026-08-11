@@ -31,7 +31,7 @@ workflow plan:
   --json
 ```
 
-Add `--issue-scope`, `--profile`, `--implementation-engine`, `--steps-json`, or
+Add `--issue-scope`, `--agent-config-json`, or
 `--definition-version` only when the user or existing run context supplies them.
 Do not invent harness, model, effort, or route selections.
 

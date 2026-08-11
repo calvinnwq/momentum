@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { projectValidatedLegacyWorkflowRunRoute } from "../src/adapters/db/route-state.js";
 import {
   CODING_WORKFLOW_DEFINITION,
   type WorkflowDefinition,
@@ -114,7 +113,6 @@ type RunRow = {
   repo_path: string | null;
   objective: string | null;
   issue_scope_json: string;
-  route_json: string;
   approval_boundary: string | null;
   skill_revision: string | null;
   workflow_definition_key: string | null;
@@ -180,8 +178,6 @@ describe("persistWorkflowRunStart", () => {
         approvalBoundary: null,
         definitionKey: "sample-workflow",
         definitionVersion: 3,
-        route: {},
-        implementationEngine: null,
         stepCount: 2,
         inserted: true,
       });
@@ -194,7 +190,6 @@ describe("persistWorkflowRunStart", () => {
       expect(row?.repo_path).toBe("/repos/momentum");
       expect(row?.objective).toBe("Implement NGX-346");
       expect(row?.issue_scope_json).toBe("{}");
-      expect(row?.route_json).toBe("{}");
       expect(row?.approval_boundary).toBeNull();
       expect(row?.skill_revision).toBeNull();
       expect(row?.workflow_definition_key).toBe("sample-workflow");
@@ -306,21 +301,6 @@ describe("persistWorkflowRunStart", () => {
       ).toEqual({
         agent_config_json:
           '{"harness":"codex","model":"gpt-generic","effort":"high"}',
-      });
-      expect(
-        projectValidatedLegacyWorkflowRunRoute(db, "run-001", {
-          source: WORKFLOW_RUN_START_SOURCE,
-          definitionKey: definition.key,
-          definitionVersion: definition.version,
-        }),
-      ).toEqual({
-        steps: {
-          implementation: {
-            harness: "codex",
-            model: "gpt-generic",
-            effort: "high",
-          },
-        },
       });
     } finally {
       db.close();
@@ -614,7 +594,6 @@ describe("persistWorkflowRunStart", () => {
       expect(row?.issue_scope_json).toBe(
         JSON.stringify({ issues: ["NGX-346"] }),
       );
-      expect(row?.route_json).toBe("{}");
       expect(row?.skill_revision).toBe("abc123");
       expect(row?.source).toBe("workflow-definition");
       expect(

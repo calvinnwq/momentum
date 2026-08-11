@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { projectLegacyWorkflowRunRoute } from "../src/adapters/db/route-projection.js";
+import { projectLegacyWorkflowRunRoute } from "../src/adapters/db/legacy-route-migration.js";
 import {
   readWorkflowRunCodingCompatibilities,
   readWorkflowRunCodingCompatibility,
@@ -79,9 +79,9 @@ function seedImportedRun(
 ): void {
   db.prepare(
     `INSERT INTO workflow_runs (
-       id, state, source, plan_json, issue_scope_json, route_json,
+       id, state, source, plan_json, issue_scope_json,
        created_at, updated_at
-     ) VALUES (?, 'succeeded', 'agent-workflow', '{}', '{}', '{}', ?, ?)`,
+     ) VALUES (?, 'succeeded', 'agent-workflow', '{}', '{}', ?, ?)`,
   ).run(runId, NOW, NOW);
   writeCanonicalWorkflowRunRouteState(db, {
     runId,
@@ -327,15 +327,19 @@ describe("operator read-back reads canonical state through direct typed readers"
     try {
       seedNativeCodingRun(db, "native-detail-readback");
       const detail = loadWorkflowRunDetail(db, "native-detail-readback");
-      expect(detail?.run.implementationEngine).toBe("gnhf");
-      expect(detail?.run.route).not.toHaveProperty("implementationEngine");
-      expect(detail?.run.route).not.toHaveProperty("profile");
+      expect(detail?.run.compatibility).toEqual({
+        coding: {
+          implementationEngine: "gnhf",
+          selectedProfile: "operator-profile",
+        },
+      });
+      expect(detail?.run).not.toHaveProperty("route");
     } finally {
       db.close();
     }
   });
 
-  it("keeps imported run detail readable with an empty projected route", () => {
+  it("keeps imported run detail readable without any route projection", () => {
     const db = openTempDb();
     try {
       seedImportedRun(db, "cwfp-detail-readback", {
@@ -343,8 +347,8 @@ describe("operator read-back reads canonical state through direct typed readers"
         profile: "imported-profile",
       });
       const detail = loadWorkflowRunDetail(db, "cwfp-detail-readback");
-      expect(detail?.run.route).toEqual({});
-      expect(detail?.run.implementationEngine).toBeNull();
+      expect(detail?.run).not.toHaveProperty("route");
+      expect(detail?.run.compatibility).toBeNull();
       expect(
         readWorkflowRunImportMetadata(db, "cwfp-detail-readback"),
       ).toMatchObject({
@@ -411,11 +415,16 @@ describe("run JSON read-back exposes canonical metadata through typed fields", (
       seedNativeCodingRun(db, "native-json-readback");
       const detail = loadWorkflowRunDetail(db, "native-json-readback");
       const shape = workflowRunToJsonShape(detail!.run);
-      expect(shape["implementationEngine"]).toBe("gnhf");
-      expect(shape["selectedProfile"]).toBe("operator-profile");
+      expect(shape["compatibility"]).toEqual({
+        coding: {
+          implementationEngine: "gnhf",
+          selectedProfile: "operator-profile",
+        },
+      });
       expect(shape["importMetadata"]).toBeNull();
-      expect(shape["route"]).not.toHaveProperty("implementationEngine");
-      expect(shape["route"]).not.toHaveProperty("profile");
+      expect(shape).not.toHaveProperty("route");
+      expect(shape).not.toHaveProperty("implementationEngine");
+      expect(shape).not.toHaveProperty("selectedProfile");
     } finally {
       db.close();
     }
@@ -437,9 +446,8 @@ describe("run JSON read-back exposes canonical metadata through typed fields", (
       );
       const detail = loadWorkflowRunDetail(db, "cwfp-json-readback");
       const shape = workflowRunToJsonShape(detail!.run);
-      expect(shape["route"]).toEqual({});
-      expect(shape["implementationEngine"]).toBeNull();
-      expect(shape["selectedProfile"]).toBeNull();
+      expect(shape).not.toHaveProperty("route");
+      expect(shape["compatibility"]).toBeNull();
       expect(shape["importMetadata"]).toEqual({
         mode: "execute-ready",
         profile: "imported-profile",
@@ -502,24 +510,42 @@ describe("active readers do not use route state for import / implementation auth
       file: "src/renderers/workflow.ts",
       token: 'route["implementationEngine"]',
     },
+    // The runtime read surfaces must not import the migration-only legacy
+    // route module or the retired projector wrapper at all.
     {
-      file: "src/adapters/db/route-projection.ts",
+      file: "src/core/workflow/run/status.ts",
+      token: "legacy-route-migration",
+    },
+    {
+      file: "src/core/workflow/run/status.ts",
+      token: "projectValidatedLegacyWorkflowRunRoute",
+    },
+    {
+      file: "src/core/workflow/dispatch/execute.ts",
+      token: "projectValidatedLegacyWorkflowRunRoute",
+    },
+    {
+      file: "src/renderers/workflow.ts",
+      token: "legacy-route-migration",
+    },
+    {
+      file: "src/adapters/db/legacy-route-migration.ts",
       token: 'route["implementationEngine"]',
     },
     {
-      file: "src/adapters/db/route-projection.ts",
+      file: "src/adapters/db/legacy-route-migration.ts",
       token: 'route["mode"]',
     },
     {
-      file: "src/adapters/db/route-projection.ts",
+      file: "src/adapters/db/legacy-route-migration.ts",
       token: 'route["risk"]',
     },
     {
-      file: "src/adapters/db/route-projection.ts",
+      file: "src/adapters/db/legacy-route-migration.ts",
       token: 'route["quotaPolicy"]',
     },
     {
-      file: "src/adapters/db/route-projection.ts",
+      file: "src/adapters/db/legacy-route-migration.ts",
       token: 'route["profile"]',
     },
   ];

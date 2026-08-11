@@ -677,9 +677,9 @@ function seedStreamRun(
 ): void {
   db.prepare(
     `INSERT INTO workflow_runs
-       (id, state, source, plan_json, issue_scope_json, route_json,
+       (id, state, source, plan_json, issue_scope_json,
         needs_manual_recovery, started_at, finished_at, created_at, updated_at)
-       VALUES (?, ?, 'momentum-native-coding', '{}', '{}', '{}',
+       VALUES (?, ?, 'momentum-native-coding', '{}', '{}',
         0, ?, ?, ?, ?)`,
   ).run(
     input.runId,

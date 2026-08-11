@@ -48,13 +48,19 @@ describe("read-only route-state migration probe", () => {
     const db = openExistingDbMigratedReadOnly(dataDir);
     expect(db).toBeDefined();
     try {
+      // The snapshot serves the fully migrated shape: the retired route_json
+      // column is rebuilt away and the canonical marker tables exist.
+      const columns = (
+        db!.prepare('PRAGMA table_info("workflow_runs")').all() as Array<{
+          name: string;
+        }>
+      ).map((row) => row.name);
+      expect(columns).not.toContain("route_json");
       expect(
         db!
-          .prepare(
-            "SELECT route_json FROM workflow_runs WHERE id = 'native-simple'",
-          )
+          .prepare("SELECT 1 FROM workflow_runs WHERE id = 'native-simple'")
           .get(),
-      ).toEqual({ route_json: "{}" });
+      ).toEqual({ 1: 1 });
       expect(
         db!
           .prepare(

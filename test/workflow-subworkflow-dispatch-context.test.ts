@@ -300,20 +300,9 @@ describe("deriveDispatchedSubworkflowContext — resolves a configured subworkfl
         childDefinitionVersion: CHILD_DEFINITION.version,
       },
     });
-    // Stale compatibility-shaped state names a different child B; the active
-    // path must behave as if the canonical step-owned intent (A) is the only
-    // value that exists.
-    db.prepare("UPDATE workflow_runs SET route_json = ? WHERE id = ?").run(
-      JSON.stringify({
-        subworkflow: {
-          child: {
-            childDefinitionKey: "stale-child-b",
-            childDefinitionVersion: 9,
-          },
-        },
-      }),
-      PARENT_RUN_ID,
-    );
+    // The retired route_json column no longer exists, so a stale
+    // compatibility-shaped child intent B cannot be represented at all; the
+    // canonical step-owned intent (A) is the only durable value.
 
     const resolution = deriveDispatchedSubworkflowContext(
       claim(db),
@@ -486,19 +475,8 @@ describe("deriveDispatchedSubworkflowContext — fail closed", () => {
       objective: "Grandparent run with stale compatibility lineage",
       now: NOW,
     });
-    db.prepare("UPDATE workflow_runs SET route_json = ? WHERE id = ?").run(
-      JSON.stringify({
-        subworkflow: {
-          lineage: {
-            parentRunId: "stale-route-parent",
-            parentStepId: STEP_ID,
-            depth: 1,
-            ancestorDefinitionKeys: ["stale-route-ancestor"],
-          },
-        },
-      }),
-      grandparentRunId,
-    );
+    // The retired route_json column no longer exists, so stale
+    // route-shaped lineage cannot shadow the canonical ancestor rows.
     db.prepare(
       `INSERT INTO workflow_run_lineage (
          run_id, parent_run_id, parent_step_id, depth,

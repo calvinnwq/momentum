@@ -114,7 +114,7 @@ describe("workflow route-state CLI failure normalization", () => {
     });
   }
 
-  it("preserves route diagnostics from compatibility projection", async () => {
+  it("preserves canonical agent-config diagnostics on status read-back", async () => {
     const dataDir = seedRouteRefusal();
     const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
     try {
@@ -154,8 +154,8 @@ describe("workflow route-state CLI failure normalization", () => {
       command: "workflow status",
       code: "route_state_value_invalid",
       runId: "native-full",
-      jsonPath: "$.steps.implementation.model",
-      repair: expect.stringContaining("manually repair"),
+      jsonPath: "$.steps.implementation.agentConfig",
+      repair: expect.stringContaining("workflow_steps.agent_config_json"),
     });
   });
 });
