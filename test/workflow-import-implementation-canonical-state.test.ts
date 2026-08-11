@@ -15,7 +15,10 @@ import {
 import { RouteStateMigrationError } from "../src/adapters/db/route-state-errors.js";
 import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
 import { resolveWorkflowStepDispatchRouteSelection } from "../src/core/workflow/dispatch/execute.js";
-import { loadWorkflowRunDetail } from "../src/core/workflow/run/status.js";
+import {
+  listWorkflowRunSummaries,
+  loadWorkflowRunDetail,
+} from "../src/core/workflow/run/status.js";
 import { workflowRunToJsonShape } from "../src/renderers/workflow.js";
 import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
@@ -322,6 +325,33 @@ describe("readWorkflowRunCodingCompatibility — historical read-back only", () 
 });
 
 describe("operator read-back reads canonical state through direct typed readers", () => {
+  it("keeps legacy runs readable when canonical route tables are absent", () => {
+    const db = openTempDb();
+    try {
+      db.exec(`
+        DROP TABLE workflow_run_coding_compatibility;
+        DROP TABLE workflow_run_import_metadata;
+      `);
+      db.prepare(
+        `INSERT INTO workflow_runs (
+           id, state, source, plan_json, issue_scope_json,
+           created_at, updated_at
+         ) VALUES (?, 'succeeded', 'legacy-runner', '{}', '{}', ?, ?)`,
+      ).run("legacy-readable", NOW, NOW);
+
+      expect(loadWorkflowRunDetail(db, "legacy-readable")?.run).toMatchObject({
+        runId: "legacy-readable",
+        compatibility: null,
+        importMetadata: null,
+      });
+      expect(
+        listWorkflowRunSummaries(db).map((summary) => summary.run.runId),
+      ).toEqual(["legacy-readable"]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("exposes the historical implementation engine on run detail without route keys", () => {
     const db = openTempDb();
     try {

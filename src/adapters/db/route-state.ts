@@ -405,6 +405,7 @@ export function readWorkflowRunCodingCompatibility(
   db: MomentumDb,
   runId: string,
 ): WorkflowRunCodingCompatibilityReadback | undefined {
+  if (!tableExists(db, "workflow_run_coding_compatibility")) return undefined;
   const row = db
     .prepare(
       `SELECT implementation_engine, selected_profile
@@ -432,6 +433,9 @@ export function readWorkflowRunCodingCompatibilities(
   runIds: readonly string[],
 ): Map<string, WorkflowRunCodingCompatibilityReadback> {
   const readbacks = new Map<string, WorkflowRunCodingCompatibilityReadback>();
+  if (!tableExists(db, "workflow_run_coding_compatibility")) {
+    return readbacks;
+  }
   try {
     for (const [runId, row] of loadCanonicalCompatibilityRows(
       db,
@@ -561,6 +565,7 @@ export function readWorkflowRunImportMetadataForRuns(
   runIds: readonly string[],
 ): Map<string, WorkflowRunImportMetadataReadback> {
   const readbacks = new Map<string, WorkflowRunImportMetadataReadback>();
+  if (!tableExists(db, "workflow_run_import_metadata")) return readbacks;
   try {
     for (const [runId, row] of loadCanonicalImportMetadataRows(
       db,
@@ -582,6 +587,7 @@ export function readWorkflowRunImportMetadata(
   db: MomentumDb,
   runId: string,
 ): WorkflowRunImportMetadataReadback | undefined {
+  if (!tableExists(db, "workflow_run_import_metadata")) return undefined;
   const sourceFormatSelect = columnExists(
     db,
     "workflow_run_import_metadata",
