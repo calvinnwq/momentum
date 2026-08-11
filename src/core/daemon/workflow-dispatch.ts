@@ -761,6 +761,7 @@ function createMissingHostBindingsNativeDispatch(
             attemptId: attempt.attemptId,
             attemptNumber: attempt.attemptNumber,
             repoPath: resolved.exec.repoPath,
+            now: context.now,
           });
         } catch (error) {
           settleRepoOwnership?.(false);
@@ -819,6 +820,38 @@ function createMissingHostBindingsNativeDispatch(
                   attempt.attemptNumber,
                   context.now,
                 );
+          const provenance = loadDispatchedStepRunProvenance(
+            context.db,
+            claim.runId,
+          );
+          const resolved =
+            provenance === undefined
+              ? { ok: false as const, reason: "run_not_found" }
+              : resolveDispatchedStepExecutorContext(claim.runId, provenance);
+          if (!resolved.ok) {
+            settleHandoff?.(false);
+            throw new RegisteredExecutorHostBindingsError(
+              "runtime_unavailable",
+              resolved.reason,
+            );
+          }
+          try {
+            assertCompletedNativeMechanismRepositoryProof({
+              db: context.db,
+              runId: claim.runId,
+              stepId: claim.stepId,
+              attemptId: attempt!.attemptId,
+              attemptNumber: attempt!.attemptNumber,
+              repoPath: resolved.exec.repoPath,
+              now: context.now,
+              completionStage: completedLiveStep
+                ? "mechanism_completed"
+                : DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+            });
+          } catch (error) {
+            settleHandoff?.(false);
+            throw error;
+          }
           if (completedLiveStep) {
             return {
               tools: new Map(),
@@ -826,26 +859,6 @@ function createMissingHostBindingsNativeDispatch(
             };
           }
           const delegateTool = resolveDelegateToolName(config);
-          const provenance = loadDispatchedStepRunProvenance(
-            context.db,
-            claim.runId,
-          );
-          if (provenance === undefined) {
-            throw new RegisteredExecutorHostBindingsError(
-              "runtime_unavailable",
-              "run_not_found",
-            );
-          }
-          const resolved = resolveDispatchedStepExecutorContext(
-            claim.runId,
-            provenance,
-          );
-          if (!resolved.ok) {
-            throw new RegisteredExecutorHostBindingsError(
-              "runtime_unavailable",
-              resolved.reason,
-            );
-          }
           const adapter = createPersistedProfileDelegateToolAdapter({
             tool: delegateTool,
             repoPath: resolved.exec.repoPath,
@@ -1206,6 +1219,7 @@ function createLiveStepHostBindingsResolver(
           attemptId: attempt.attemptId,
           attemptNumber: attempt.attemptNumber,
           repoPath: resolved.exec.repoPath,
+          now: context.now,
         });
       } catch (error) {
         settleRepoOwnership?.(false);
@@ -1486,6 +1500,7 @@ function createLiveStepHostBindingsResolver(
         attemptNumber: attempt.attemptNumber,
         repoPath: safety.repoPath,
         baseHead: safety.repoSafety.baseHead,
+        now: context.now,
       });
     }
     const repoOwnership = completedNativeMechanism
@@ -2159,22 +2174,34 @@ function assertCompletedNativeMechanismRepositoryProof(input: {
   attemptId: string;
   attemptNumber: number;
   repoPath: string;
+  now: number;
+  completionStage?: "mechanism_completed" | typeof DELEGATE_SUPERVISOR_HANDOFF_STAGE;
   baseHead?: string;
 }): void {
   const repoLock = getActiveRepoLockForJob(
     input.db,
     deriveDispatchCorrelationId(input.runId, input.stepId),
   );
+  const repoRoot = (() => {
+    try {
+      return fs.realpathSync(input.repoPath);
+    } catch {
+      return path.resolve(input.repoPath);
+    }
+  })();
   if (
     repoLock === undefined ||
     repoLock.goal_id !== input.runId ||
-    repoLock.iteration !== input.attemptNumber
+    repoLock.iteration !== input.attemptNumber ||
+    repoLock.lease_expires_at < input.now ||
+    repoLock.repo_root !== repoRoot
   ) {
     throw new RegisteredExecutorHostBindingsError(
       "repo_ownership_unproven",
       "completed native mechanism cannot be reattached because repository ownership is no longer proven",
     );
   }
+  const completionStage = input.completionStage ?? "mechanism_completed";
   const completedRound = [
     ...listExecutorRoundsForAttempt(input.db, input.attemptId),
   ]
@@ -2184,21 +2211,69 @@ function assertCompletedNativeMechanismRepositoryProof(input: {
         round.attemptNumber === input.attemptNumber &&
         round.classification === null &&
         listExecutorCheckpointsForRound(input.db, round.roundId).some(
-          (checkpoint) => checkpoint.stage === "mechanism_completed",
+          (checkpoint) => checkpoint.stage === completionStage,
         ),
     );
+  const completionCheckpoints =
+    completedRound === undefined
+      ? []
+      : listExecutorCheckpointsForRound(input.db, completedRound.roundId);
   const expectedHead =
     completedRound?.commitSha !== null && completedRound !== undefined
       ? completedRound.commitSha
-      : input.baseHead === undefined
-        ? null
-        : expectedSettledRepoHead(completedRound, input.baseHead);
+      : completionStage === DELEGATE_SUPERVISOR_HANDOFF_STAGE
+        ? recordedDelegateHandoffHead(completionCheckpoints)
+        : input.baseHead === undefined
+          ? null
+          : expectedSettledRepoHead(completedRound, input.baseHead);
   const repo = inspectRepo(input.repoPath);
   if (repo.ok && expectedHead !== null && repo.head === expectedHead) return;
   throw new RegisteredExecutorHostBindingsError(
     "head_mismatch",
     "completed native mechanism cannot be reattached because its recorded repository HEAD is no longer proven",
   );
+}
+
+function recordedDelegateHandoffHead(
+  checkpoints: readonly Readonly<{
+    stage: string;
+    detail: string | null;
+  }>[],
+): string | null {
+  const checkpoint = [...checkpoints]
+    .reverse()
+    .find(
+      (candidate) => candidate.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+    );
+  if (checkpoint?.detail === null || checkpoint === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(checkpoint.detail);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    const record = parsed as Record<string, unknown>;
+    const handoff =
+      record["handoff"] !== undefined ? record["handoff"] : parsed;
+    if (handoff === null || typeof handoff !== "object" || Array.isArray(handoff)) {
+      return null;
+    }
+    const externalIdentity = (handoff as Record<string, unknown>)[
+      "externalIdentity"
+    ];
+    if (
+      externalIdentity === null ||
+      typeof externalIdentity !== "object" ||
+      Array.isArray(externalIdentity)
+    ) {
+      return null;
+    }
+    const headSha = (externalIdentity as Record<string, unknown>)["headSha"];
+    return typeof headSha === "string" && /^[0-9a-f]{40}$/.test(headSha)
+      ? headSha
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function validatePortableAgentBinding(

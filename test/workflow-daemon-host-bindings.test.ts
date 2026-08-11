@@ -1176,7 +1176,7 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
     db.close();
   });
 
-  it("reattaches completed delegate evidence without a bindings source", async () => {
+  it("reattaches completed delegate evidence with matching repository ownership", async () => {
     const repoPath = initRepo();
     const db = openDb(makeTempDir("momentum-daemon-completed-delegate-data-"));
     const runId = "delegate-completed-without-bindings-run";
@@ -1206,6 +1206,16 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
       "handoff",
       repoPath,
     );
+    const lock = acquireRepoLock(db, {
+      repoRoot: repoPath,
+      holder: "delegate-completed-without-bindings-worker",
+      goalId: runId,
+      iteration: 1,
+      jobId: deriveDispatchCorrelationId(runId, "handoff"),
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    expect(lock.ok).toBe(true);
 
     const production = resolveDaemonWorkflowStepDispatch(
       {},
@@ -1338,6 +1348,91 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
     ).toEqual({ count: 1 });
     db.close();
   });
+
+  it.each(["live-step mechanism", "delegate handoff"] as const)(
+    "fails closed when binding-free completed %s evidence has no repository ownership",
+    async (completionKind) => {
+      const repoPath = initRepo();
+      const db = openDb(makeTempDir("momentum-daemon-completed-delegate-data-"));
+      const runId = `delegate-completed-without-repo-ownership-${completionKind.replaceAll(" ", "-")}-run`;
+      startApprovedRun(
+        db,
+        {
+          key: `daemon-completed-delegate-without-repo-ownership-${completionKind}`,
+          title: "Daemon Completed Delegate Without Repo Ownership",
+          version: 1,
+          steps: [
+            {
+              key: "handoff",
+              kind: "implementation",
+              executor: "delegate-supervisor",
+              config: { tool: "gnhf" },
+              order: 0,
+              required: true,
+            },
+          ],
+        },
+        runId,
+        repoPath,
+      );
+      if (completionKind === "live-step mechanism") {
+        const evidence = seedCompletedMechanismAttempt(
+          db,
+          runId,
+          "handoff",
+          "delegate-supervisor",
+          { state: "capturing_result", detail: "attempt outcome: ok" },
+        );
+        const currentHead = execFileSync(
+          "git",
+          ["-C", repoPath, "rev-parse", "HEAD"],
+          { encoding: "utf8" },
+        ).trim();
+        db.prepare(
+          "UPDATE executor_rounds SET commit_sha = ? WHERE round_id = ?",
+        ).run(currentHead, evidence.roundId);
+      } else {
+        seedCompletedDelegateHandoffAttempt(db, runId, "handoff", repoPath);
+      }
+
+      const production = resolveDaemonWorkflowStepDispatch(
+        {},
+        executeWorkflowStepDispatch,
+        {},
+      );
+      expect(production.ok, production.ok ? "" : production.message).toBe(true);
+      if (!production.ok) return;
+
+      const result = await runWorkflowSchedulerOnceAsync({
+        db,
+        runId,
+        workerId: `delegate-completed-without-repo-ownership-${completionKind}-worker`,
+        dispatch: production.dispatch,
+        ...(production.preClaim === undefined
+          ? {}
+          : { preClaim: production.preClaim }),
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      expect(
+        db
+          .prepare("SELECT state FROM executor_attempts WHERE workflow_run_id = ?")
+          .get(runId),
+      ).toEqual({ state: "manual_recovery_required" });
+      expect(
+        db
+          .prepare(
+            "SELECT state, recovery_code FROM executor_rounds WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({
+        state: "manual_recovery_required",
+        recovery_code: "repo_ownership_unproven",
+      });
+      db.close();
+    },
+  );
 
   it("fails closed when binding-free native reattachment has no repository ownership", async () => {
     const repoPath = initRepo();
@@ -1501,4 +1596,92 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
     }
     db.close();
   });
+
+  it.each(["expired", "wrong repository"] as const)(
+    "fails closed when binding-free native reattachment has an %s active lock",
+    async (lockKind) => {
+      const repoPath = initRepo();
+      const db = openDb(makeTempDir("momentum-daemon-completed-native-data-"));
+      const runId = `native-completed-invalid-lock-${lockKind.replaceAll(" ", "-")}-run`;
+      startApprovedRun(
+        db,
+        {
+          key: `daemon-completed-native-invalid-lock-${lockKind}`,
+          title: "Daemon Completed Native Invalid Lock",
+          version: 1,
+          steps: [
+            {
+              key: "preflight",
+              kind: "preflight",
+              executor: "agent-once",
+              config: {},
+              order: 0,
+              required: true,
+            },
+          ],
+        },
+        runId,
+        repoPath,
+      );
+      const evidence = seedCompletedMechanismAttempt(
+        db,
+        runId,
+        "preflight",
+        "agent-once",
+        { state: "capturing_result", detail: "attempt outcome: ok" },
+      );
+      const currentHead = execFileSync(
+        "git",
+        ["-C", repoPath, "rev-parse", "HEAD"],
+        { encoding: "utf8" },
+      ).trim();
+      db.prepare(
+        "UPDATE executor_rounds SET commit_sha = ? WHERE round_id = ?",
+      ).run(currentHead, evidence.roundId);
+      const lock = acquireRepoLock(db, {
+        repoRoot:
+          lockKind === "expired"
+            ? repoPath
+            : makeTempDir("momentum-unrelated-repo-"),
+        holder: `native-completed-invalid-lock-${lockKind}-worker`,
+        goalId: runId,
+        iteration: 1,
+        jobId: deriveDispatchCorrelationId(runId, "preflight"),
+        leaseExpiresAt: lockKind === "expired" ? NOW - 1 : NOW + 30_000,
+        now: NOW,
+      });
+      expect(lock.ok).toBe(true);
+
+      const production = resolveDaemonWorkflowStepDispatch(
+        {},
+        executeWorkflowStepDispatch,
+        {},
+      );
+      expect(production.ok, production.ok ? "" : production.message).toBe(true);
+      if (!production.ok) return;
+
+      await runWorkflowSchedulerOnceAsync({
+        db,
+        runId,
+        workerId: `native-completed-invalid-lock-${lockKind}-worker`,
+        dispatch: production.dispatch,
+        ...(production.preClaim === undefined
+          ? {}
+          : { preClaim: production.preClaim }),
+        now: () => NOW + 1,
+      });
+
+      expect(
+        db
+          .prepare(
+            "SELECT state, recovery_code FROM executor_rounds WHERE round_id = ?",
+          )
+          .get(evidence.roundId),
+      ).toEqual({
+        state: "manual_recovery_required",
+        recovery_code: "repo_ownership_unproven",
+      });
+      db.close();
+    },
+  );
 });
