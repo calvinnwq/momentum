@@ -73,8 +73,9 @@ describe("Milestone 10 production workflow-lane dispatch smoke (NGX-367)", () =>
       boundary: "through-implementation",
     });
 
-    // daemon start --max-*: the shipped bounded managed loop refuses the
-    // native step before claiming it when host bindings are not configured.
+    // daemon start --max-*: the shipped bounded boundary refuses the native
+    // step before startup recovery, daemon registration, or claiming can touch
+    // workflow state when host bindings are not configured.
     const daemon = runCliBinary([
       "daemon",
       "start",
@@ -88,12 +89,14 @@ describe("Milestone 10 production workflow-lane dispatch smoke (NGX-367)", () =>
     ]);
     expect(daemon.code, `daemon start stderr: ${daemon.stderr}`).toBe(1);
     expect(daemon.stdout).toBe("");
-    const daemonPayload = JSON.parse(daemon.stderr) as {
-      loop: Record<string, unknown>;
-    };
-    expect(daemonPayload.loop["workflowStepsDispatched"]).toBe(0);
-    expect(daemonPayload.loop["lastWorkflowCode"]).toBeNull();
-    expect(daemonPayload.loop["error"]).toContain("runtime_unavailable");
+    const daemonPayload = JSON.parse(daemon.stderr) as Record<string, unknown>;
+    expect(daemonPayload).toMatchObject({
+      ok: false,
+      command: "daemon start",
+      code: "daemon_host_bindings_required",
+    });
+    expect(daemonPayload["message"]).toContain("MOMENTUM_HOST_BINDINGS_FILE");
+    expect(daemonPayload["loop"]).toBeUndefined();
 
     // The fail-closed refusal leaves the workflow untouched.
     const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
@@ -125,6 +128,16 @@ describe("Milestone 10 production workflow-lane dispatch smoke (NGX-367)", () =>
         )
         .get(runId) as { state: string };
       expect(step.state).toBe("approved");
+      expect(
+        db.prepare("SELECT COUNT(*) AS count FROM daemon_runs").get(),
+      ).toEqual({ count: 0 });
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM workflow_leases WHERE run_id = ? AND released_at IS NULL",
+          )
+          .get(runId),
+      ).toEqual({ count: 0 });
     } finally {
       db.close();
     }
