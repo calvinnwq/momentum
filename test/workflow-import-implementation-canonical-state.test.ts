@@ -586,7 +586,9 @@ describe("active readers do not use retired route projection state", () => {
         updatedAt: NOW,
       });
       expect(summary?.run.importMetadata).toEqual(detail?.run.importMetadata);
-      expect(logs?.detail.run.importMetadata).toEqual(detail?.run.importMetadata);
+      expect(logs?.detail.run.importMetadata).toEqual(
+        detail?.run.importMetadata,
+      );
       expect(handoff?.detail.run.importMetadata).toEqual(
         detail?.run.importMetadata,
       );
