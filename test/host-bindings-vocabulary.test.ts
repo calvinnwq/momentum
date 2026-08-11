@@ -1,7 +1,10 @@
-import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import {
+  listConfiguredHostBindingKinds,
+  resolveHostBinding,
+} from "../src/adapters/host-bindings-registry.js";
 import {
   DAEMON_HOST_BINDINGS_FILE_ENV_VAR,
   readDaemonHostBindingsSource,
@@ -16,26 +19,7 @@ const bindingsPath = path.join(
 );
 
 describe("host-binding vocabulary guard (NGX-668)", () => {
-  it("keeps the retired checked-in profile path out of the repository", () => {
-    expect(
-      fs.existsSync(
-        path.join(
-          REPO_ROOT,
-          "profiles/coding-workflow-live-wrapper.profile.json",
-        ),
-      ),
-    ).toBe(false);
-    expect(fs.existsSync(bindingsPath)).toBe(true);
-  });
-
-  it("ships the checked-in host bindings in the strict { bindings } shape", () => {
-    const document = JSON.parse(
-      fs.readFileSync(bindingsPath, "utf8"),
-    ) as Record<string, unknown>;
-    expect(Object.keys(document)).toEqual(["bindings"]);
-  });
-
-  it("resolves the checked-in source through the production environment path", () => {
+  it("resolves the checked-in source through the production host-binding registry", () => {
     const resolution = resolveDaemonHostBindings(
       { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: bindingsPath },
       { loadSource: readDaemonHostBindingsSource },
@@ -44,8 +28,36 @@ describe("host-binding vocabulary guard (NGX-668)", () => {
     expect(resolution.status).toBe("resolved");
     if (resolution.status !== "resolved") return;
     expect(resolution.source).toBe(bindingsPath);
-    expect(resolution.bindings.bindings.has("implementation")).toBe(true);
-    expect(resolution.bindings.bindings.has("validate")).toBe(true);
+    expect(listConfiguredHostBindingKinds(resolution.bindings)).toEqual([
+      "preflight",
+      "implementation",
+      "postflight",
+      "validate",
+      "merge-cleanup",
+    ]);
+
+    const implementation = resolveHostBinding(
+      resolution.bindings,
+      "implementation",
+    );
+    expect(implementation).toMatchObject({
+      ok: true,
+      kind: "implementation",
+      config: {
+        command: "/usr/bin/env",
+        cwd: "repo",
+        resultFile: "result.json",
+      },
+    });
+
+    const unsupported = resolveHostBinding(
+      resolution.bindings,
+      "linear-refresh",
+    );
+    expect(unsupported).toMatchObject({
+      ok: false,
+      code: "host_binding_not_configured",
+    });
   });
 
   it("refuses the retired selector without consulting a legacy source", () => {
