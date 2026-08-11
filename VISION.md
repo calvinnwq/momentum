@@ -113,7 +113,7 @@ A third party adds an executor against documented interfaces, and the proof of t
 If Momentum's own tracker adapter or agent wrapper needs private hooks, the SDK is not done.
 
 The pre-1.0 nomenclature sweep has landed: the schema calls this concept an "executor" (the "family" suffix is gone), `one-shot` became `agent-once`, `goal-loop` became `agent-loop`, and the coding workflow's validation step selects `delegate-supervisor` with the tool as step config, while recorded legacy spellings stay readable through a non-mutating projection.
-How steps bind to real commands on a given machine is that host's **bindings**, selected by environment; the words "route" and "profile" are retired rather than redefined as machine-local host-binding authorities, while their read-only compatibility projection preserves historical operator-visible state.
+How steps bind to real commands on a given machine is that host's **bindings**, selected by environment; the words "route" and "profile" are retired rather than redefined as machine-local host-binding authorities, while canonical typed read-back preserves historical operator-visible compatibility state.
 
 ## Stability And 1.0
 

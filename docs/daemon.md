@@ -112,8 +112,8 @@ Missing issue scope, missing or ambiguous source evidence, duplicate intents, st
 Configured `subworkflow` steps are also handled by the
 managed daemon: the owning step's canonical `workflow_steps.executor_config_json`
 `child` object selects the child workflow definition, the run's canonical
-`workflow_run_lineage` row bounds recursion (run `route` output carries no
-`subworkflow` namespace), and the parent step mirrors terminal child-run
+`workflow_run_lineage` row bounds recursion (no run envelope emits a `route`
+object), and the parent step mirrors terminal child-run
 evidence only after the child reaches a terminal state.
 Missing child config, invalid canonical lineage, unsafe recursion,
 unresolved child definitions, unsupported child attachments, invalid child state,
