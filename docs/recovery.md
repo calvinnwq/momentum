@@ -236,14 +236,14 @@ Unreadable, contradictory, cancelled, identity-mismatched, or stalled external s
 An attempt settled with `external_state_blocked` is retryable only after the external blocker clears.
 Guarded clear prepares the step for retry; the next dispatcher inserts the fresh later attempt, and an unresolved prior handoff intent is reconciled before the adapter may launch anything again.
 The later attempt retains a valid non-terminal correlated handoff and prior decisions but starts a fresh four-minute semantic-stall window.
-For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
+For binding-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
 A local wrapper-finalization failure does not establish that external outcome.
 The newer attempt first reads the correlated external run.
 A matching failed or cancelled state permits one fresh launch; every other status reruns the failed local finalization before the same run is reattached for supervision.
 For no-mistakes, a durable `launching` receipt reads the original executor log only to correlate the external run id; launch-only evidence has no wrapper-finalization authority and requires operator inspection even when the repository is still clean at the launch head.
 After the wrapper returns, its receipt binds the exact bounded result digest, including before verified no-change acceptance.
 Failed local-finalization retries and prepared-commit recovery reject missing or changed result bytes before any reset or commit; an interrupted `resetting` receipt still requires repository inspection.
-For another profile-backed delegate, recovery recognizes an already-completed reset only when the worktree matches the recorded base tree, and recognizes or recreates a commit only when the bounded regular result's exact digest plus its parent, tree, message, and clean-worktree proof match the receipt.
+For another binding-backed delegate, recovery recognizes an already-completed reset only when the worktree matches the recorded base tree, and recognizes or recreates a commit only when the bounded regular result's exact digest plus its parent, tree, message, and clean-worktree proof match the receipt.
 If the process stopped after staging a verified commit, the dispatcher accepts that prepared index only when the `finalizing` receipt matches the current base `HEAD`, exact staged tree, configured artifact paths, result digest, and successful result, with no unstaged or untracked changes.
 It rechecks repository ownership and all commit evidence before creating the commit.
 Symbolic links, oversized evidence, named pipes, missing digests, and changed result bytes fail closed; persisted external-state files pass the same bounded regular-file check before read or refresh.

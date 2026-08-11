@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * CLI entrypoint used by the checked-in dogfood live-wrapper profile.
+ * CLI entrypoint used by the checked-in dogfood host bindings.
  *
  * Keep this adapter thin: behavior and test seams live in
  * `src/core/workflow/live-wrapper/coding-workflow.ts`; the executable wrapper

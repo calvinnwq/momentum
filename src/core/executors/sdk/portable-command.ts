@@ -1,4 +1,4 @@
-/** Portable script capability identity shared by SDK config and host profiles. */
+/** Portable script capability identity shared by SDK config and host bindings. */
 
 export const SCRIPT_COMMAND_IDENTITY_PATTERN =
   "^(?!\\.{1,2}$)(?![A-Za-z]:)[A-Za-z0-9@][A-Za-z0-9._:@+-]*$";

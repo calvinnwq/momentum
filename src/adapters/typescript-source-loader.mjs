@@ -1,7 +1,7 @@
 /**
- * Minimal Node loader for the checked-in workflow live-wrapper dogfood profile.
+ * Minimal Node loader for the checked-in workflow host-binding dogfood command.
  *
- * The profile must keep working after generated `dist/` output is cleaned up, so
+ * The host-binding command must keep working after generated `dist/` output is cleaned up, so
  * it imports the TypeScript wrapper CLI from `src/` and lets this loader strip
  * erasable TypeScript syntax at runtime. It also maps local `.js` import
  * specifiers emitted by the source tree back to sibling `.ts` files.
@@ -19,7 +19,10 @@ export async function resolve(specifier, context, nextResolve) {
       specifier.endsWith(".js") &&
       context.parentURL?.startsWith("file:")
     ) {
-      const tsUrl = new URL(specifier.replace(/\.js$/, ".ts"), context.parentURL);
+      const tsUrl = new URL(
+        specifier.replace(/\.js$/, ".ts"),
+        context.parentURL,
+      );
       try {
         await access(fileURLToPath(tsUrl));
         return { url: tsUrl.href, shortCircuit: true };
@@ -37,7 +40,7 @@ export async function load(url, context, nextLoad) {
     return {
       format: "module",
       shortCircuit: true,
-      source: stripTypeScriptTypes(source, { mode: "strip" })
+      source: stripTypeScriptTypes(source, { mode: "strip" }),
     };
   }
   return nextLoad(url, context);

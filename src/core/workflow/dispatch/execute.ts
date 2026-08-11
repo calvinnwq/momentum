@@ -105,6 +105,7 @@ import {
 export { deriveDispatchAttemptId, deriveDispatchCorrelationId };
 import { refreshWorkflowRunRuntimeState } from "../run/runtime-state.js";
 import {
+  getWorkflowStep,
   startWorkflowStep,
   type WorkflowStepTransitionOutcome,
 } from "../step/transitions.js";
@@ -248,6 +249,25 @@ function dispatchExecutorScaffold(
         status: WORKFLOW_DISPATCH_RESULT_STATUS.dispatched,
         detail: `${executor} ${retried.attemptId} attempt ${retried.attemptNumber}`,
       };
+    }
+    if (getWorkflowStep(db, claim.runId, claim.stepId)?.state === "approved") {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const started = startWorkflowStep(db, {
+          runId: claim.runId,
+          stepId: claim.stepId,
+          now,
+        });
+        if (!started.ok) {
+          db.exec("ROLLBACK");
+        } else {
+          refreshWorkflowRunStateAfterDispatch(db, claim.runId, now);
+          db.exec("COMMIT");
+        }
+      } catch (error) {
+        safeRollback(db);
+        throw error;
+      }
     }
     return {
       status: WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,

@@ -24,7 +24,7 @@ were left in place; importers still reference the concrete modules below.
 | Routes               | `route/coding.ts`, `route/canonical-agent-config.ts`, `route/subworkflow.ts`, `route/subworkflow-child-config.ts`, `route/subworkflow-child-runner.ts`, `route/subworkflow-dispatch-context.ts`                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Preflight            | `preflight/structural.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Monitor & watch      | `monitor/state.ts`, `monitor/envelope.ts`, `monitor/progress.ts`, `monitor/watch-advisory.ts`, `monitor/watch-stream.ts`, `monitor/watch-stream-source.ts`, `monitor/action-authority.ts`                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Live-wrapper dogfood | `live-wrapper/coding-workflow.ts`, `live-wrapper/merge-cleanup-preflight.ts`, `live-wrapper/merge-cleanup-lifecycle.ts`, `live-wrapper/daemon-profile.ts`, `live-wrapper/daemon-exec-context.ts`                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Live-wrapper dogfood | `live-wrapper/coding-workflow.ts`, `live-wrapper/merge-cleanup-preflight.ts`, `live-wrapper/merge-cleanup-lifecycle.ts`, `live-wrapper/daemon-host-bindings.ts`, `live-wrapper/daemon-exec-context.ts`                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Recovery             | `recovery/artifact.ts`, `recovery/reconcile.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 `dispatch/dispatch.ts` and `dispatch/persist.ts` are internal helpers behind
@@ -47,7 +47,7 @@ Other domains reach workflow behavior through these modules:
 - **CLI renderers** (`src/renderers/workflow.ts`): the same run/gate/monitor/
   status/handoff/events/logs shapes, imported **type-only** (renderers format, they
   do not mutate state).
-- **Daemon and supervisor dispatch** (`src/core/daemon/workflow-dispatch.ts`): `dispatch/execute`, `dispatch/registered-executor`, `dispatch/dogfood`, `dispatch/external-apply-dispatch`, `dispatch/tracker-refresh-lifecycle`, `dispatch/subworkflow-dispatch`, and `live-wrapper/daemon-profile`; configured profile-backed and third-party executors share the registered SDK tick driver.
+- **Daemon and supervisor dispatch** (`src/core/daemon/workflow-dispatch.ts`): `dispatch/execute`, `dispatch/registered-executor`, `dispatch/dogfood`, `dispatch/external-apply-dispatch`, `dispatch/tracker-refresh-lifecycle`, `dispatch/subworkflow-dispatch`, and `live-wrapper/daemon-host-bindings`; configured binding-backed and third-party executors share the registered SDK tick driver.
 - **Dispatched-step reconciliation**: `dispatch/reconcile` /
   `dispatch/reconcile-execute` own the pure/effect seam that finalizes a
   dispatched step from terminal executor evidence.
@@ -57,7 +57,7 @@ Other domains reach workflow behavior through these modules:
   `step/executor-real-adapters` (production registry builder backed by
   live wrappers or honest `runtime_unavailable` adapters),
   `live-wrapper/coding-workflow` (the wrapper-command seam used by the
-  checked-in dogfood live-wrapper profile), `live-wrapper/merge-cleanup-preflight`
+  checked-in dogfood host-binding file), `live-wrapper/merge-cleanup-preflight`
   and `live-wrapper/merge-cleanup-lifecycle` (GitHub auth, target, readback,
   safe-apply, and already-applied reconciliation for the merge-cleanup tail
   step), `step/transitions`,
@@ -91,11 +91,11 @@ tests that need substrate smoke coverage.
 
 Registered executor dispatch supersedes the interim live-wrapper composition.
 `dispatch/registered-executor.ts` creates the durable scaffold, resolves the executor by permanent name, drives bounded SDK ticks, and reconciles daemon-owned classification.
-Profile-backed `agent-loop` uses `executors/agent-loop/sdk.ts`, `agent-once` and `script` use `executors/single-shot/sdk.ts`, delegated tools use `executors/delegate-supervisor/executor.ts`, and the legacy `no-mistakes` identity uses `executors/live-step/sdk-executor.ts`.
+Binding-backed `agent-loop` uses `executors/agent-loop/sdk.ts`, `agent-once` and `script` use `executors/single-shot/sdk.ts`, delegated tools use `executors/delegate-supervisor/executor.ts`, and the legacy `no-mistakes` identity uses `executors/live-step/sdk-executor.ts`.
 The native agent-loop, single-shot, and live-step lifecycles record replay-safe `mechanism_completed` evidence before daemon classification, so reattachment classifies durable completed work without rerunning the bounded mechanism.
 `dispatch/executor-evidence.ts` and `dispatch/executor-recovery.ts` retain neutral settlement helpers used by external-apply and subworkflow; they are not an alternate live-wrapper execution lane.
 
-`live-wrapper/daemon-profile.ts` resolves the optional daemon profile source, and
+`live-wrapper/daemon-host-bindings.ts` resolves the optional daemon host-binding source, and
 `live-wrapper/daemon-exec-context.ts` maps durable run provenance to host-local
 paths. The registered host-binding resolver keeps portable step config separate
 from executable paths, environment, repo ownership, verification, and commit-or-
@@ -112,14 +112,14 @@ Correlated no-mistakes launch output cannot recover a launch-only receipt withou
 Generic retry recovery requires a bounded regular result whose exact digest matches the receipt plus exact base, tree, message, and clean-worktree proof; otherwise it preserves the worktree and refuses another external launch.
 If a verified commit is staged when the process stops, recovery accepts that otherwise-dirty index only when the `finalizing` receipt matches the current base `HEAD`, staged tree, configured artifact paths, result digest, and successful result, with no unstaged or untracked changes.
 Repository ownership and commit evidence are checked again immediately before the recovered commit.
-Finalized profile-backed delegate state must match the repository's current full `HEAD`.
+Finalized binding-backed delegate state must match the repository's current full `HEAD`.
 After a durable handoff intent or completed handoff exists, an unclassified running, capturing-result, or `mirroring_external_state` round remains scheduler-resumable across stale auto-release dispatch-lease recovery instead of being parked or relaunched.
 A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
 An attempt classified `waiting_operator` before a crash reuses or recreates its workflow gate from the durable decision selector and unresolved decision when stale dispatch recovery releases the abandoned lease.
 An earlier crash after the delegate persisted a mirrored gate checkpoint, gate-eligible decision, and `waiting_operator` observation leaves the unclassified round resumable so the same attempt can finish classification and gate parking.
 A scheduler pass that releases a stale dispatch owner can transfer the same dispatch correlation's matching active repo lock to the replacement holder before the longer repo lock expires, with full identity compare-and-swap fencing.
 A valid non-terminal handoff is reconciled through adapter recovery before reuse across retry attempts.
-For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
+For binding-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
 A local wrapper-finalization failure first triggers a correlated status read on the newer attempt.
 A failed or cancelled run permits one fresh launch; every other status reruns local finalization before the same run is reattached for supervision.
 Only the attempt's first completed delegate handoff may receive an immediate second tick in its dispatcher pass; later passes and retry attempts use one tick.
@@ -150,8 +150,8 @@ manual-recovery behavior for invalid canonical lineage, missing or ambiguous
 child state.
 
 `live-wrapper/coding-workflow.ts` is an opt-in dogfood helper for
-`profiles/coding-workflow-live-wrapper.profile.json`: the daemon live
-profile still owns process supervision and result-file placement, while this
+`bindings/coding-workflow.host-bindings.json`: the daemon host-binding file
+still owns process supervision and result-file placement, while this
 helper loads `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the configured
 command for `MOMENTUM_STEP_KIND`, and writes normalized `RunnerResult` evidence
 so command failures become durable `success: false` results rather than stranded
@@ -166,7 +166,7 @@ It parks missing branch-start state and current no-mistakes cancellation status 
 If the wrapper is interrupted before writing that evidence but the external no-mistakes run later proves success, guarded `clear-recovery` can reconcile only the failed required `validate` step with either legacy `no-mistakes:<run-id>#checks-passed` evidence or a readable structured deterministic evidence JSON file.
 The structured record must carry the workflow run id, issue scope, branch/head SHA, pull request id/head/check state when present, no-mistakes run id, successful outcome, zero unresolved findings and decisions, and explicit review/test/docs/lint/format/push/PR/CI phase statuses.
 `recovery/no-mistakes-evidence.ts` refuses unknown schemas, stale identity, unresolved findings, partial phase evidence, and pending/failed/unknown checks before the failed step can be marked succeeded.
-The checked-in dogfood profile runs the wrapper CLI from `src/` through the TypeScript source loader/register shims in `src/adapters/`, so cleanup of generated `dist/` files after test or no-mistakes work does not strand `merge-cleanup` or `tracker-refresh` tail work.
+The checked-in host-binding file runs the wrapper CLI from `src/` through the TypeScript source loader/register shims in `src/adapters/`, so cleanup of generated `dist/` files after test or no-mistakes work does not strand `merge-cleanup` or `tracker-refresh` tail work.
 For `merge-cleanup`, `live-wrapper/merge-cleanup-preflight.ts` and `live-wrapper/merge-cleanup-lifecycle.ts` keep preflight -> apply -> reconcile inside the tail step. The wrapper requires explicit GitHub auth in the filtered environment, a run-local `merge_cleanup` target block (PR id, expected head SHA, cleanup branch), and a live `gh pr view` readback proving the PR is open, non-draft, mergeable, and still at the expected head before the command is spawned. Already-merged or already-deleted cleanup state becomes reconcile guidance rather than a second external mutation.
 External-side-effect tail failures (`merge-cleanup` / `tracker-refresh`) use the shared step-kind set in `run/reducer.ts`, classify through the monitor as `failed_external_side_effect_step`, and steer operators to evidence-backed `workflow run clear-recovery --evidence-pointer <ref>` reconciliation instead of a blind re-run that could repeat the external write.
 Renderer next-action shapes expose this as `actionClass: "reconcile_external_tail"` with `recoveryDetail.kind: "external_tail_reconcile"`; interrupted no-mistakes evidence reconciliation exposes `actionClass: "reconcile_deterministic_evidence"` with `recoveryDetail.kind: "no_mistakes_deterministic_evidence"` only when durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
@@ -174,7 +174,7 @@ Ordinary failed validate steps remain `retry_failed_step` with `recoveryDetail: 
 
 `workflow run start-coding` is the explicit Momentum-native start door.
 It reuses `run/start` / `run/start-persist` for durable rows, reserves the historical `cwfp-`, `cwfb-`, and `overnight-` prefixes for compatibility imports, stores native compatibility in the adapter-owned coding destination read back through the direct typed compatibility reader, and keeps CWFP/default switching explicit.
-The coding doors accept `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`, and default to persisted `gnhf`; execution semantics are owned by [Daemon commands](../../../docs/daemon.md#workflow-live-wrapper-profile).
+The coding doors accept `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`, and default to persisted `gnhf`; execution semantics are owned by [Daemon commands](../../../docs/daemon.md#workflow-host-bindings).
 The current built-in definition classifies implementation and validate as `delegate-supervisor` with their tool in portable step config.
 Versions 1 and 2 remain registered unchanged for recorded runs with their legacy vocabulary.
 Native dispatch projects the portable merge-cleanup command for those V1 runs without rewriting the immutable definition.

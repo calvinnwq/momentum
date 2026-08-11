@@ -269,7 +269,7 @@ Optional arguments:
 - `--issue-scope <identifier>` - record an issue-scope identifier on the run.
 - `--profile <name>` - record the trimmed selected runtime/profile in `workflow_run_coding_compatibility.selected_profile` so the typed `run.selectedProfile` read-back lets status, list, handoff, and logs report which profile the run was started for; the monitor detail loader reads the same canonical row before deriving its compact envelope.
   Blank profile values are refused before the run is written.
-  This captures the operator's intent in durable state; the daemon still resolves the live-wrapper profile it actually executes from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
+  This captures the operator's intent in durable state; the daemon still resolves the host-binding file it actually executes from `MOMENTUM_HOST_BINDINGS_FILE` at run time.
 
 Behaviour:
 
@@ -292,14 +292,14 @@ Behaviour:
   Successful apply records terminal evidence and reconciles the step; already-applied successful audit evidence can be reconciled without another Linear mutation.
   Missing/ambiguous context, missing credentials, policy denial, duplicate/stale or mismatched intent/audit evidence, invalid payload, a missing resolved target, or any other unsafe apply refusal routes to manual recovery before the adapter client is called.
   Configured `subworkflow` steps are also filled by the daemon itself: child config comes from the owning step's canonical `workflow_steps.executor_config_json`, recursion lineage is bounded through the run's canonical `workflow_run_lineage` row (run `route` output carries no `subworkflow` namespace), the child run starts with explicit lineage persistence or reattaches only after its canonical definition and lineage match, and terminal child evidence is mirrored back to the parent step; missing config, invalid canonical lineage, unsafe recursion, unresolved child definitions, unsupported attachment, invalid child state, or ambiguous child terminals route to manual recovery.
-  When `MOMENTUM_LIVE_WRAPPER_PROFILE` points managed-loop `daemon start` at a valid workflow live-wrapper profile, the daemon runs configured profile-backed step wrappers after the scaffold is created.
+  When `MOMENTUM_HOST_BINDINGS_FILE` points managed-loop `daemon start` at a valid workflow host-binding file, the daemon runs configured binding-backed step wrappers after the scaffold is created.
   An ordinary live-wrapper result is finalized through the shared verify -> commit / reset transaction before terminalization and reconciliation: Momentum reads the runner result's commit intent, writes `verification.log`, commits verified changes, resets safe failures, and attaches the verification log to round evidence.
   A delegate-supervisor wrapper result passes through the same safe finalization but becomes durable handoff and terminal-candidate evidence rather than terminal step authority.
   A successful no-mistakes handoff with no repository changes is accepted only after verification proves the worktree clean; failed verification still rejects it.
   The delegate attempt and step reconcile only after a later external-state read receives a daemon-accepted terminal classification.
   Verification commands and timeout resolve from linked goal verification first, then `MOMENTUM.md`, then the built-in default timeout with no commands; a repo-local run directory must be ignored by git before execution starts.
   Result-file, moved-HEAD, lost-lease, git, commit, and reset safety failures preserve the precise live recovery code in executor round / gate evidence and render best-effort run-scoped `recovery.md` guidance.
-  Runtime profile requirements, native binding failures, and the no-fallback rule are owned by [Daemon commands](daemon.md#workflow-live-wrapper-profile).
+  Host-binding requirements, native binding failures, and the no-fallback rule are owned by [Daemon commands](daemon.md#workflow-host-bindings).
 - **No clobber**: a duplicate `--run-id` refuses with `run_exists` and never overwrites the existing run.
 
 ### JSON envelope (success)
@@ -446,7 +446,7 @@ Optional arguments:
 - `--profile <name>` - record the selected runtime/profile in `workflow_run_coding_compatibility.selected_profile`, so the typed `run.selectedProfile` read-back lets status, list, handoff, and logs explain which runtime/profile the Momentum-native run was started for from durable state alone; the monitor detail loader reads the same canonical row before deriving its compact envelope.
   The value is trimmed and must be non-blank.
   This column is historical native compatibility, never active machine-local host-binding authority.
-  This captures intent only; the executing live-wrapper profile is still resolved by the daemon from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
+  This captures intent only; the executing host-binding file is still resolved by the daemon from `MOMENTUM_HOST_BINDINGS_FILE` at run time.
 - `--implementation-engine <engine>` - record the historical coding implementation label in `workflow_run_coding_compatibility.implementation_engine` and expose it through the typed `run.implementationEngine` read-back.
   Valid values are `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`; when omitted, the coding doors record the honest `gnhf` label.
   The recorded definition key/version, matching versioned step executor, and frozen portable config remain active implementation authority; the compatibility label supplies only read-back/refusal semantics.
@@ -456,7 +456,7 @@ Optional arguments:
   Provider-specific model aliases are normalized when the merged step selection also supplies the matching harness; for example `{"harness":"claude","model":"sonnet"}` records and previews `model=claude-sonnet-4-6`, `{"harness":"codex","model":"openai/gpt-5.5"}` records `model=gpt-5.5`, and `{"harness":"opencode","model":"glm-5.2"}` records `model=opencode-go/glm-5.2`.
   Unknown harness/model values remain free-form after structural validation, so future provider model ids can still be passed through before Momentum learns a shorthand for them.
   During native daemon dispatch, the canonical step-row selection is mapped to executor-round `agentProvider`, `model`, and `effort` fields, including retry and reattachment round materialization, and then forwarded to live wrappers through `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT` when those values are present.
-  `route.steps` (the per-step selection) stays distinct from `run.selectedProfile` (the recorded operator profile read-back) and from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE` execution profile.
+  `route.steps` (the per-step selection) stays distinct from `run.selectedProfile` (the recorded operator profile read-back) and from the daemon's `MOMENTUM_HOST_BINDINGS_FILE` execution host bindings.
 - `--definition-version <n>` - require a specific built-in `coding-workflow` version.
   When omitted, the latest known built-in version is used.
   Existing native runs continue resolving the built-in version recorded on the run after future built-in versions are added.
@@ -1307,10 +1307,10 @@ step shape without that field.
 `run.route` is a read-only compatibility projection over explicit canonical destinations; new writes leave `workflow_runs.route_json` empty, and the projection now carries only the `steps` namespace.
 `run.selectedProfile` reads `workflow_run_coding_compatibility.selected_profile` directly, and `run.importMetadata` reads the imported `mode`, legacy `profile`, `risk`, `quotaPolicy`, `sourceFormat`, and marker `createdAt` / `updatedAt` timestamps directly from `workflow_run_import_metadata` for imported runs (`null` otherwise); the retired `route.profile`, `route.mode`, `route.risk`, and `route.quotaPolicy` keys are no longer emitted.
 The import table also owns the imported marker timestamps, which remain database audit fields rather than duplicated route values.
-For CLI-created runs, `--profile` records the non-imported value for status, list, handoff, and logs read-back; the monitor detail loader reads the same canonical value before deriving its compact envelope, while daemon execution still resolves the live-wrapper profile from `MOMENTUM_LIVE_WRAPPER_PROFILE`.
+For CLI-created runs, `--profile` records the non-imported value for status, list, handoff, and logs read-back; the monitor detail loader reads the same canonical value before deriving its compact envelope, while daemon execution still resolves the host-binding file from `MOMENTUM_HOST_BINDINGS_FILE`.
 `run.implementationEngine` reads the historical coding implementation label directly from `workflow_run_coding_compatibility.implementation_engine`: `gnhf`, legacy `native-goal-loop`, or `current-gnhf-cwfp`; the retired `route.implementationEngine` key is no longer emitted.
 These historical compatibility and import values are read-back and refusal evidence only; they never select the executor, definition version, or host bindings.
-The implementation-route execution contract is owned by [Daemon commands](daemon.md#workflow-live-wrapper-profile).
+The implementation-route execution contract is owned by [Daemon commands](daemon.md#workflow-host-bindings).
 `current-gnhf-cwfp` remains an explicit unsupported compatibility selection and fails closed before the implementation executor starts.
 For non-imported runs, `run.route.steps` projects the effective per-step harness/model/effort selections from `workflow_steps.agent_config_json`; for fresh native coding runs, definition-level `agentConfig` and run-specific `--steps-json` selections are merged and normalized at start, so the selected route can be audited from durable state.
 Provider-specific model aliases from the merged selection have already been normalized when the step supplies a known mapped harness (`claude`, `codex`, or `opencode`), so status, handoff, monitor, logs, and native dispatch use the same command-ready model string.
@@ -1846,13 +1846,17 @@ OpenClaw hosts that need chat-delivery suppression, path-sanitized inspection co
 That wrapper also config-gates and audits its own local auto-actions before any local state write, records the intended saved status before that write, and appends a matching failed status row if the write fails; the raw watch command only reports `recommendedActionPolicy` and does not write OpenClaw auto-action audit files.
 When the wrapper's local auto-action audit fails closed, it suppresses its own monitor-removal cleanup hint and surfaces a human-required OpenClaw escalation instead of changing the raw watch contract.
 It does not resolve approvals, gates, manual recovery, or other operator decisions.
-When `--once` is eligible to dispatch a profile-backed step, including native
+When `--once` is eligible to dispatch a binding-backed step, including native
 `agent-loop`, `agent-once`, `script`, or `delegate-supervisor`,
-`MOMENTUM_LIVE_WRAPPER_PROFILE` must be configured.
-Without that profile, watch refuses before moving the step to `running` so a
+`MOMENTUM_HOST_BINDINGS_FILE` must be configured.
+For a new step, without that host-binding file, watch refuses before the
+scheduler claim, attempt/round creation, or process launch, so a
 chat/supervisor poll cannot strand the workflow without terminal dispatch
-evidence.
-When the profile is configured, the watch dispatcher uses the same repo lock,
+evidence. If an active native attempt already has durable completed-mechanism
+or handoff evidence, watch reattaches and classifies that evidence without
+rerunning the mechanism; an invalid host-binding source still fails before
+dispatch.
+When host bindings are configured, the watch dispatcher uses the same repo lock,
 ignored run-directory check, verification config fallback, and verify -> commit
 / reset finalization path as managed-loop `daemon start`.
 
@@ -2313,7 +2317,8 @@ A cron, OpenClaw, or GUI poller branches on the envelope instead of scraping tex
 | `usage_error` | The stream call is malformed, such as an extra positional argument or a missing value for `--since`; with `--jsonl`, this still renders as JSON and exits `2`. |
 | `invalid_cursor` | The `--since` value is not a valid durable event cursor. |
 | `data_dir_failed` | Data directory resolution, SQLite access, the bounded `--once` dispatch tick, or stream polling failed. |
-| `daemon_live_wrapper_profile_invalid` | The shared daemon live-wrapper profile was configured but unreadable or invalid when the bounded dispatch tick resolved it. |
+| `daemon_host_bindings_invalid` | The shared daemon host-binding file was configured but unreadable or invalid when the bounded dispatch tick resolved it. |
+| `daemon_host_bindings_required` | Dispatch was refused because a native executor has no usable host bindings; workflow state is not mutated and no process is launched. |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
 | `watch_unsupported_source` | The run source is not `momentum-native-coding` (`--once` mode only). |
 
@@ -2461,13 +2466,13 @@ A completed `continue` poll in `succeeded` or `failed` with a durable handoff in
 The read projects findings and decisions as append-only child evidence, records the raw response digest in `inputDigest`, and records the stable semantic progress digest in `resultDigest`.
 Repeated unchanged running reads refresh liveness but retain the last semantic-progress time; four minutes without semantic progress or terminal evidence parks the attempt for manual recovery.
 A retry reconciles a valid non-terminal correlated handoff through adapter recovery before reuse, preserves decision history, and starts a fresh semantic-progress window for the new attempt.
-For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
+For binding-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
 A local wrapper-finalization failure does not establish that the correlated external run failed.
 The retry reads that run first.
 A matching failed or cancelled state permits one fresh launch; every other status reruns failed local finalization before the same run is reattached for supervision.
 
 Terminal success requires a full 40-character observed head SHA and matching external run id and branch; a head advanced from launch must carry adapter-verified descendant proof.
-Profile-backed adapters additionally require that exact full SHA to match the repository's current `HEAD`.
+Binding-backed adapters additionally require that exact full SHA to match the repository's current `HEAD`.
 It also requires no active step or findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
 For no-mistakes, every pending or running canonical steps-table row counts as an active step.
 Terminal state cached during handoff settles only after a fresh read corroborates that identity and clean state; pending CI or another head cannot reuse it.
@@ -2479,7 +2484,7 @@ Unreadable state, identity drift, cancellation, or contradictory completion ente
 The step-scoped handoff receipt is written before no-mistakes launch and before delegated reset or commit mutations.
 For no-mistakes, correlated launch output identifies a launch-only external run but cannot authorize reattachment without wrapper-finalization proof.
 After its wrapper returns, the no-mistakes receipt binds the exact bounded result digest; the selected reset or commit and any later failed-finalization retry or prepared-commit recovery reject changed or missing result bytes before mutation.
-For other profile-backed tools, recovery requires the bounded regular result's exact receipt digest plus completed-reset or parent/tree/message/clean-worktree commit proof; symbolic links or any mismatch refuse a duplicate launch while preserving the worktree.
+For other binding-backed tools, recovery requires the bounded regular result's exact receipt digest plus completed-reset or parent/tree/message/clean-worktree commit proof; symbolic links or any mismatch refuse a duplicate launch while preserving the worktree.
 No-mistakes status normalization accepts only canonical current AXI fields and a validated steps table, so ambiguous fields, malformed or duplicate rows, unknown statuses, and out-of-table CI evidence fail closed.
 GNHF and no-mistakes remain tool names in portable step config, not new executor identities or authoritative artifact stores.
 

@@ -11,7 +11,7 @@
  * nothing here runs executors, schedules work, or starts a Goal loop. Scheduling
  * is owned separately by `dispatch/scheduler.ts`; the native agent-loop,
  * agent-once / script SDK paths and the legacy no-mistakes mirror /
- * delegate-supervisor profile-backed paths attach through executor-loop
+ * delegate-supervisor binding-backed paths attach through executor-loop
  * persistence rather than this start persistence layer. The retired goal-first
  * lane no longer starts work;
  * durable Goal rows remain readable state.

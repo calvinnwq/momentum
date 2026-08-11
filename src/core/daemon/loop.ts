@@ -18,6 +18,7 @@ import {
   type RunWorkflowSchedulerOnceAsyncInput,
   type RunWorkflowSchedulerOnceResult,
   type AsyncWorkflowStepDispatch,
+  type WorkflowStepPreClaim,
 } from "../workflow/dispatch/scheduler.js";
 import type { WorkflowLeaseStalePolicy } from "../workflow/run/reducer.js";
 import { WORKFLOW_DISPATCH_RESULT_STATUS } from "../workflow/dispatch/execute.js";
@@ -55,6 +56,7 @@ export type DaemonWorkflowLaneConfig = {
   stalePolicy?: WorkflowLeaseStalePolicy;
   /** Explicit runtime registrations that own their raw executor identities. */
   claimedExecutorNames?: ReadonlySet<string>;
+  preClaim?: WorkflowStepPreClaim;
 };
 
 export type DaemonLoopInput = {
@@ -208,8 +210,16 @@ export async function runDaemonLoop(
         };
 
   const markInternalError = (error: unknown): void => {
+    const message = error instanceof Error ? error.message : String(error);
+    const recoveryCode =
+      typeof error === "object" &&
+      error !== null &&
+      "recoveryCode" in error &&
+      typeof (error as { recoveryCode?: unknown }).recoveryCode === "string"
+        ? (error as { recoveryCode: string }).recoveryCode
+        : null;
     internalErrorMessage =
-      error instanceof Error ? error.message : String(error);
+      recoveryCode === null ? message : `${recoveryCode}: ${message}`;
     exitReason = "internal_error";
   };
 
@@ -317,6 +327,9 @@ export async function runDaemonLoop(
         if (workflowLane.claimedExecutorNames !== undefined) {
           schedulerInput.claimedExecutorNames =
             workflowLane.claimedExecutorNames;
+        }
+        if (workflowLane.preClaim !== undefined) {
+          schedulerInput.preClaim = workflowLane.preClaim;
         }
         workflowResult = await runWorkflowSchedulerOnceAsync(schedulerInput);
         lastWorkflowCode = workflowResult.code;

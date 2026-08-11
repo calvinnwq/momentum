@@ -2,14 +2,14 @@
  * Live workflow-step execution wrapper.
  *
  * Momentum invokes live workflow steps that wrap the existing
- * OpenClaw engines. The typed live-wrapper config plus a
- * `WorkflowStepKind`-keyed registry live in `live-wrapper-registry.ts`. This module
- * adds the next layer: actually running a resolved live wrapper as an explicit
+ * OpenClaw engines. The typed host-binding config plus a
+ * `WorkflowStepKind`-keyed registry live in `host-bindings-registry.ts`. This
+ * module adds the next layer: actually running a resolved live wrapper as an explicit
  * local child process and normalizing its outcome.
  *
  * `runLiveStepWrapper` is the live execution core for the `implementation`
  * step (and any later step kind whose engine emits the normalized
- * `RunnerResult` document). Given a resolved `LiveWrapperConfig` plus the
+ * `RunnerResult` document). Given a resolved `HostBindingConfig` plus the
  * step's execution context, it:
  *
  *   - refuses native Windows execution with `unsupported_platform` before any
@@ -51,9 +51,9 @@ import type { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 
 import type {
-  LiveWrapperConfig,
-  LiveWrapperProbeConfig,
-} from "./live-wrapper-registry.js";
+  HostBindingConfig,
+  HostBindingProbeConfig,
+} from "./host-bindings-registry.js";
 import { parseRunnerResult } from "../core/executors/runner/result.js";
 import type { RunnerResult } from "../core/executors/runner/types.js";
 import type { WorkflowStepKind } from "../core/workflow/run/reducer.js";
@@ -132,7 +132,7 @@ export const LIVE_STEP_WRAPPER_ENV_VARS = {
 
 export type LiveStepWrapperInput = {
   kind: WorkflowStepKind;
-  config: LiveWrapperConfig;
+  config: HostBindingConfig;
   runId: string;
   stepId: string;
   attempt: number;
@@ -579,7 +579,7 @@ export async function runLiveStepWrapperAsync(
 
 function finishLiveStepWrapperProcess(input: {
   input: LiveStepWrapperInput;
-  config: LiveWrapperConfig;
+  config: HostBindingConfig;
   outputMaxBytes: number;
   logHandle: number;
   executorLogPath: string;
@@ -761,7 +761,7 @@ type ProbeOutcome =
 
 function runProbe(
   logHandle: number,
-  probe: LiveWrapperProbeConfig,
+  probe: HostBindingProbeConfig,
   cwd: string,
   env: NodeJS.ProcessEnv,
   outputMaxBytes: number,
@@ -811,7 +811,7 @@ function runProbe(
 
 async function runProbeAsync(
   logHandle: number,
-  probe: LiveWrapperProbeConfig,
+  probe: HostBindingProbeConfig,
   cwd: string,
   env: NodeJS.ProcessEnv,
   outputMaxBytes: number,
@@ -865,7 +865,7 @@ async function runProbeAsync(
 
 function finishProbe(
   logHandle: number,
-  probe: LiveWrapperProbeConfig,
+  probe: HostBindingProbeConfig,
   result: SpawnSyncReturns<string>,
   outputMaxBytes: number,
 ): ProbeOutcome {
@@ -940,7 +940,7 @@ function finishProbe(
 }
 
 function validateRuntimeTimeouts(
-  config: LiveWrapperConfig,
+  config: HostBindingConfig,
 ): { ok: true } | { ok: false; error: string } {
   const timeout = validatePositiveTimeoutSec(config.timeoutSec, "timeout_sec");
   if (!timeout.ok) return timeout;
@@ -955,7 +955,7 @@ function validateRuntimeTimeouts(
 
 function isNodeBootstrapModuleFailure(
   stderr: string,
-  config: LiveWrapperConfig,
+  config: HostBindingConfig,
   cwd: string,
 ): boolean {
   if (
@@ -979,7 +979,7 @@ function isNodeBootstrapModuleFailure(
   );
 }
 
-function configuredNodeEntrypoint(config: LiveWrapperConfig): string | null {
+function configuredNodeEntrypoint(config: HostBindingConfig): string | null {
   const commandBase = path.basename(config.command);
   if (commandBase === "node") {
     return firstNodeScriptArg(config.args);
@@ -2505,14 +2505,14 @@ function validateResultPathContainment(
 }
 
 function resolveCwd(
-  config: LiveWrapperConfig,
+  config: HostBindingConfig,
   input: LiveStepWrapperInput,
 ): string {
   return config.cwd === "iteration" ? input.iterationDir : input.repoPath;
 }
 
 function resolveEnv(
-  config: LiveWrapperConfig,
+  config: HostBindingConfig,
   input: LiveStepWrapperInput,
   resultJsonPath: string,
 ): NodeJS.ProcessEnv {
@@ -2571,12 +2571,12 @@ export function buildLiveStepRuntimeEnvironment(
   return env;
 }
 
-function formatCommand(config: LiveWrapperConfig): string {
+function formatCommand(config: HostBindingConfig): string {
   if (config.args.length === 0) return config.command;
   return `${config.command} ${config.args.join(" ")}`;
 }
 
-function formatProbeCommand(probe: LiveWrapperProbeConfig): string {
+function formatProbeCommand(probe: HostBindingProbeConfig): string {
   if (probe.args.length === 0) return probe.command;
   return `${probe.command} ${probe.args.join(" ")}`;
 }
@@ -2745,7 +2745,7 @@ function wrapperError(
   return { ok: false, code, error, resultJsonPath, executorLogPath };
 }
 
-function isCodingWorkflowWrapperInvocation(config: LiveWrapperConfig): boolean {
+function isCodingWorkflowWrapperInvocation(config: HostBindingConfig): boolean {
   return config.args.some((arg) =>
     arg.includes("coding-workflow-live-wrapper-cli"),
   );

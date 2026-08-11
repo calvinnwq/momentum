@@ -9,7 +9,7 @@
  * `definition/persist.ts`; first-class workflow run start, executor
  * records, the opt-in daemon scheduler lane, the native agent-loop /
  * agent-once / script SDK paths, and the legacy no-mistakes mirror /
- * delegate-supervisor profile-backed paths,
+ * delegate-supervisor binding-backed paths,
  * gates, and production dispatch scaffolds are layered on later modules.
  * Closeout dogfood and deferred executor adapters stay outside this
  * primitive module.

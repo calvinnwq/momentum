@@ -15,6 +15,13 @@ import {
 } from "../src/core/workflow/definition/definition.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import { insertWorkflowGate } from "../src/core/workflow/gate/persist.js";
+import {
+  insertExecutorAttempt,
+  insertExecutorCheckpoint,
+  insertExecutorRound,
+} from "../src/core/executors/loop/persist.js";
+import { deriveDispatchCorrelationId } from "../src/core/workflow/dispatch/attempt-ids.js";
+import { acquireRepoLock } from "../src/core/repo/locks.js";
 
 type RunResult = {
   code: number;
@@ -64,6 +71,89 @@ function initRepo(repoPath: string): void {
   );
   runGit(repoPath, ["add", "README.md", ".gitignore"]);
   runGit(repoPath, ["commit", "-m", "init", "--quiet"]);
+}
+
+function seedCompletedNativeEvidence(
+  db: MomentumDb,
+  runId: string,
+  stepId: string,
+  commitSha: string | null,
+): void {
+  const attemptId = `${runId}::${stepId}::attempt-1`;
+  const roundId = `${attemptId}::round::0`;
+  insertExecutorAttempt(
+    db,
+    {
+      attemptId,
+      workflowRunId: runId,
+      stepRunId: stepId,
+      stepKey: stepId,
+      executor: "agent-once",
+      state: "running",
+      attemptNumber: 1,
+      startedAt: SEED_NOW,
+      heartbeatAt: SEED_NOW,
+      finishedAt: null,
+    },
+    { now: SEED_NOW },
+  );
+  insertExecutorRound(
+    db,
+    {
+      roundId,
+      attemptId,
+      workflowRunId: runId,
+      stepRunId: stepId,
+      stepKey: stepId,
+      executor: "agent-once",
+      attemptNumber: 1,
+      roundIndex: 0,
+      state: "capturing_result",
+      classification: null,
+      startedAt: SEED_NOW,
+      heartbeatAt: SEED_NOW,
+      finishedAt: null,
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: null,
+      resultDigest: null,
+      artifactRoot: "/artifacts/round-0",
+      logPaths: [],
+      summary: null,
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: null,
+      commitSha,
+      recoveryCode: null,
+      humanGate: null,
+    },
+    { now: SEED_NOW },
+  );
+  insertExecutorCheckpoint(
+    db,
+    {
+      checkpointId: `${roundId}-started`,
+      roundId,
+      sequence: 0,
+      stage: "round_started",
+      detail: null,
+    },
+    { now: SEED_NOW },
+  );
+  insertExecutorCheckpoint(
+    db,
+    {
+      checkpointId: `${roundId}-completed`,
+      roundId,
+      sequence: 1,
+      stage: "mechanism_completed",
+      detail: "attempt outcome: ok",
+    },
+    { now: SEED_NOW },
+  );
 }
 
 async function run(
@@ -159,13 +249,12 @@ const VALID_WRAPPER_RESULT_JSON = JSON.stringify({
 
 const WRITE_VALID_WRAPPER_RESULT = `printf 'watch wrapper ran\\n' > "$MOMENTUM_REPO_PATH/watch-wrapper.txt" && printf '%s' '${VALID_WRAPPER_RESULT_JSON}' > "$MOMENTUM_RESULT_PATH"`;
 
-function writeLiveWrapperProfile(root: string, stepKind: string): string {
+function writeHostBindings(root: string, stepKind: string): string {
   const profilePath = path.join(root, "watch-live-wrapper-profile.json");
   fs.writeFileSync(
     profilePath,
     JSON.stringify({
-      name: "watch-live-wrapper",
-      wrappers: {
+      bindings: {
         [stepKind]: {
           command: "/bin/sh",
           args: ["-c", WRITE_VALID_WRAPPER_RESULT],
@@ -259,7 +348,12 @@ function seedStep(
 
 function seedLease(
   db: MomentumDb,
-  input: { runId: string; leaseKind: string; expiresAt: number },
+  input: {
+    runId: string;
+    leaseKind: string;
+    expiresAt: number;
+    holder?: string;
+  },
 ): void {
   db.prepare(
     `INSERT INTO workflow_leases
@@ -269,7 +363,7 @@ function seedLease(
   ).run(
     input.runId,
     input.leaseKind,
-    `holder:${input.runId}`,
+    input.holder ?? `holder:${input.runId}`,
     1_000,
     input.expiresAt,
     1_000,
@@ -583,7 +677,7 @@ describe("momentum workflow run watch", () => {
     const repoPath = path.join(dataDir, "repo");
     fs.mkdirSync(repoPath, { recursive: true });
     initRepo(repoPath);
-    const profilePath = writeLiveWrapperProfile(dataDir, "implementation");
+    const profilePath = writeHostBindings(dataDir, "implementation");
     const runId = "mwf-watch-dispatch-approved";
     const db = openDb(dataDir);
     try {
@@ -616,7 +710,7 @@ describe("momentum workflow run watch", () => {
         dataDir,
         "--json",
       ],
-      { MOMENTUM_LIVE_WRAPPER_PROFILE: profilePath },
+      { MOMENTUM_HOST_BINDINGS_FILE: profilePath },
     );
 
     expect(result.code).toBe(0);
@@ -702,9 +796,9 @@ describe("momentum workflow run watch", () => {
       message: string;
     };
     expect(failure).toMatchObject({
-      code: "daemon_live_wrapper_profile_required",
+      code: "daemon_host_bindings_required",
     });
-    expect(failure.message).toContain("MOMENTUM_LIVE_WRAPPER_PROFILE");
+    expect(failure.message).toContain("MOMENTUM_HOST_BINDINGS_FILE");
     expect(failure.message).toContain("preflight");
 
     const after = openDb(dataDir);
@@ -729,6 +823,495 @@ describe("momentum workflow run watch", () => {
       expect(leaseCount.count).toBe(0);
     } finally {
       after.close();
+    }
+  });
+
+  it("reattaches completed preflight evidence from watch without launching a host binding", async () => {
+    const dataDir = makeTempDir();
+    const repoPath = path.join(dataDir, "repo");
+    fs.mkdirSync(repoPath, { recursive: true });
+    initRepo(repoPath);
+    const runId = "mwf-watch-completed-preflight-evidence";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath,
+        objective: "Exercise watch completed native evidence reattachment",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'preflight'",
+      ).run(runId);
+      seedCompletedNativeEvidence(
+        db,
+        runId,
+        "preflight",
+        runGit(repoPath, ["rev-parse", "HEAD"]),
+      );
+      const lock = acquireRepoLock(db, {
+        repoRoot: repoPath,
+        holder: "workflow-watch-completed-preflight-worker",
+        goalId: runId,
+        iteration: 1,
+        jobId: deriveDispatchCorrelationId(runId, "preflight"),
+        leaseExpiresAt: Date.now() + 30_000,
+        now: Date.now(),
+      });
+      expect(lock.ok).toBe(true);
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      emit: true,
+      phase: "awaiting_approval",
+    });
+
+    const after = openDb(dataDir);
+    try {
+      expect(
+        after
+          .prepare(
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'preflight'",
+          )
+          .get(runId),
+      ).toEqual({ state: "succeeded" });
+      expect(
+        after
+          .prepare(
+            "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ count: 1 });
+    } finally {
+      after.close();
+    }
+  });
+
+  it("surfaces malformed executor config from watch before claiming a step", async () => {
+    const dataDir = makeTempDir();
+    const profilePath = writeHostBindings(dataDir, "preflight");
+    const runId = "mwf-watch-invalid-executor-config";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise watch executor-config refusal",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'preflight'",
+      ).run(runId);
+    } finally {
+      db.close();
+    }
+
+    const result = await run(
+      [
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ],
+      {
+        MOMENTUM_HOST_BINDINGS_FILE: profilePath,
+        MOMENTUM_EXECUTOR_CONFIG: "{ malformed",
+      },
+    );
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stderr || result.stdout)).toMatchObject({
+      code: "executor_config_invalid",
+    });
+    const after = openDb(dataDir);
+    try {
+      expect(
+        after
+          .prepare(
+            "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ count: 0 });
+    } finally {
+      after.close();
+    }
+  });
+
+  it("refuses a running native SDK recheck before heartbeating when host bindings are not configured", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-running-native-preclaim";
+    const stepId = "preflight";
+    const attemptId = `${runId}::${stepId}::dispatch`;
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise watch pre-claim guard on an active native step",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'running' WHERE run_id = ? AND step_id = ?",
+      ).run(runId, stepId);
+      // A roundless running attempt on a native SDK executor is the active
+      // resumable tick the scheduler rechecks (and heartbeats) each pass.
+      db.prepare(
+        `INSERT INTO executor_attempts (
+           attempt_id, workflow_run_id, step_run_id, step_key,
+           executor, state, attempt_number, started_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        attemptId,
+        runId,
+        stepId,
+        stepId,
+        "agent-once",
+        "running",
+        1,
+        SEED_NOW,
+        SEED_NOW,
+        SEED_NOW,
+      );
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY,
+      });
+      // The watch worker already holds a fresh dispatch claim whose heartbeat
+      // is old enough that this tick would refresh it.
+      seedLease(db, {
+        runId,
+        leaseKind: "dispatch",
+        expiresAt: FRESH_EXPIRY,
+        holder: `workflow-watch:${runId}`,
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(1);
+    const failure = JSON.parse(result.stderr) as {
+      code: string;
+      message: string;
+    };
+    expect(failure).toMatchObject({
+      code: "daemon_host_bindings_required",
+    });
+    expect(failure.message).toContain("MOMENTUM_HOST_BINDINGS_FILE");
+
+    const after = openDb(dataDir);
+    try {
+      // The pre-claim refusal must fire before the heartbeat: the dispatch
+      // lease keeps its seeded heartbeat and expiry and stays unreleased.
+      const lease = after
+        .prepare(
+          `SELECT heartbeat_at AS heartbeatAt, expires_at AS expiresAt,
+                  released_at AS releasedAt
+             FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'`,
+        )
+        .get(runId) as {
+        heartbeatAt: number;
+        expiresAt: number;
+        releasedAt: number | null;
+      };
+      expect(lease).toEqual({
+        heartbeatAt: 1_000,
+        expiresAt: FRESH_EXPIRY,
+        releasedAt: null,
+      });
+      const attempt = after
+        .prepare(
+          "SELECT state, attempt_number AS attemptNumber FROM executor_attempts WHERE attempt_id = ?",
+        )
+        .get(attemptId) as { state: string; attemptNumber: number };
+      expect(attempt).toEqual({ state: "running", attemptNumber: 1 });
+      const roundCount = after
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get(runId) as { count: number };
+      expect(roundCount.count).toBe(0);
+      const step = after
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+        )
+        .get(runId, stepId) as { state: string };
+      expect(step.state).toBe("running");
+    } finally {
+      after.close();
+    }
+  });
+
+  it("refuses the retired MOMENTUM_LIVE_WRAPPER_PROFILE selector with a migration diagnostic before any dispatch", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-retired-selector";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise retired live-wrapper selector refusal",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'preflight'",
+      ).run(runId);
+    } finally {
+      db.close();
+    }
+
+    const result = await run(
+      [
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ],
+      { MOMENTUM_LIVE_WRAPPER_PROFILE: "/legacy/profile.json" },
+    );
+
+    expect(result.code).toBe(1);
+    const failure = JSON.parse(result.stderr) as {
+      code: string;
+      message: string;
+    };
+    expect(failure.code).toBe("daemon_host_bindings_invalid");
+    expect(failure.message).toContain("MOMENTUM_LIVE_WRAPPER_PROFILE");
+    expect(failure.message).toContain("MOMENTUM_HOST_BINDINGS_FILE");
+    expect(failure.message).toContain("retired");
+
+    const after = openDb(dataDir);
+    try {
+      const step = after
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'preflight'",
+        )
+        .get(runId) as { state: string };
+      expect(step.state).toBe("approved");
+      const attemptCount = after
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+        )
+        .get(runId) as { count: number };
+      expect(attemptCount.count).toBe(0);
+    } finally {
+      after.close();
+    }
+  });
+
+  it("refuses the retired selector even when no step is dispatch-eligible and persists no monitor baseline", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-retired-selector-idle";
+    const db = openDb(dataDir);
+    try {
+      // No approvals: the run's next action is an approval, not a dispatch, so
+      // the watch tick would otherwise skip dispatch entirely and succeed.
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise retired selector refusal on an idle run",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run(
+      [
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ],
+      { MOMENTUM_LIVE_WRAPPER_PROFILE: "/legacy/profile.json" },
+    );
+
+    expect(result.code).toBe(1);
+    const failure = JSON.parse(result.stderr) as {
+      code: string;
+      message: string;
+    };
+    expect(failure.code).toBe("daemon_host_bindings_invalid");
+    expect(failure.message).toContain("MOMENTUM_LIVE_WRAPPER_PROFILE");
+    expect(failure.message).toContain("MOMENTUM_HOST_BINDINGS_FILE");
+    expect(failure.message).toContain("retired");
+
+    const after = openDb(dataDir);
+    try {
+      const runRow = after
+        .prepare(
+          "SELECT monitor_last_seen_digest, monitor_last_seen_at FROM workflow_runs WHERE id = ?",
+        )
+        .get(runId) as {
+        monitor_last_seen_digest: string | null;
+        monitor_last_seen_at: number | null;
+      };
+      expect(runRow.monitor_last_seen_digest).toBeNull();
+      expect(runRow.monitor_last_seen_at).toBeNull();
+      const attemptCount = after
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+        )
+        .get(runId) as { count: number };
+      expect(attemptCount.count).toBe(0);
+    } finally {
+      after.close();
+    }
+  });
+
+  it("refuses an unreadable host-binding source before opening an idle watch run", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-invalid-bindings-idle";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise invalid host bindings refusal on an idle run",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run(
+      [
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ],
+      {
+        MOMENTUM_HOST_BINDINGS_FILE: path.join(
+          dataDir,
+          "missing-host-bindings.json",
+        ),
+      },
+    );
+
+    expect(result.code).toBe(1);
+    const failure = JSON.parse(result.stderr) as {
+      code: string;
+      message: string;
+    };
+    expect(failure.code).toBe("daemon_host_bindings_invalid");
+    expect(failure.message).toContain("source_unreadable");
+
+    const after = openDb(dataDir);
+    try {
+      const runRow = after
+        .prepare(
+          "SELECT monitor_last_seen_digest, monitor_last_seen_at FROM workflow_runs WHERE id = ?",
+        )
+        .get(runId) as {
+        monitor_last_seen_digest: string | null;
+        monitor_last_seen_at: number | null;
+      };
+      expect(runRow.monitor_last_seen_digest).toBeNull();
+      expect(runRow.monitor_last_seen_at).toBeNull();
+    } finally {
+      after.close();
+    }
+  });
+
+  it("refuses the retired selector even when the writable open falls back to a read-only snapshot", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-retired-selector-busy";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise retired selector refusal under writer contention",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      });
+    } finally {
+      db.close();
+    }
+
+    const releaseWriter = await holdWriterLock(
+      path.join(dataDir, "momentum.db"),
+    );
+    try {
+      const result = await run(
+        [
+          "workflow",
+          "run",
+          "watch",
+          runId,
+          "--once",
+          "--data-dir",
+          dataDir,
+          "--json",
+        ],
+        { MOMENTUM_LIVE_WRAPPER_PROFILE: "/legacy/profile.json" },
+      );
+
+      expect(result.code).toBe(1);
+      const failure = JSON.parse(result.stderr) as {
+        code: string;
+        message: string;
+      };
+      expect(failure.code).toBe("daemon_host_bindings_invalid");
+      expect(failure.message).toContain("MOMENTUM_HOST_BINDINGS_FILE");
+      expect(failure.message).toContain("retired");
+    } finally {
+      await releaseWriter();
     }
   });
 
@@ -776,7 +1359,7 @@ describe("momentum workflow run watch", () => {
         message: string;
       };
       expect(failure).toMatchObject({
-        code: "daemon_live_wrapper_profile_required",
+        code: "daemon_host_bindings_required",
       });
       expect(failure.message).toContain(target.stepId);
 
@@ -1148,7 +1731,7 @@ describe("momentum workflow run watch", () => {
     const repoPath = path.join(dataDir, "repo");
     fs.mkdirSync(repoPath, { recursive: true });
     initRepo(repoPath);
-    const profilePath = writeLiveWrapperProfile(dataDir, "implementation");
+    const profilePath = writeHostBindings(dataDir, "implementation");
     const runId = "mwf-watch-live-wrapper";
     const db = openDb(dataDir);
     try {
@@ -1181,7 +1764,7 @@ describe("momentum workflow run watch", () => {
         dataDir,
         "--json",
       ],
-      { MOMENTUM_LIVE_WRAPPER_PROFILE: profilePath },
+      { MOMENTUM_HOST_BINDINGS_FILE: profilePath },
     );
 
     expect(result.code, `stderr: ${result.stderr}`).toBe(0);
@@ -1216,6 +1799,7 @@ describe("momentum workflow run watch", () => {
 
   it("releases the dispatch lease when the watch dispatcher tick throws", async () => {
     const dataDir = makeTempDir();
+    const hostBindingsPath = writeHostBindings(dataDir, "implementation");
     const runId = "mwf-watch-dispatch-throws";
     const db = openDb(dataDir);
     try {
@@ -1244,16 +1828,19 @@ describe("momentum workflow run watch", () => {
       db.close();
     }
 
-    const result = await run([
-      "workflow",
-      "run",
-      "watch",
-      runId,
-      "--once",
-      "--data-dir",
-      dataDir,
-      "--json",
-    ]);
+    const result = await run(
+      [
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ],
+      { MOMENTUM_HOST_BINDINGS_FILE: hostBindingsPath },
+    );
 
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as {

@@ -7,7 +7,7 @@ import {
   LIVE_STEP_EXECUTOR_ERROR_CODE_BY_RECOVERY_CODE,
   buildLiveStepWrapperInput,
   createLiveWorkflowStepExecutor,
-  createLiveWorkflowStepExecutorsFromProfile,
+  createLiveWorkflowStepExecutorsFromBindings,
   mapLiveStepWrapperResult,
 } from "../src/core/executors/live-step/executor.js";
 import {
@@ -20,9 +20,9 @@ import {
   type WorkflowStepExecutorInput,
 } from "../src/core/workflow/step/executor.js";
 import {
-  parseLiveWrapperProfile,
-  type LiveWrapperConfig,
-} from "../src/adapters/live-wrapper-registry.js";
+  parseHostBindings,
+  type HostBindingConfig,
+} from "../src/adapters/host-bindings-registry.js";
 import type { RunnerResult } from "../src/core/executors/runner/types.js";
 
 const tempRoots: string[] = [];
@@ -110,8 +110,8 @@ function makeExecutorInput(
 }
 
 function makeConfig(
-  overrides: Partial<LiveWrapperConfig> = {},
-): LiveWrapperConfig {
+  overrides: Partial<HostBindingConfig> = {},
+): HostBindingConfig {
   return {
     command: "/bin/sh",
     args: [],
@@ -346,11 +346,10 @@ describe("createLiveWorkflowStepExecutor", () => {
   });
 });
 
-describe("createLiveWorkflowStepExecutorsFromProfile", () => {
+describe("createLiveWorkflowStepExecutorsFromBindings", () => {
   it("builds one executor per configured step kind and skips unconfigured kinds", () => {
-    const parsed = parseLiveWrapperProfile({
-      name: "live-default",
-      wrappers: {
+    const parsed = parseHostBindings({
+      bindings: {
         implementation: {
           command: "/bin/sh",
           args: ["-c", "true"],
@@ -363,8 +362,8 @@ describe("createLiveWorkflowStepExecutorsFromProfile", () => {
     });
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    const executors = createLiveWorkflowStepExecutorsFromProfile(
-      parsed.profile,
+    const executors = createLiveWorkflowStepExecutorsFromBindings(
+      parsed.bindings,
     );
     expect([...executors.keys()]).toEqual(["implementation"]);
     expect(executors.get("implementation")?.executes).toBe(true);

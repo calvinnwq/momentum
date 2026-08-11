@@ -162,6 +162,7 @@ export type SingleShotExecutorHostBindings = {
   hostBindingIdentity?: string;
   /** True only for the host call that atomically inserted this new round. */
   roundAlreadyMaterialized?: boolean;
+  replayOnly?: boolean;
   /** Host-resolved native runner for production registered dispatch. */
   runRound?: SingleShotRoundRunner;
   /** Release or retain repository ownership after durable mechanism evidence. */
@@ -317,6 +318,52 @@ export class SingleShotExecutor implements Executor<
       (snapshot) =>
         snapshot.round.attemptNumber === context.state.attempt.attemptNumber,
     );
+    if (hostBindings.replayOnly === true && currentAttemptRounds.length > 0) {
+      try {
+        const resumed = resumeCompletedSingleShotRound(this.name, {
+          ...context,
+          config,
+          hostBindings,
+        });
+        hostBindings.settleRepoOwnership?.(true);
+        return resumed;
+      } catch (error) {
+        hostBindings.settleRepoOwnership?.(false);
+        if (hostBindings.replayOnly === true) {
+          const round = currentAttemptRounds[0]?.round;
+          if (round !== undefined) {
+            return {
+              roundId: round.roundId,
+              recommendation: "manual_recovery_required",
+              recommendedRoundState: "manual_recovery_required",
+              recommendedAttemptState: "manual_recovery_required",
+              recoveryCode: "runtime_unavailable",
+              humanGate: "manual_recovery_required",
+              reason: `Completed native round could not be reclassified without host bindings: ${error instanceof Error ? error.message : String(error)}`,
+              decision: {
+                classification: "manual_recovery_required",
+                roundState: "manual_recovery_required",
+                attemptState: "manual_recovery_required",
+                recoveryCode: "runtime_unavailable",
+                humanGate: "manual_recovery_required",
+                reason:
+                  "Host bindings are unavailable for completed native work.",
+              },
+              artifacts: [],
+              checkpoints: [],
+              classificationCheckpoint: {
+                checkpointId: `${round.roundId}-checkpoint-recovery-unavailable`,
+                roundId: round.roundId,
+                sequence: 0,
+                stage: "classified",
+                detail: "classification: manual_recovery_required",
+              },
+            };
+          }
+        }
+        throw error;
+      }
+    }
     if (
       currentAttemptRounds.length > 0 &&
       hostBindings.roundAlreadyMaterialized !== true
@@ -565,13 +612,15 @@ function resumeCompletedSingleShotRound(
       `Single-shot resumable round ${round.roundId} does not match host round ${context.hostBindings.start.roundId}.`,
     );
   }
-  assertSingleShotRoundMatchesHost(executor, context, round);
-  assertResumableDispatchBinding(
-    executor,
-    context,
-    round,
-    snapshot.checkpoints,
-  );
+  if (context.hostBindings.replayOnly !== true) {
+    assertSingleShotRoundMatchesHost(executor, context, round);
+    assertResumableDispatchBinding(
+      executor,
+      context,
+      round,
+      snapshot.checkpoints,
+    );
+  }
   if (round.classification !== null || isTerminalRoundState(round.state)) {
     throw new Error(
       `Single-shot round ${round.roundId} is already terminal and cannot resume classification.`,

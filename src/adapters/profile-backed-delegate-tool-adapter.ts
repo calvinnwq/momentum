@@ -1355,6 +1355,20 @@ export function createPersistedProfileDelegateToolAdapter(input: {
   argsPrefix: readonly string[];
   env: Record<string, string | undefined>;
 }): DelegateSupervisorToolAdapter {
+  if (input.tool === "no-mistakes" && input.command.length === 0) {
+    return {
+      name: input.tool,
+      handoff: () => {
+        throw new Error("durable no-mistakes handoff must not be repeated");
+      },
+      readExternalState: ({ handoff }) =>
+        readBindingFreeNoMistakesDelegateState(
+          input.repoPath,
+          handoff.artifactPaths,
+          handoff.externalIdentity,
+        ),
+    };
+  }
   if (input.tool === "no-mistakes") {
     return createNoMistakesToolAdapter({
       handoff: () => {
@@ -2621,12 +2635,89 @@ function readRepoBoundPersistedDelegateState(
   );
   const read =
     finalizedReceiptState ?? readPersistedDelegateState(artifactPaths);
-  if (!read.ok || delegateStateHeadMatchesRepo(repoPath, read.value.headSha)) {
-    return read;
+  if (!read.ok) return read;
+  if (
+    read.value.externalRunId !== expected.identity.externalRunId ||
+    read.value.branch !== expected.identity.branch
+  ) {
+    return {
+      ok: false,
+      error:
+        "delegated external state does not match its durable external identity",
+    };
   }
+  if (delegateStateHeadMatchesRepo(repoPath, read.value.headSha)) return read;
   return {
     ok: false,
     error: `delegated external state head ${read.value.headSha} does not match the current repository head`,
+  };
+}
+
+function readBindingFreeNoMistakesDelegateState(
+  repoPath: string,
+  artifactPaths: readonly string[] | undefined,
+  expected: DelegateSupervisorExternalIdentity,
+): ReturnType<typeof readPersistedDelegateState> {
+  const receiptPath = artifactPaths?.find(
+    (candidate) => path.basename(candidate) === "delegate-handoff.json",
+  );
+  const statePath = artifactPaths?.find((candidate) =>
+    candidate.endsWith("delegate-external-state.json"),
+  );
+  if (receiptPath === undefined || statePath === undefined) {
+    return {
+      ok: false,
+      error:
+        "no-mistakes handoff evidence has no validated receipt and state artifacts",
+    };
+  }
+  try {
+    const stored = JSON.parse(
+      readBoundedRegularFile(
+        receiptPath,
+        "no-mistakes handoff receipt",
+      ).toString("utf8"),
+    ) as Partial<NoMistakesDelegateReceipt>;
+    const identity = stored.externalIdentity;
+    if (
+      stored.schemaVersion !== 1 ||
+      (stored.phase !== "launched" && stored.phase !== "completed") ||
+      stored.branch !== expected.branch ||
+      stored.headSha !== expected.headSha ||
+      typeof stored.statePath !== "string" ||
+      path.resolve(stored.statePath) !== path.resolve(statePath) ||
+      identity?.externalRunId !== expected.externalRunId ||
+      identity?.branch !== expected.branch ||
+      identity?.headSha !== expected.headSha
+    ) {
+      return {
+        ok: false,
+        error:
+          "no-mistakes handoff receipt does not match its durable identity",
+      };
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      error: `no-mistakes handoff receipt is unreadable: ${errorMessage(error)}`,
+    };
+  }
+  const read = readPersistedDelegateState([statePath]);
+  if (!read.ok) return read;
+  if (
+    read.value.externalRunId !== expected.externalRunId ||
+    read.value.branch !== expected.branch
+  ) {
+    return {
+      ok: false,
+      error:
+        "no-mistakes external state does not match its durable external identity",
+    };
+  }
+  if (delegateStateHeadMatchesRepo(repoPath, read.value.headSha)) return read;
+  return {
+    ok: false,
+    error: `no-mistakes external state head ${read.value.headSha} does not match the current repository head`,
   };
 }
 

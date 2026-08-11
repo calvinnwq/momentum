@@ -10,7 +10,7 @@
  * Like its read-smoke sibling it never performs I/O — it only:
  *
  *   - decides whether the harness smoke may run at all, given operator-controlled
- *     environment variables and a configured live-wrapper profile
+ *     environment variables and configured host bindings
  *     (`planWorkflowHarnessSmoke`), and
  *   - maps a finished probe / harness run into a documented failure-mode
  *     taxonomy (`classifyWorkflowHarnessOutcome`).
@@ -41,11 +41,11 @@ import {
   type WorkflowExecutor,
 } from "../../workflow/definition/definition.js";
 import {
-  parseLiveWrapperProfile,
-  resolveLiveWrapper,
-  type LiveWrapperCwd,
-  type LiveWrapperProbeConfig,
-} from "../../../adapters/live-wrapper-registry.js";
+  parseHostBindings,
+  resolveHostBinding,
+  type HostBindingCwd,
+  type HostBindingProbeConfig,
+} from "../../../adapters/host-bindings-registry.js";
 import {
   WORKFLOW_STEP_KINDS,
   type WorkflowStepKind,
@@ -66,7 +66,7 @@ export const REAL_SMOKE_WORKFLOW_ALLOW_WRITE_ENV_VAR =
 
 export type WorkflowHarnessSmokeSkipReason =
   | "not_opted_in"
-  | "profile_unavailable"
+  | "host_bindings_unavailable"
   | "kind_missing"
   | "unsupported_kind"
   | "not_configured"
@@ -83,10 +83,10 @@ export type WorkflowHarnessSmokePlan =
       probeOnly: boolean;
       command: string;
       args: readonly string[];
-      cwd: LiveWrapperCwd;
+      cwd: HostBindingCwd;
       timeoutSec: number;
       envAllow: readonly string[];
-      probe: LiveWrapperProbeConfig | null;
+      probe: HostBindingProbeConfig | null;
     };
 
 const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(
@@ -96,12 +96,12 @@ const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(
 /**
  * Decide whether the opt-in real coding-workflow harness smoke may run, and with
  * what bounded parameters. Pure: reads only the provided environment snapshot
- * and the supplied raw live-wrapper profile value (parsed here so callers may
+ * and the supplied raw host-binding value (parsed here so callers may
  * pass file contents without coupling this module to the filesystem).
  */
 export function planWorkflowHarnessSmoke(
   env: Record<string, string | undefined>,
-  rawProfile: unknown,
+  rawHostBindings: unknown,
 ): WorkflowHarnessSmokePlan {
   if (!isEnvFlagEnabled(env[REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR])) {
     return {
@@ -111,12 +111,12 @@ export function planWorkflowHarnessSmoke(
     };
   }
 
-  const parsedProfile = parseLiveWrapperProfile(rawProfile);
-  if (!parsedProfile.ok) {
+  const parsedBindings = parseHostBindings(rawHostBindings);
+  if (!parsedBindings.ok) {
     return {
       mode: "skip",
-      reason: "profile_unavailable",
-      detail: `A valid live-wrapper profile is required to resolve the harness command: ${parsedProfile.error}`,
+      reason: "host_bindings_unavailable",
+      detail: `Valid host bindings are required to resolve the harness command: ${parsedBindings.error}`,
     };
   }
 
@@ -136,7 +136,7 @@ export function planWorkflowHarnessSmoke(
     };
   }
 
-  const resolved = resolveLiveWrapper(parsedProfile.profile, kind);
+  const resolved = resolveHostBinding(parsedBindings.bindings, kind);
   if (!resolved.ok) {
     return {
       mode: "skip",

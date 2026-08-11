@@ -146,7 +146,7 @@ The built-in `delegate-supervisor` uses the same interface.
 Its strict portable config is `{ "tool": "<adapter-name>" }`.
 The resolved adapter's declared `name` must exactly match that selected tool or the executor treats the adapter as unavailable.
 The current coding definition uses `gnhf` for implementation and `no-mistakes` for validation without adding either tool as a new executor identity.
-Profile-backed tool bindings are host-local; a configured third-party executor does not receive them through `MOMENTUM_EXECUTOR_CONFIG`.
+Binding-backed tool adapters are host-local; a configured third-party executor does not receive them through `MOMENTUM_EXECUTOR_CONFIG`.
 
 ### Delegate-supervisor lifecycle
 
@@ -155,25 +155,25 @@ The executor owns durable rounds, evidence projection, semantic liveness, gates,
 
 Before invoking a tool, the executor records a `delegate_handoff_intent` checkpoint.
 A successful handoff records the pinned external run id and branch, the canonical lowercase full 40-character launch-head SHA, summary, artifact paths, and any terminal-state candidate observed during handoff in `delegate_handoff_completed`.
-The profile-backed host releases repository ownership only after that handoff evidence is durable.
+The binding-backed host releases repository ownership only after that handoff evidence is durable.
 If an attempt or process is interrupted after intent but before completion, the adapter must recover the same external handoff from durable evidence.
 An adapter without safe recovery support fails closed, and a later attempt cannot launch another external run while an earlier handoff intent remains unresolved.
-The profile-backed host writes its tool receipt before the no-mistakes launch and before any delegated reset or commit mutation.
+The binding-backed host writes its tool receipt before the no-mistakes launch and before any delegated reset or commit mutation.
 After the no-mistakes wrapper returns, that receipt binds the exact digest of the bounded regular result document.
 The host rechecks the digest before the finalizer's selected reset or commit, before accepting a verified no-change result, and before any failed-finalization retry or prepared-commit recovery; changed or missing result bytes fail closed before mutation or handoff completion.
 No-mistakes handoff finalization accepts a successful result with a verified clean worktree and no changes to commit; a failed verification still rejects the handoff.
 An interrupted no-mistakes `launching` receipt reads the original executor log only to corroborate exactly one canonical current run id; historical sections are ignored, duplicate identities fail closed, and without durable wrapper-finalization proof the receipt never becomes authority to reattach or relaunch.
-Generic profile-backed recovery accepts a completed reset or commit only when the current result file is a bounded regular file whose exact digest matches the receipt and the recorded base, tree, commit message, and clean-worktree proof also match.
+Generic binding-backed recovery accepts a completed reset or commit only when the current result file is a bounded regular file whose exact digest matches the receipt and the recorded base, tree, commit message, and clean-worktree proof also match.
 If interruption leaves a verified commit staged but not created, host preflight accepts the otherwise-dirty index only when the `finalizing` receipt matches the current base `HEAD`, exact staged tree, configured artifact paths, result digest, and successful result, with no unstaged or untracked changes.
 Prepared-commit recovery then rechecks repository ownership, result bytes, expected tree, and commit message immediately before committing.
 Delegate receipts, result documents, persisted external-state documents, and no-mistakes launch logs must be bounded regular files; symbolic links, oversized files, named pipes, and path substitution fail closed before evidence is read or refreshed.
 Correlated legacy run-root delegate state and no-mistakes receipts remain recoverable through a one-way migration into the step-scoped delegate root; a legacy no-mistakes receipt must explicitly record successful handoff finalization, and attempt-correlation and branch checks plus current-head validation for finalized state prevent unrelated legacy evidence from migrating.
-Finalized profile-backed state must also carry a full 40-character head SHA that matches the repository's current `HEAD`.
+Finalized binding-backed state must also carry a full 40-character head SHA that matches the repository's current `HEAD`.
 Missing receipts or mismatched branch, result, worktree, commit, or current-head evidence preserve the worktree and refuse a duplicate launch.
-Existing `mechanism_completed` checkpoints from the earlier profile-backed path remain reattachable and are classified without repeating the tool handoff.
+Existing `mechanism_completed` checkpoints from the earlier binding-backed path remain reattachable and are classified without repeating the tool handoff.
 Checkpoint precedence follows durable round index and checkpoint sequence, so a newer delegate intent or handoff cannot be overridden by an older legacy completion.
 A later attempt sends the latest valid non-terminal handoff through `recoverHandoff` before reuse, preserves prior decision history, and starts a fresh semantic-stall window instead of relaunching the delegated tool.
-For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains durable evidence but permits one fresh launch on the newer attempt.
+For binding-backed no-mistakes, a conclusively failed or cancelled prior external run remains durable evidence but permits one fresh launch on the newer attempt.
 A locally failed wrapper-finalization receipt is not proof that its external run failed.
 The newer attempt reads the correlated run first.
 A conclusively failed or cancelled run permits one fresh launch without repeating local finalization; every other status reruns the failed local finalization before the same run is reattached for supervision.
@@ -195,7 +195,7 @@ Each unchanged running read still refreshes durable liveness, but it carries for
 After four minutes without semantic progress or terminal evidence, the attempt enters `manual_recovery_required` with `external_state_inconsistent` so an operator can inspect the external run before clearing recovery.
 
 Terminal success requires a full 40-character observed head SHA, a matching handoff run id and branch, no active step or findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
-Profile-backed adapters additionally bind that terminal SHA to the repository's current `HEAD`.
+Binding-backed adapters additionally bind that terminal SHA to the repository's current `HEAD`.
 Terminal evidence captured by the handoff is persisted in the same envelope as a settlement candidate, but a fresh adapter read must corroborate the same run, branch, and exact full head SHA before the executor can settle it.
 On reattachment, the no-mistakes adapter may reload a missing in-envelope candidate from the step-scoped `launched` receipt only when the receipt's schema, run id, branch, full launch head, full terminal head, and external identity all match and Git proves the terminal head descends from the launch head.
 A lagging `running` response can corroborate the candidate only when it reports no active step, passed or absent CI, no findings or selected findings, and no unresolved decisions.
@@ -205,7 +205,7 @@ Unreadable state, cancelled state, contradictory completion, and identity drift 
 
 Third-party modules loaded only through `MOMENTUM_EXECUTOR_CONFIG` currently receive an empty `hostBindings` object.
 The public registration surface does not inject machine-local commands, credentials, or clients into those modules.
-Profile-backed built-ins use Momentum's internal host-binding resolver for live-wrapper execution.
+Binding-backed built-ins use Momentum's internal host-binding resolver for their machine-local execution.
 
 ## Registered dispatch lifecycle
 
@@ -219,13 +219,14 @@ The driver preserves that selection in controller-created recovery rounds, and
 initial handoff, retry rounds, and reattachment rounds, while their durable
 checkpoint evidence remains attached to the same attempt and round lineage.
 A legacy or migrated dispatch lineage whose first round is index 1 is not redispatched as an SDK tick, including on a mixed-lineage retry; it remains on the reconciliation or recovery path.
-For the first completed delegate-supervisor handoff in an attempt, the profile-backed dispatcher permits a second bounded tick in the same pass so the first external-state read follows that durable handoff immediately.
+For the first completed delegate-supervisor handoff in an attempt, the binding-backed dispatcher permits a second bounded tick in the same pass so the first external-state read follows that durable handoff immediately.
 Later passes and every retry attempt return to one tick, including a retry that launches a fresh external run.
 A continuation-only pass waits the configured daemon poll interval before the next external-state read.
 If a process dies after a durable handoff intent or completed handoff exists but before daemon classification, stale auto-release dispatch recovery releases the abandoned lease and re-drives that unclassified running, capturing-result, or `mirroring_external_state` round under the same attempt.
 The same recovery applies to a completed `continue` poll whose succeeded or failed round has a durable handoff in its history.
 It does not park the run merely because terminal classification is missing, and it does not repeat the external handoff.
-Native completed-mechanism reattachment follows the durable-envelope rule below.
+Native completed-mechanism reattachment without a resolved host-binding source follows the durable-envelope rule below: durable completion evidence must identify the current attempt, the current repository `HEAD` must exactly match the completed round's recorded commit SHA, expected settled base HEAD, or delegate handoff head, and an active unexpired repository lock must still match the run, attempt number, and canonical repository root.
+Missing or expired ownership fails closed with `repo_ownership_unproven`; a missing or mismatched recorded repository head fails closed with `head_mismatch`.
 If the process instead dies after gate classification but before gate parking finishes, stale dispatch recovery reuses or reconstructs the round-scoped gate from the durable decision selector and unresolved decision.
 That recovery verifies and releases the exact stale lease in the same transaction, preserving the executor's selected operator target without opening manual recovery.
 If a delegate dies earlier after persisting a mirrored gate checkpoint, a gate-eligible decision, and a `waiting_operator` observation but before classification, stale recovery makes that unclassified round resumable under the same attempt so classification and gate parking can finish.
@@ -240,7 +241,7 @@ This prevents a delayed result from an old attempt from completing the active re
 Dispatch lease heartbeats run independently of the executor tick, including while synchronous executor code blocks the main event loop.
 Every durable envelope write is fenced against the current lease identity and freshness.
 Lease loss aborts the tick signal and prevents later writes from the former owner.
-The profile-backed repository lock spans at least the longest configured wrapper/probe execution window plus the full verification-command budget and is released only after clean finalization or durable handoff evidence.
+The binding-backed repository lock spans at least the longest configured wrapper/probe execution window plus the full verification-command budget and is released only after clean finalization or durable handoff evidence.
 Recovery of an unresolved handoff may take over an active lock for the same step-scoped deterministic dispatch correlation after the lock expires or after the scheduler proves and releases the matching stale dispatch owner.
 The repository, run, previous holder, attempt, job, and prior deadline must still match, and subsequent heartbeats and settlement remain fenced by the new holder and attempt.
 
@@ -323,7 +324,7 @@ When Momentum observes an unowned escaped descendant, loses ownership visibility
 It does not expose SQLite or terminal-classification methods. The daemon controller and frozen executor facade are separate runtime objects, not merely different TypeScript views of one object. The facade rejects evidence for another attempt, overlapping or gapped rounds, writes after either the round or attempt is terminal, and terminal states submitted through JavaScript or casted observation inputs. Every public write validates its complete payload at runtime, including round starts and observations, progress checkpoint batches, artifacts, checkpoints, findings, decisions, and daemon settlement. Observation updates use an explicit runtime field whitelist rather than spreading caller objects. State-dependent checks and writes are transactional; daemon-allocated checkpoint identity, terminal classification, and attempt settlement share one write transaction.
 Executor writes are available only while the attempt is `running`; a daemon transition to `waiting_operator` or any other non-running state revokes every facade write, including heartbeat, until daemon policy moves the attempt again.
 
-If `mechanism_completed` evidence is durable but daemon classification is not, the profile-backed native `agent-loop`, `agent-once`, and `script` entrypoints reattach the matching non-terminal deterministic attempt, reconstruct the outcome from that checkpoint, and return the same recommendation without rerunning the mechanism or repeating its commit.
+If `mechanism_completed` evidence is durable but daemon classification is not, the binding-backed native `agent-loop`, `agent-once`, and `script` entrypoints reattach the matching non-terminal deterministic attempt, reconstruct the outcome from that checkpoint, and return the same recommendation without rerunning the mechanism or repeating its commit.
 Result-capture observations and their completion checkpoints commit together, so a restart cannot see a torn completion proof.
 For a new native dispatch, the attempt, its initial running round, and the hashed `round_started` dispatch-binding checkpoint are materialized in one transaction after runtime inputs resolve, so a crash cannot leave a newly created attempt without its complete durable reattach binding.
 Every subsequent native agent-loop round uses the same atomic round plus binding operation before its mechanism launches.
@@ -393,14 +394,14 @@ Executors receive any host-provided bindings through `ExecutorTickContext.hostBi
 The shipped agent-loop and single-shot lifecycles keep round-start identity and their resolved live-wrapper or script runner in that field.
 Before invoking that adapter, the built-in lifecycle clones and freezes its portable config and host round-start bindings so runner mutation cannot change the durable dispatch identity.
 The runner still receives portable config and must reject any mismatch with the captured host resolution.
-The production profile-backed host cross-checks agent-loop agent/timeout/policy, script command/timeout/policy, and agent-once agent/timeout/policy identity before launching a process.
-Its policy identity is the resolved live-wrapper profile name, its agent identity is the persisted per-step selection from canonical step state and exposed through the compatibility `route.steps` projection, and its script identity is the profile's optional `command_identity` or the workflow step kind for older profiles.
+The production binding-backed host cross-checks agent-loop agent/timeout/policy, script command/timeout/policy, and agent-once agent/timeout/policy identity before launching a process.
+Its agent identity is the persisted per-step selection from canonical step state and exposed through the compatibility `route.steps` projection, and its script identity is the binding's optional `command_identity` or the workflow step kind for older bindings; no binding-set name or policy identity is injected into portable state.
 Resolved executable paths, raw argv, cwd, and environment remain host-owned and contribute only an opaque digest to the durable reattachment binding.
 Any mismatch returns `invalid_input` before process launch.
 For scripts, an explicit host `commandIdentity` is authoritative; otherwise the absolute executable's basename is the expected portable command identity.
 The deterministic script host also requires `timeoutSec` to be a positive integer no greater than 2,147,453 seconds.
 An invalid or oversized host timeout returns `invalid_input` before either the synchronous compatibility path or the asynchronous SDK path launches the command.
-Daemon profile availability and native no-fallback behavior are owned by [Daemon commands](daemon.md#workflow-live-wrapper-profile).
+Daemon host-binding availability and native no-fallback behavior are owned by [Daemon commands](daemon.md#workflow-host-bindings).
 
 The agent-once and script built-ins publish strict schemas with `additionalProperties: false`. Schema validation is fail-closed once registration/preflight wiring selects the executor, and the native single-shot lifecycle repeats executor-specific validation before durable round creation. Script config cannot carry agent fields; agent-once config cannot carry command fields. The SDK declaration itself never turns an unknown field into ambient runtime behavior.
 
@@ -419,7 +420,7 @@ There are four public extension levels:
 3. Supply the shipped agent-loop lifecycle's narrow bounded round adapter.
 4. Implement `Executor` directly for a new lifecycle.
 
-The shipped delegate-supervisor has a narrower tool-adapter interface inside the profile-backed built-in host, but there is not yet a public tool-adapter registry for third-party modules.
+The shipped delegate-supervisor has a narrower tool-adapter interface inside the binding-backed built-in host, but there is not yet a public tool-adapter registry for third-party modules.
 Agent-loop has no default iteration cap: requirements are the stop condition, and an explicit `maxRounds` value may stop continuation with a durable `quota_exhausted` gate.
 A looping executor must never add an implicit cap in its own adapter.
 

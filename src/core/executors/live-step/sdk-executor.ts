@@ -198,7 +198,7 @@ const EMPTY_CONFIG_SCHEMA = {
   additionalProperties: false,
 } as const satisfies ExecutorConfigSchema;
 
-/** Current built-in schemas used by the profile-backed compatibility bridge. */
+/** Current built-in schemas used by the binding-backed compatibility bridge. */
 export function liveStepBuiltInConfigSchema(
   name: string,
 ): ExecutorConfigSchema {
@@ -273,7 +273,7 @@ function parseDurableDecision(detail: string): DurableLiveStepDecision {
 }
 
 /**
- * Finalize one profile-backed result through shared repo safety.
+ * Finalize one binding-backed result through shared repo safety.
  * Callers may accept a verified clean worktree with nothing to commit when the
  * delegated tool's successful handoff is itself the intended evidence.
  */

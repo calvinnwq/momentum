@@ -35,7 +35,7 @@ Momentum is a workflow-first runtime for durable repo-work orchestration.
 
 Built-in executor identities currently include `agent-loop`, `agent-once`,
 `script`, `delegate-supervisor`, `external-apply`, and `subworkflow`.
-Profile-backed registration and native binding details are owned by [Executor SDK](docs/executor-sdk.md#config-and-host-bindings).
+Binding-backed registration and native binding details are owned by [Executor SDK](docs/executor-sdk.md#config-and-host-bindings).
 Step definitions may also name arbitrary valid permanent identities supplied by
 the configured executor registry.
 Recorded definitions stay byte-for-byte immutable, so retired spellings remain
@@ -119,7 +119,7 @@ Every executor declares a strict object config schema. The schema describes only
 portable workflow intent: agent harness/model/effort, tool or command identity,
 timeouts, opt-in `maxRounds`, and policy. Executable paths, cwd, environment,
 credentials, stdin policy, and other machine-local values are host bindings.
-Daemon profile resolution and native no-fallback behavior are owned by [Daemon commands](docs/daemon.md#workflow-live-wrapper-profile).
+Daemon host-binding resolution and native no-fallback behavior are owned by [Daemon commands](docs/daemon.md#workflow-host-bindings).
 Structural preflight validation and module registration are separate runtime
 wiring; the SDK contract does not make either a private executor hook. The
 single-shot lifecycle also enforces its declared executor-specific schema at
@@ -180,13 +180,13 @@ rejects cross-attempt or non-current round results.
 Delegate retries retain correlated handoff and decision evidence but start a new
 semantic-stall window for the new attempt.
 A valid non-terminal handoff is reconciled through adapter recovery before reuse.
-For profile-backed no-mistakes, a conclusively failed or cancelled prior
+For binding-backed no-mistakes, a conclusively failed or cancelled prior
 external run remains evidence but permits one fresh launch on the newer attempt.
 Local wrapper-finalization failure alone is not external terminal evidence: the newer attempt first reads the correlated run.
 A conclusively failed or cancelled run permits one fresh launch; every other status reruns the failed local finalization before the same run is reattached for supervision.
 An independent dispatch-lease heartbeat continues during synchronous ticks, and
 every executor write is fenced against live lease ownership.
-The profile-backed repo lock covers at least the longest configured wrapper/probe execution window plus the complete verification budget, and it is released only after clean finalization or durable delegate handoff evidence.
+The binding-backed repo lock covers at least the longest configured wrapper/probe execution window plus the complete verification budget, and it is released only after clean finalization or durable delegate handoff evidence.
 An unresolved delegate intent can take over an active lock only for the same step-scoped deterministic dispatch correlation: either after that lock expires or after the scheduler proves and releases the matching stale dispatch owner.
 Repository, run, job, previous-holder, attempt, and deadline compare-and-swap fencing prevents displacement of a concurrent or newer owner, and later lock writes require the new holder and attempt.
 
@@ -223,7 +223,7 @@ portable step config selects it with `tool`, so adding a tool does not add an
 executor or durable schema value. Recovery after a persisted handoff
 intent must reconcile durable tool evidence or fail closed before another
 launch.
-The profile-backed host writes no-mistakes launch intent before spawning the tool and writes reset or commit intent before the corresponding repository mutation.
+The binding-backed host writes no-mistakes launch intent before spawning the tool and writes reset or commit intent before the corresponding repository mutation.
 After the no-mistakes wrapper returns, the receipt binds the exact digest of its bounded regular result file.
 The host revalidates that digest before a selected reset or commit, before accepting a verified no-change result, and before retrying failed local finalization or recovering a prepared commit, so changed result bytes authorize no repository mutation or handoff completion.
 Successful no-mistakes handoff finalization accepts a verified clean worktree with no changes to commit, while failed verification still rejects the handoff.
@@ -235,7 +235,7 @@ current base `HEAD`, exact index tree, configured artifact paths, result digest,
 and successful result, with no unstaged or untracked changes.
 Recovery then rechecks repository ownership, result digest, expected tree, and
 commit message immediately before creating the prepared commit.
-Completed profile-backed state is accepted only while its full 40-character head
+Completed binding-backed state is accepted only while its full 40-character head
 SHA matches the repository's current `HEAD`.
 The external run id and branch are stable correlation identity; an
 observed head may advance as the delegated tool commits fixes and counts as
@@ -360,7 +360,7 @@ For ordinary live-wrapper-owned dispatched steps, successful wrapper evidence is
 not terminal by itself: Momentum reads the runner result, verifies, commits or
 resets against the captured base HEAD, and only then records terminal executor
 evidence for reconciliation.
-For profile-backed delegate-supervisor steps, that same finalization produces
+For binding-backed delegate-supervisor steps, that same finalization produces
 durable handoff and candidate evidence instead; the attempt and workflow step
 remain non-terminal until a later external-state read receives a daemon-accepted
 terminal classification.
@@ -376,7 +376,7 @@ that recovery on Linux or macOS prepares the same step for a new attempt and
 round regardless of step kind.
 
 Workflow-level preflight validates structural setup before runtime work begins:
-definition resolution, approval boundary, route config, wrapper/profile schema,
+definition resolution, approval boundary, route config, wrapper/host-binding schema,
 canonical config keys, and result/config path shape. Side-effecting tail steps
 own their own capability/auth/target/idempotency checks inside the same durable
 step lifecycle that applies and reconciles the side effect.
@@ -448,8 +448,8 @@ captures the run's isolation inputs in durable state: repo, objective, issue
 scope, approval boundary, skill revision, and the historical operator
 runtime/profile and implementation-label compatibility values; those values are
 read-back/refusal evidence only.
-The daemon still resolves the executing live-wrapper profile from
-`MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
+The daemon still resolves the executing host-binding file from
+`MOMENTUM_HOST_BINDINGS_FILE` at run time.
 Native coding dispatch resolves executors from the built-in `coding-workflow` definition for that source, even if a persisted definition with the same key/version exists.
 Built-in workflow definitions are resolved by key and version; native runs must keep resolving the built-in version recorded on the run, even after a later built-in recipe becomes current.
 If the recorded built-in version is unavailable, native dispatch must fail closed instead of substituting persisted rows or a later built-in version.
@@ -459,7 +459,7 @@ Configured modules are trusted in-process code, so the no-write guarantee does n
 The preview is a pure projection of the version-pinned built-in definition plus inputs, so a later `start-coding` from the same inputs persists a matching run, and the frozen plan can be reconstructed from the run's recorded `(definition key, version)` for approval/dispatch to reference.
 Structural preflight is shared by the native coding start and preview doors before durable run writes: missing built-in definition versions, blank required repository paths, invalid approval boundaries, invalid issue-scope identifiers, blank route profiles, unsupported implementation engines, and invalid route steps fail closed with `preflightEvidence`.
 `--implementation-engine` accepts `gnhf`, the persisted compatibility label `native-goal-loop`, or `current-gnhf-cwfp` on the coding doors, and the generic `workflow run start` refuses it with `route_config_not_allowed`.
-Implementation-route execution semantics are owned by [Daemon commands](docs/daemon.md#workflow-live-wrapper-profile).
+Implementation-route execution semantics are owned by [Daemon commands](docs/daemon.md#workflow-host-bindings).
 The coding doors carry native per-step coding route/config overrides: `workflow run start-coding` / `workflow run preview-coding` accept `--steps-json <json>`, a sparse object keyed by the configurable coding steps (`implementation`, `postflight`, `validate`, `merge-cleanup`) carrying `harness`/`model`/`effort` string fields.
 Selections are validated and normalized before durable writes; absent steps/fields defer to definition defaults during native plan/start resolution, and an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` (and writes nothing), while the generic `workflow run start` refuses the flag with `route_config_not_allowed`.
 Provider-specific model aliases are part of that normalization when the merged step selection supplies the matching harness: known Claude aliases persist as pinned Claude Code model strings, known Codex aliases persist as un-namespaced Codex CLI model ids, and known OpenCode aliases persist as provider-qualified OpenCode model ids, while unknown harness/model values remain free-form.
@@ -476,7 +476,7 @@ Status detail read-back exposes optional `steps[].agentConfig` only for runs
 whose source is `momentum-native-coding` and whose definition key is
 `coding-workflow`; generic definition runs and imported compatibility runs keep
 their existing step shape.
-The projection stays distinct from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE` execution profile.
+The projection stays distinct from the daemon's `MOMENTUM_HOST_BINDINGS_FILE` execution host bindings.
 Durable route state uses explicit destinations: per-step agent and executor config on `workflow_steps`, optional definition agent config on `step_definitions`, child ancestry in `workflow_run_lineage`, non-imported run engine/profile compatibility in `workflow_run_coding_compatibility`, and imported mode/profile/risk/quota policy plus the imported source format and import timestamps in `workflow_run_import_metadata`; run source provenance remains on `workflow_runs`.
 Fresh writes leave `workflow_runs.route_json` empty, while one adapter-owned read-only projector preserves only the remaining `route.steps` compatibility namespace.
 Import metadata and implementation authority are canonical-only: the projector emits no import, implementation, or profile keys, import persistence and operator read-back use `workflow_run_import_metadata` and `workflow_run_coding_compatibility` as their canonical owners, native dispatch validates only the canonical compatibility refusal state, imported metadata (including the imported profile) is historical audit state that never influences executor or host selection, and the recorded definition key/version, matching versioned step-definition executor, and step-owned frozen config alone select what runs.
@@ -523,7 +523,7 @@ Momentum still does not post webhooks, wake external lanes, remove external moni
 Native tail recovery is hardened without changing the default route.
 Failed required `merge-cleanup` and `tracker-refresh` steps classify as `failed_external_side_effect_step` so operators verify the canonical external state - pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `tracker-refresh` - then reconcile through `workflow run clear-recovery --evidence-pointer <ref>` instead of blindly re-running side-effecting tail work.
 Status, handoff, monitor, and watch expose that lane as `nextAction.actionClass: "reconcile_external_tail"` with `recoveryDetail.kind: "external_tail_reconcile"`.
-The checked-in live-wrapper dogfood profile executes the wrapper from source through the TypeScript source loader so cleanup of generated `dist/` artifacts does not break `merge-cleanup` or `tracker-refresh` tail work.
+The checked-in coding-workflow host-binding file executes the wrapper from source through the TypeScript source loader so cleanup of generated `dist/` artifacts does not break `merge-cleanup` or `tracker-refresh` tail work.
 The wrapper validates `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG` before spawning a child command: the top level is limited to `steps`, per-step keys must use the canonical snake_case schema, malformed `env_allow` and unsafe or mismatched `result_file` values fail closed as setup recovery, and rejected configs write no runner evidence.
 For the `validate` step, the wrapper config must include a `runner_profile` block that selects the `axi` interface, declares `stdin: "closed"`, records the selected no-mistakes agent (`claude`, `codex`, `opencode`, or `rovodev`), records that agent's required harness environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), and names the configured absolute executable agent path.
 The wrapper checks the filtered child environment, executable agent path, no-mistakes `HOME/.no-mistakes/config.yaml` top-level `agent`, and no-mistakes top-level `agent_path_override.<agent>` config against that profile before spawning no-mistakes, so missing runner env, `agent=auto`, malformed YAML, duplicate config keys, nested-only overrides, a missing/non-executable agent path, a mismatched no-mistakes agent override, or an unsafe stdin policy fails closed as setup recovery instead of relying on ambient daemon state.

@@ -52,7 +52,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
 - `events` — append-only audit stream (`job.succeeded`, `job.failed`, `goal.reduced`, `goal.completed`, `goal.failed`, `goal.recovery_cleared`, etc.).
 - `repo_locks` - per-repo exclusion lease held across a goal iteration or a live-wrapper workflow dispatch that may mutate git.
   Workflow dispatch locks are released after a proven-clean commit / reset / reconciliation outcome or, when already parked in `needs_manual_recovery`, by an operator-guarded recovery clear that atomically prepares the matching attempt for retry; stored goal-iteration manual-recovery locks are also released by `recovery clear`.
-  A profile-backed dispatch lock covers at least the longest configured wrapper/probe execution window plus the full verification-command budget, so a bounded delegate handoff cannot outlive its repository ownership.
+  A binding-backed dispatch lock covers at least the longest configured wrapper/probe execution window plus the full verification-command budget, so a bounded delegate handoff cannot outlive its repository ownership.
   Workflow dispatch locks reuse the legacy identity columns (`goal_id` = run id, `job_id` = the step-scoped dispatch correlation id `<run-id>::<step-id>::dispatch` shared by every attempt of the step, `iteration` = attempt number) so the active-per-repo-root index remains the exclusion primitive.
   An unresolved delegate intent may take over its matching active lock after lock expiry or after the scheduler proves and releases the same stale dispatch owner.
   A compare-and-swap over the repository, run, job, previous holder, attempt, and deadline prevents displacement of a concurrent or newer owner, then fences later lock writes by the new holder and attempt.
@@ -73,7 +73,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
   Non-imported workflow-run implementation-engine and selected-profile compatibility are stored in `workflow_run_coding_compatibility`.
   These values are historical read-back/refusal evidence only: `selected_profile` is never authority for machine-local host binding, and neither value selects the active executor, definition version, or frozen step configuration.
   New runs default the historical implementation label to `gnhf`; legacy `native-goal-loop` rows remain readable, `current-gnhf-cwfp` remains an explicit unsupported compatibility selection, and unknown persisted values fail closed before dispatch.
-  The refusal semantics of those values are owned by [Daemon commands](daemon.md#workflow-live-wrapper-profile); active implementation selection remains definition- and step-owned.
+  The refusal semantics of those values are owned by [Daemon commands](daemon.md#workflow-host-bindings); active implementation selection remains definition- and step-owned.
   Imported mode, legacy profile, risk, quota policy, source format, and the import marker's `created_at` / `updated_at` timestamps are stored in `workflow_run_import_metadata`, with the quota policy kept in the single-purpose `quota_policy_json` column. `source_format` records `agent-workflow-plan@v<n>` for a positive integer `plan.json.schemaVersion`, and is otherwise `NULL`.
   The imported run's `source` and `source_artifact_path` remain provenance on `workflow_runs`; imported metadata is historical audit state and never local command or host-binding authority.
   Subworkflow parent/step/depth/ancestry facts are stored in `workflow_run_lineage`.
@@ -116,14 +116,14 @@ A single `momentum.db` per data directory backs durable state across all goals:
   When one step has multiple legacy invocation rows whose attempt numbers collide, their groups are ordered deterministically by lifecycle time and renumbered into a monotone step-wide sequence; `legacy_provenance.legacyAttemptNumber` preserves each changed number, and the re-anchored rounds receive the assigned attempt number.
   Bounded `daemon start --max-*` and `workflow run watch --once` create the first attempt scaffold when they dispatch an eligible approved workflow step with a valid executor identity; the workflow dispatcher derives deterministic `<run-id>::<step-id>::attempt-<n>` ids so re-entry finds the same scaffold instead of duplicating work.
   The step-scoped `<run-id>::<step-id>::dispatch` token survives only as narrowly scoped correlation provenance: external delegate handoff receipts and repo-lock job identity still correlate by it across retries, but it is no longer a row id in the active hierarchy.
-  When a bounded daemon cycle or watch tick uses a valid live-wrapper profile, an ordinary live-wrapper scaffold is terminalized from the wrapper result after repo-safety, verification, and commit/reset finalization, then reconciled in place.
-  A profile-backed delegate-supervisor wrapper result instead becomes durable handoff and terminal-candidate evidence; the attempt and step remain non-terminal until a later external-state read receives a daemon-accepted terminal classification.
+  When a bounded daemon cycle or watch tick uses valid host bindings, an ordinary live-wrapper scaffold is terminalized from the wrapper result after repo-safety, verification, and commit/reset finalization, then reconciled in place.
+  A binding-backed delegate-supervisor wrapper result instead becomes durable handoff and terminal-candidate evidence; the attempt and step remain non-terminal until a later external-state read receives a daemon-accepted terminal classification.
   For the built-in `tracker-refresh` step's `external-apply` executor, the daemon terminalizes it only after issue-scope, policy/auth, matching-source, one pending `status_update` intent or deterministic evidence to seed the expected `Done` intent, valid-payload, and idempotency-marker preflight passes, or from already-applied successful audit evidence.
   Configured `subworkflow` steps use the same scaffold shape to attach child-run evidence before the parent step is reconciled; missing child config, invalid canonical lineage, unsafe recursion, unsupported attachment, invalid child state, and ambiguous child terminals route to manual recovery.
   An `unsupported_platform` or `runtime_unavailable` refusal on any dispatched step leaves its attempt as immutable evidence; after `workflow run clear-recovery` prepares the step on a repaired or supported host, the next dispatch inserts a fresh attempt with the next `attempt_number` instead of reopening the earlier attempt or duplicating the session.
   Retryable delegate-supervisor adapter, handoff, unreadable or inconsistent external-state, and cleared external-blocker outcomes use the same incremented-attempt path.
   A valid non-terminal correlated handoff and prior decisions remain durable across that retry, while an unresolved handoff intent must be reconciled before another external launch.
-  For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
+  For binding-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
   A local wrapper-finalization failure is reconciled by reading the correlated run first; a matching failed or cancelled run permits one fresh launch, while every other status reruns local finalization before the same run is reattached for supervision.
   Retry preparation releases only the matching attempt's `needs_manual_recovery` repo locks in the same transaction as the clear, so a refused clear rolls both changes back.
   If an interrupted native no-mistakes wrapper left a failed step but the external no-mistakes run later proves success, guarded `clear-recovery` can instead stamp operator evidence on the failed `validate` step and re-derive the run without opening generic terminal-run mutation.
@@ -137,7 +137,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
   Registered SDK lifecycles, including native `agent-loop`, `agent-once`, and `script`, materialize their first round at index 0 through the durable envelope after host bindings resolve.
   Executor rounds freeze agent / model / effort metadata resolved from canonical step config when present, surfaced through the compatibility `route.steps` projection, but carry no terminal evidence until the owning executor or daemon adapter records it.
   Native coding retry and reattachment round materialization reuses the same frozen step-owned selection.
-  Live-wrapper-owned rounds filled by a configured daemon/watch profile can include `verification-log` artifact paths or precise recovery codes from result parsing, moved HEAD, lost dispatch lease, git, commit, or reset failures.
+  Live-wrapper-owned rounds filled by a configured daemon/watch host-binding file can include `verification-log` artifact paths or precise recovery codes from result parsing, moved HEAD, lost dispatch lease, git, commit, or reset failures.
   A `delegate-supervisor` handoff normally completes one durable round, and each normal continuation read completes another; a round reopened after gate resolution resumes in place.
   Only the attempt's first completed handoff may receive an immediate second read in the same dispatcher pass; later passes and retry attempts perform one tick and continuation-only daemon cycles wait the configured poll interval.
   If the process stops after a durable handoff intent or completed handoff exists but before classification, the unclassified running, capturing-result, or `mirroring_external_state` round remains resumable under the same attempt and does not authorize another handoff.
@@ -170,18 +170,18 @@ Files at `<data-dir>/goals/<goal-id>/`, written by the retired goal-first lane a
 
 ## Repo-local workflow artifact files
 
-Native workflow runs that execute through a configured live-wrapper profile use `<repo>/.agent-workflows/<run-id>/` as the run directory.
+Native workflow runs that execute through configured host bindings use `<repo>/.agent-workflows/<run-id>/` as the run directory.
 Imported workflow runs use the directory derived from their source artifact path.
 The ordinary live-wrapper lane writes `result.json`, `executor.log`, `verification.log`, `recovery.md`, and attempt-specific `attempt-<n>/` subdirectories there as step evidence.
 Delegate-supervisor steps write their result, log, verification, and external-state evidence beneath `delegate/<step-id>/`, with later attempts beneath that step directory's `attempt-<n>/` child.
 Each delegated step writes its atomic schema-version-1 `delegate-handoff.json` receipt at the step-scoped delegate root so an interrupted or retried attempt reattaches a valid non-terminal correlated run instead of duplicating it.
 Recovery routes a prior valid handoff through the adapter before reuse, allowing host-local receipt finalization to be reconciled first.
-For profile-backed no-mistakes, a conclusively failed or cancelled prior run remains evidence but permits one fresh launch on the newer attempt.
+For binding-backed no-mistakes, a conclusively failed or cancelled prior run remains evidence but permits one fresh launch on the newer attempt.
 No-mistakes receipts progress through `launching`, `resetting` or `finalizing`, and `launched` or `failed`; a correlated launch log alone cannot promote a `launching` receipt without wrapper-finalization proof.
 After the wrapper returns, a no-mistakes receipt binds the exact bounded result digest used to authorize the selected reset or commit, verified no-change acceptance, and any later failed-finalization retry or prepared-commit recovery.
 A retry of a locally failed no-mistakes receipt reads the correlated external state first.
 A failed or cancelled run permits one fresh launch; every other status reruns local finalization before the same run is reattached for supervision.
-Other profile-backed delegate receipts progress through launch, wrapper completion, reset or commit preparation, and finalization phases, carrying the exact result digest plus repository base/tree/message proof required to recognize an already-completed mutation safely.
+Other binding-backed delegate receipts progress through launch, wrapper completion, reset or commit preparation, and finalization phases, carrying the exact result digest plus repository base/tree/message proof required to recognize an already-completed mutation safely.
 An interrupted `finalizing` receipt can also authorize recovery of an exactly staged commit when the current base `HEAD`, index tree, configured artifact paths, result digest, and successful result all match and no unstaged or untracked changes exist.
 Receipts, result documents, persisted external-state documents, and no-mistakes launch evidence must be bounded regular files rather than symbolic links, oversized files, or named pipes.
 Correlated legacy delegate state or no-mistakes receipts at the run root migrate into this step-scoped layout during recovery only after attempt-correlation and branch checks plus current-head validation for finalized state; a legacy no-mistakes receipt must explicitly record successful handoff finalization.

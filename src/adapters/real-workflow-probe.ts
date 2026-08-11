@@ -11,10 +11,10 @@
  *   - `runHarnessProbe` spawns the resolved live-wrapper pre-flight probe (a
  *     cheap availability check) with a bounded `spawnSync` discipline, then
  *     delegates the outcome mapping to the pure `classifyProbeSpawnResult`.
- *   - `loadRawWorkflowProfileFromEnv` reads the operator-pointed live-wrapper
- *     profile JSON so the gated smoke can resolve a real wrapper command. It
+ *   - `loadRawWorkflowHostBindingsFromEnv` reads the operator-pointed host-binding
+ *     JSON so the gated smoke can resolve a real wrapper command. It
  *     fails closed to `undefined` (the planner then skips with
- *     `profile_unavailable`) rather than throwing.
+ *     `host_bindings_unavailable`) rather than throwing.
  *
  * It deliberately does not spawn the full agent, persist leases, capture result
  * files, or run the verification/commit transaction - those stay owned by the
@@ -24,15 +24,15 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import fs from "node:fs";
 
-import type { LiveWrapperProbeConfig } from "./live-wrapper-registry.js";
+import type { HostBindingProbeConfig } from "./host-bindings-registry.js";
 import {
   classifyProbeSpawnResult,
   type WorkflowHarnessRawOutcome,
 } from "../core/executors/smoke/workflow-harness.js";
 
-/** Points the opt-in harness-probe smoke at a live-wrapper profile JSON document. */
-export const REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR =
-  "MOMENTUM_REAL_SMOKE_WORKFLOW_PROFILE";
+/** Points the opt-in harness-probe smoke at a host-binding JSON document. */
+export const REAL_SMOKE_WORKFLOW_HOST_BINDINGS_ENV_VAR =
+  "MOMENTUM_REAL_SMOKE_WORKFLOW_HOST_BINDINGS";
 
 /** Bounds probe stdout/stderr; a pre-flight availability probe is not expected to be chatty. */
 const PROBE_OUTPUT_MAX_BYTES = 1024 * 1024;
@@ -62,7 +62,7 @@ export function buildHarnessProbeEnv(
  * `spawnSync` and surfaces through `classifyProbeSpawnResult` as `timed_out`.
  */
 export function runHarnessProbe(
-  probe: LiveWrapperProbeConfig,
+  probe: HostBindingProbeConfig,
   options: RunHarnessProbeOptions = {},
 ): WorkflowHarnessRawOutcome {
   let spawn: SpawnSyncReturns<string>;
@@ -98,19 +98,20 @@ export function runHarnessProbe(
 }
 
 /**
- * Read the operator-pointed live-wrapper profile JSON so the gated smoke can
+ * Read the operator-pointed host-binding JSON so the gated smoke can
  * resolve a real wrapper command without coupling the pure planner to the
  * filesystem. Fails closed to `undefined` on a missing env var, unreadable
  * path, or invalid JSON; `planWorkflowHarnessSmoke` then skips with
- * `profile_unavailable`.
+ * `host_bindings_unavailable`.
  */
-export function loadRawWorkflowProfileFromEnv(
+export function loadRawWorkflowHostBindingsFromEnv(
   env: Record<string, string | undefined>,
 ): unknown {
-  const profilePath = env[REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR]?.trim();
-  if (!profilePath) return undefined;
+  const hostBindingsPath =
+    env[REAL_SMOKE_WORKFLOW_HOST_BINDINGS_ENV_VAR]?.trim();
+  if (!hostBindingsPath) return undefined;
   try {
-    return JSON.parse(fs.readFileSync(profilePath, "utf-8"));
+    return JSON.parse(fs.readFileSync(hostBindingsPath, "utf-8"));
   } catch {
     return undefined;
   }

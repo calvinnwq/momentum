@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { openDb } from "../src/adapters/db.js";
 import { runCli } from "../src/cli.js";
 import {
-  buildProfileBackedSdkExecutors,
+  buildHostBindingBackedSdkExecutors,
   resolveDaemonWorkflowStepDispatch,
   resolveProfileBackedDelegateToolStepKind,
 } from "../src/core/daemon/workflow-dispatch.js";
@@ -58,7 +58,7 @@ import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.
 import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 import { clearWorkflowRunManualRecoveryGuarded } from "../src/core/workflow/run/recovery.js";
 import type { ExecutorTickContext } from "../src/core/executors/sdk/types.js";
-import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
+import { DAEMON_HOST_BINDINGS_FILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-host-bindings.js";
 
 const NOW = 1_700_000_000_000;
 const tempDirs: string[] = [];
@@ -113,7 +113,7 @@ describe("profile-backed delegated tool dispatch", () => {
 describe("profile-backed built-in registration", () => {
   it("selects the native single-shot lifecycle for agent-once and script", () => {
     const executors = new Map(
-      buildProfileBackedSdkExecutors().map((executor) => [
+      buildHostBindingBackedSdkExecutors().map((executor) => [
         executor.name,
         executor,
       ]),
@@ -163,7 +163,7 @@ describe("profile-backed built-in registration", () => {
     });
     if (!claim.ok) throw new Error(claim.reason);
     const production = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -251,23 +251,23 @@ describe("profile-backed built-in registration", () => {
     );
     if (!production.ok) throw new Error(production.message);
 
-    await production.dispatch(claim.claim, {
-      db,
-      workerId: "missing-native-profile-worker",
-      now: NOW + 1,
-    });
+    await expect(
+      Promise.resolve().then(() =>
+        production.dispatch(claim.claim, {
+          db,
+          workerId: "missing-native-profile-worker",
+          now: NOW + 1,
+        }),
+      ),
+    ).rejects.toHaveProperty("recoveryCode", "runtime_unavailable");
 
     expect(
       db
         .prepare(
-          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ?",
+          "SELECT COUNT(*) AS count FROM executor_rounds WHERE workflow_run_id = ?",
         )
         .get("missing-native-profile-run"),
-    ).toEqual({
-      state: "manual_recovery_required",
-      recovery_code: "runtime_unavailable",
-      summary: expect.stringContaining(DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR),
-    });
+    ).toEqual({ count: 0 });
     db.close();
   });
 
@@ -349,8 +349,7 @@ describe("profile-backed built-in registration", () => {
     fs.writeFileSync(
       profilePath,
       JSON.stringify({
-        name: "native-dispatch-test",
-        wrappers: {
+        bindings: {
           postflight: {
             command: "/bin/sh",
             args: [
@@ -403,7 +402,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     });
     if (!claim.ok) throw new Error(claim.reason);
     const production = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -479,7 +478,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     });
     if (!claim.ok) throw new Error(claim.reason);
     const production = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -573,7 +572,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     });
     if (!claim.ok) throw new Error(claim.reason);
     const production = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -662,7 +661,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       });
       if (!claim.ok) throw new Error(claim.reason);
       const production = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
         executeWorkflowStepDispatch,
         {},
       );
@@ -744,7 +743,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     const escapedRoot = tempDir();
     fs.symlinkSync(escapedRoot, artifactAncestor, "dir");
     const production = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -830,7 +829,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       });
       if (!claim.ok) throw new Error(claim.reason);
       const production = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
         executeWorkflowStepDispatch,
         {},
       );
@@ -900,7 +899,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     });
     if (!claim.ok) throw new Error(claim.reason);
     const production = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -1048,7 +1047,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       });
       if (!claim.ok) throw new Error(claim.reason);
       const production = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
         executeWorkflowStepDispatch,
         {},
       );
@@ -1095,7 +1094,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       });
       writeGoalLoopDispatchProfile(profileDir);
       const repaired = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
         executeWorkflowStepDispatch,
         {},
       );
@@ -1193,7 +1192,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     });
     if (!claim.ok) throw new Error(claim.reason);
     const production = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -1308,7 +1307,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     if (!claim.ok) throw new Error(claim.reason);
     fs.rmSync(repoPath, { recursive: true, force: true });
     const production = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -1419,7 +1418,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     });
     if (!claim.ok) throw new Error(claim.reason);
     const production = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -1450,10 +1449,6 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     {
       binding: "host timeout",
       config: { timeoutMs: 4_000 },
-    },
-    {
-      binding: "policy envelope",
-      config: { policyEnvelope: "different-policy" },
     },
     {
       binding: "agent identity",
@@ -1500,7 +1495,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       });
       if (!claim.ok) throw new Error(claim.reason);
       const production = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
         executeWorkflowStepDispatch,
         {},
       );
@@ -1575,7 +1570,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     });
     if (!claim.ok) throw new Error(claim.reason);
     const first = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -1673,7 +1668,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
 
     writeGoalLoopDispatchProfile(profileDir, { timeoutSec: 4 });
     const repaired = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -1793,7 +1788,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     if (!claim.ok) throw new Error(claim.reason);
     const first = resolveDaemonWorkflowStepDispatch(
       {
-        [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: path.join(
+        [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: path.join(
           profileDir,
           "profile.json",
         ),
@@ -1840,7 +1835,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     writeNativeDispatchProfile(profileDir, script, "repo-cleanup");
     const repaired = resolveDaemonWorkflowStepDispatch(
       {
-        [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: path.join(
+        [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: path.join(
           profileDir,
           "profile.json",
         ),
@@ -1927,7 +1922,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     });
     if (!claim.ok) throw new Error(claim.reason);
     const first = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -1978,7 +1973,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       4,
     );
     const repaired = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -2215,6 +2210,9 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       }),
     ).toThrow("changed dispatch inputs: agentProvider, model");
 
+    // A completed mechanism does not waive binding identity: any portable
+    // config or host input drift (including an unknown host binding digest)
+    // must still fail closed instead of reattaching foreign completed work.
     for (const changedHostBindings of [
       {
         ...migratedHostBindings,
@@ -2417,7 +2415,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       { encoding: "utf8" },
     ).trim();
     const production = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -2566,7 +2564,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       ),
     });
     const production = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -2712,7 +2710,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       detail: "durable native completion",
     });
     const production = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
       executeWorkflowStepDispatch,
       {},
     );
@@ -2739,7 +2737,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         .get(roundId),
     ).toEqual({
       state: "manual_recovery_required",
-      recovery_code: "head_mismatch",
+      recovery_code: "repo_ownership_unproven",
     });
     expect(
       fs.existsSync(
@@ -2749,7 +2747,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     db.close();
   });
 
-  it("classifies a checkpointed native round and settles its lock when host bindings disappear", async () => {
+  it("classifies a checkpointed native round and settles its invalid lock when host bindings disappear", async () => {
     const repoPath = initNativeDispatchRepo();
     const definition: WorkflowDefinition = {
       key: "missing-binding-native-recovery-workflow",
@@ -2830,7 +2828,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       detail: "durable native completion",
     });
     const retained = acquireRepoLock(db, {
-      repoRoot: repoPath,
+      repoRoot: tempDir(),
       holder: "crashed-native-worker",
       goalId: runId,
       iteration: 1,
@@ -2868,7 +2866,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         .get(round.roundId),
     ).toEqual({
       state: "manual_recovery_required",
-      recovery_code: "runtime_unavailable",
+      recovery_code: "repo_ownership_unproven",
     });
     expect(
       db
@@ -2923,8 +2921,7 @@ function writeNativeDispatchProfile(
   fs.writeFileSync(
     profilePath,
     JSON.stringify({
-      name: "native-dispatch-test",
-      wrappers: {
+      bindings: {
         preflight: {
           command_identity: commandIdentity,
           command: "/bin/sh",
@@ -2948,8 +2945,7 @@ function writeGoalLoopDispatchProfile(
   fs.writeFileSync(
     profilePath,
     JSON.stringify({
-      name: "native-agent-loop-test",
-      wrappers: {
+      bindings: {
         implementation: {
           command: "/bin/sh",
           args: ["-c", NATIVE_GOAL_LOOP_SCRIPT],

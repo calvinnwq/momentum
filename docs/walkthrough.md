@@ -53,7 +53,7 @@ node dist/index.js daemon status --data-dir "$DATA" --json
 ```
 
 With no approved steps yet, the bounded loop exits cleanly with `loop.exitReason: "max_idle_cycles"`, `loop.lastWorkflowCode: "idle"`, and `loop.workflowStepsDispatched: 0`, and `daemon status` then reports the terminal `stopped` daemon run.
-Dispatching real work additionally requires an approval (below) and, for profile-backed executors including native `agent-loop`, `agent-once`, and `script`, a configured `MOMENTUM_LIVE_WRAPPER_PROFILE`; see [Daemon commands](daemon.md).
+Dispatching real work additionally requires an approval (below) and, for binding-backed executors including native `agent-loop`, `agent-once`, `script`, and `delegate-supervisor`, a configured `MOMENTUM_HOST_BINDINGS_FILE`; see [Daemon commands](daemon.md).
 
 ## Inspect the run
 
@@ -85,7 +85,7 @@ node dist/index.js workflow handoff demo-1 --data-dir "$DATA" --json
 ```
 
 After the approval, the run state is `approved`, the steps inside the boundary are `approved`, and `workflow handoff` reports `code: "advance_to_step"` with `actionClass: "continue_polling"` for `preflight`.
-From here, the next bounded `daemon start --max-idle-cycles ...` cycle can claim and dispatch the approved step when a live-wrapper profile is configured.
+From here, the next bounded `daemon start --max-idle-cycles ...` cycle can claim and dispatch the approved step when a host-binding file is configured.
 
 For ongoing supervision — `workflow run monitor`, `workflow run watch --once`, `workflow run watch --stream --jsonl`, and `workflow run events` — see [Workflow commands](workflow-commands.md).
 For manual-recovery flags, `workflow run clear-recovery`, and the stored-goal `recovery clear <goal-id>` surface, see [Recovery surfaces](recovery.md).

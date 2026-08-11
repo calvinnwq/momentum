@@ -22,7 +22,7 @@ import {
   runWorkflowSchedulerOnceAsync,
 } from "../src/core/workflow/dispatch/scheduler.js";
 import { CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR } from "../src/core/workflow/live-wrapper/coding-workflow.js";
-import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
+import { DAEMON_HOST_BINDINGS_FILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-host-bindings.js";
 import { clearWorkflowRunManualRecoveryGuarded } from "../src/core/workflow/run/recovery.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 
@@ -75,8 +75,7 @@ JSON`;
   fs.writeFileSync(
     profilePath,
     JSON.stringify({
-      name: "delegate-recovery-test",
-      wrappers: {
+      bindings: {
         implementation: {
           command: "/bin/sh",
           args: ["-c", script],
@@ -171,8 +170,7 @@ JSON`;
   fs.writeFileSync(
     profilePath,
     JSON.stringify({
-      name: "no-mistakes-recovery-test",
-      wrappers: {
+      bindings: {
         "no-mistakes": {
           command: "/bin/sh",
           args: ["-c", launchScript],
@@ -2707,7 +2705,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         stepKeys: ["implementation-a", "implementation-b"],
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
         executeWorkflowStepDispatch,
         {},
       );
@@ -2763,7 +2761,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
         {
-          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profile.profilePath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
           HOME: process.env.HOME,
           PATH: process.env.PATH,
@@ -2865,7 +2863,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         stepKeys: [stepId],
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
         executeWorkflowStepDispatch,
         {},
       );
@@ -2941,7 +2939,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         stepKeys: [stepId],
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
         executeWorkflowStepDispatch,
         {},
       );
@@ -3015,7 +3013,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         stepKeys: [stepId],
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
         executeWorkflowStepDispatch,
         {},
       );
@@ -3134,7 +3132,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         stepKeys: [stepId],
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
         executeWorkflowStepDispatch,
         {},
       );
@@ -3183,7 +3181,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       const profilePath = writeProfile(tempDir());
       const db = prepareRun({ dataDir, repoPath, runId, stepKeys: [stepId] });
       const resolved = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
         executeWorkflowStepDispatch,
         {},
       );
@@ -3253,7 +3251,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
         {
-          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profile.profilePath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
           HOME: process.env.HOME,
           PATH: process.env.PATH,
@@ -3351,7 +3349,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
           stepKeys: [stepId],
         });
         const resolved = resolveDaemonWorkflowStepDispatch(
-          { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+          { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
           executeWorkflowStepDispatch,
           {},
         );
@@ -3455,7 +3453,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
           tool: "no-mistakes",
         });
         const env = {
-          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profile.profilePath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
           HOME: process.env.HOME,
           PATH: process.env.PATH,
@@ -3738,7 +3736,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
         {
-          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profile.profilePath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
           HOME: process.env.HOME,
           PATH: process.env.PATH,
@@ -3823,7 +3821,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
         {
-          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profile.profilePath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
           HOME: process.env.HOME,
           PATH: process.env.PATH,
@@ -3902,7 +3900,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
         {
-          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profile.profilePath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
           HOME: process.env.HOME,
           PATH: process.env.PATH,
@@ -4073,7 +4071,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
         {
-          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profile.profilePath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
           HOME: process.env.HOME,
           PATH: process.env.PATH,
@@ -4142,7 +4140,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
         {
-          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profile.profilePath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
           HOME: process.env.HOME,
           PATH: process.env.PATH,
@@ -4248,7 +4246,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
         {
-          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profile.profilePath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
           HOME: process.env.HOME,
           PATH: process.env.PATH,
@@ -4365,7 +4363,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
         {
-          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profile.profilePath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
           HOME: process.env.HOME,
           PATH: process.env.PATH,
@@ -4465,7 +4463,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       ).run(path.join(importedRunDir, "plan.json"), runId);
       const resolved = resolveDaemonWorkflowStepDispatch(
         {
-          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profile.profilePath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
           HOME: process.env.HOME,
           PATH: process.env.PATH,
@@ -4583,7 +4581,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
         stepKeys: [stepId],
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
         executeWorkflowStepDispatch,
         {},
       );
@@ -4657,7 +4655,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
         stepKeys: [stepId],
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
         executeWorkflowStepDispatch,
         {},
       );
@@ -4726,7 +4724,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
         stepKeys: [stepId],
       });
       const resolved = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
         executeWorkflowStepDispatch,
         {},
       );

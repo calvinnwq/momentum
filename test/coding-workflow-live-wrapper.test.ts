@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { parseLiveWrapperProfile } from "../src/adapters/live-wrapper-registry.js";
+import { parseHostBindings } from "../src/adapters/host-bindings-registry.js";
 import { parseRunnerResult } from "../src/core/executors/runner/result.js";
 import {
   CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR,
@@ -113,38 +113,36 @@ function waitMs(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-describe("coding workflow live wrapper profile", () => {
-  it("ships a parseable live-wrapper profile for every live-wrapper-owned coding step", () => {
-    const profilePath = path.join(
+describe("coding workflow host bindings", () => {
+  it("ships a parseable host-binding file for every live-wrapper-owned coding step", () => {
+    const bindingsPath = path.join(
       process.cwd(),
-      "profiles/coding-workflow-live-wrapper.profile.json",
+      "bindings/coding-workflow.host-bindings.json",
     );
-    const parsed = parseLiveWrapperProfile(
-      JSON.parse(fs.readFileSync(profilePath, "utf8")),
+    const parsed = parseHostBindings(
+      JSON.parse(fs.readFileSync(bindingsPath, "utf8")),
     );
 
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.profile.name).toBe("coding-workflow-live-wrapper");
-    expect(Array.from(parsed.profile.wrappers.keys()).sort()).toEqual([
+    expect(Array.from(parsed.bindings.bindings.keys()).sort()).toEqual([
       "implementation",
       "merge-cleanup",
       "postflight",
       "preflight",
       "validate",
     ]);
-    expect(parsed.profile.wrappers.get("merge-cleanup")?.envAllow).toEqual(
+    expect(parsed.bindings.bindings.get("merge-cleanup")?.envAllow).toEqual(
       expect.arrayContaining(["GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR"]),
     );
-    expect(parsed.profile.wrappers.get("validate")?.envAllow).toEqual(
+    expect(parsed.bindings.bindings.get("validate")?.envAllow).toEqual(
       expect.arrayContaining(["HOME", "CODEX_HOME", "PATH"]),
     );
   });
 
-  it("canonicalizes legacy wrapper step keys", () => {
-    const parsed = parseLiveWrapperProfile({
-      name: "legacy-wrapper",
-      wrappers: {
+  it("canonicalizes legacy binding step keys", () => {
+    const parsed = parseHostBindings({
+      bindings: {
         "no-mistakes": {
           command: process.execPath,
           args: [],
@@ -158,7 +156,7 @@ describe("coding workflow live wrapper profile", () => {
 
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(Array.from(parsed.profile.wrappers.keys())).toEqual(["validate"]);
+    expect(Array.from(parsed.bindings.bindings.keys())).toEqual(["validate"]);
   });
 
   it("uses the canonical step before validating a legacy alias", () => {
@@ -178,17 +176,17 @@ describe("coding workflow live wrapper profile", () => {
   });
 
   it("keeps merge-cleanup executable independent of generated dist", () => {
-    const profilePath = path.join(
+    const bindingsPath = path.join(
       process.cwd(),
-      "profiles/coding-workflow-live-wrapper.profile.json",
+      "bindings/coding-workflow.host-bindings.json",
     );
-    const parsed = parseLiveWrapperProfile(
-      JSON.parse(fs.readFileSync(profilePath, "utf8")),
+    const parsed = parseHostBindings(
+      JSON.parse(fs.readFileSync(bindingsPath, "utf8")),
     );
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
 
-    const wrapper = parsed.profile.wrappers.get("merge-cleanup");
+    const wrapper = parsed.bindings.bindings.get("merge-cleanup");
     expect(wrapper).toBeDefined();
     if (wrapper === undefined) return;
     expect(wrapper.args.join(" ")).not.toContain("dist/");

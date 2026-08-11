@@ -77,6 +77,7 @@ import {
   DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
   DELEGATE_SUPERVISOR_MIRRORED_STAGE,
 } from "../../executors/delegate-supervisor/executor.js";
+import { planWorkflowStepReconciliation } from "./reconcile.js";
 import {
   reconcileDispatchedWorkflowStep,
   WORKFLOW_RECONCILE_RESULT_STATUS,
@@ -189,6 +190,45 @@ export function selectRunnableWorkflowWork(
       "selectRunnableWorkflowWork: graceMs must be a non-negative finite number",
     );
   }
+  return scanRunnableWorkflowWork(db, {
+    now: input.now,
+    graceMs,
+    ...(input.runId === undefined ? {} : { runId: input.runId }),
+    assumeStaleAutoReleaseLeasesRecovered: false,
+    assumeTerminalDispatchEvidenceReconciled: false,
+  });
+}
+
+/**
+ * The shared scan behind {@link selectRunnableWorkflowWork} and the pre-claim
+ * preflight. Read-only: no row is mutated.
+ *
+ * `assumeStaleAutoReleaseLeasesRecovered` classifies runs as the tick's
+ * stale-lease recovery pass would leave them, without mutating anything: runs
+ * withheld only by stale `auto-release` leases are treated as schedulable
+ * (recovery releases those leases), and runs holding a stale
+ * `manual-recovery-required` lease are skipped (recovery parks them).
+ *
+ * `assumeTerminalDispatchEvidenceReconciled` (set only by the pre-claim
+ * preflight, and only meaningful alongside the flag above) additionally
+ * predicts {@link tryRecoverTerminalDispatchEvidence}: a run whose stale
+ * `auto-release` dispatch lease covers a `running` step with terminal executor
+ * evidence is scanned as recovery would leave it — the step treated as its
+ * planned terminal state (surfacing its successor), or the run skipped when
+ * the plan routes to manual recovery. The prediction only touches the
+ * in-memory step copy; no row changes.
+ */
+function scanRunnableWorkflowWork(
+  db: MomentumDb,
+  input: {
+    now: number;
+    graceMs: number;
+    runId?: string;
+    assumeStaleAutoReleaseLeasesRecovered: boolean;
+    assumeTerminalDispatchEvidenceReconciled: boolean;
+  },
+): WorkflowSchedulerScan {
+  const graceMs = input.graceMs;
 
   // Only non-terminal runs that are not already parked for manual recovery can
   // produce runnable work or relevant stale leases. `pending` runs (no approval
@@ -220,10 +260,34 @@ export function selectRunnableWorkflowWork(
   const staleLeases: StaleWorkflowLease[] = [];
 
   for (const run of runs) {
-    const steps = loadStepRecords(db, run.id);
-    const leases = loadLeaseRecords(db, run.id);
-    const signals = collectRunLeaseSignals(leases, input.now, graceMs);
+    let steps = loadStepRecords(db, run.id);
+    let leases = loadLeaseRecords(db, run.id);
+    let signals = collectRunLeaseSignals(leases, input.now, graceMs);
     staleLeases.push(...signals.staleLeases);
+
+    if (input.assumeStaleAutoReleaseLeasesRecovered) {
+      // Recovery parks a run with a stale manual-recovery lease; it can never
+      // become runnable this tick.
+      if (signals.hasStaleManualRecoveryLease) continue;
+      if (input.assumeTerminalDispatchEvidenceReconciled) {
+        const predicted = predictTerminalDispatchEvidenceReconciliation(
+          db,
+          run.id,
+          steps,
+          leases,
+          { now: input.now, graceMs },
+        );
+        // Recovery would park the run for manual recovery; never runnable.
+        if (predicted === "manual_recovery") continue;
+        if (predicted !== undefined) steps = predicted;
+      }
+      leases = leases.filter(
+        (lease) =>
+          classifyWorkflowLease(lease, { now: input.now, graceMs }) !==
+          "stale-auto-release",
+      );
+      signals = collectRunLeaseSignals(leases, input.now, graceMs);
+    }
 
     const derivedRunState = deriveWorkflowRunState(steps, {
       leases,
@@ -258,6 +322,53 @@ export function selectRunnableWorkflowWork(
   }
 
   return { runnable, staleLeases };
+}
+
+/**
+ * Predict, read-only, how {@link tryRecoverTerminalDispatchEvidence} would
+ * leave one run's steps. Mirrors its trigger conditions — a stale
+ * `auto-release` `dispatch` lease, a `running` step, and a terminal latest
+ * executor attempt for that step — then applies the pure
+ * {@link planWorkflowStepReconciliation} decision to an in-memory copy only:
+ *
+ *   - `finalize` → the running step is returned as its planned terminal state,
+ *     so `nextRunnableStep` surfaces its successor exactly as the tick's
+ *     post-recovery scan would;
+ *   - `manual_recovery` → `"manual_recovery"` (the caller skips the run, as
+ *     recovery parks it);
+ *   - otherwise → `undefined` (recovery would not reconcile; no change).
+ */
+function predictTerminalDispatchEvidenceReconciliation(
+  db: MomentumDb,
+  runId: string,
+  steps: readonly WorkflowStepRecord[],
+  leases: readonly WorkflowLeaseRecord[],
+  input: { now: number; graceMs: number },
+): WorkflowStepRecord[] | "manual_recovery" | undefined {
+  const staleDispatchLease = leases.find(
+    (lease) =>
+      lease.leaseKind === WORKFLOW_DISPATCH_LEASE_KIND &&
+      lease.stalePolicy === "auto-release" &&
+      classifyWorkflowLease(lease, input) === "stale-auto-release",
+  );
+  if (staleDispatchLease === undefined) return undefined;
+
+  const runningStep = steps.find((step) => step.state === "running");
+  if (runningStep === undefined) return undefined;
+
+  const attempt = loadLatestExecutorAttemptForStep(
+    db,
+    runId,
+    runningStep.stepId,
+  );
+  if (attempt === undefined) return undefined;
+
+  const plan = planWorkflowStepReconciliation(attempt.state);
+  if (plan.action === "manual_recovery") return "manual_recovery";
+  if (plan.action !== "finalize") return undefined;
+  return steps.map((step) =>
+    step === runningStep ? { ...step, state: plan.stepState } : step,
+  );
 }
 
 /** Lease-derived signals for one run, shared by the scan and the claim path. */
@@ -499,7 +610,8 @@ export function recoverStaleWorkflowLeases(
       continue;
     }
 
-    db.exec("BEGIN IMMEDIATE");
+    const ownsTransaction = !db.isTransaction;
+    if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
     try {
       const live = getWorkflowLease(db, candidate.runId, candidate.leaseKind);
       const classification =
@@ -520,7 +632,7 @@ export function recoverStaleWorkflowLeases(
             runId: live.runId,
             now,
           });
-          db.exec("COMMIT");
+          if (ownsTransaction) db.exec("COMMIT");
           recovered.push({
             runId: live.runId,
             leaseKind: live.leaseKind,
@@ -530,7 +642,7 @@ export function recoverStaleWorkflowLeases(
             recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
           });
         } else {
-          db.exec("ROLLBACK");
+          if (ownsTransaction) db.exec("ROLLBACK");
           skipped.push({
             runId: candidate.runId,
             leaseKind: candidate.leaseKind,
@@ -554,7 +666,7 @@ export function recoverStaleWorkflowLeases(
           now,
         });
         if (marked.ok) {
-          db.exec("COMMIT");
+          if (ownsTransaction) db.exec("COMMIT");
           recovered.push({
             runId: live.runId,
             leaseKind: live.leaseKind,
@@ -569,7 +681,7 @@ export function recoverStaleWorkflowLeases(
             now,
           });
         } else {
-          db.exec("ROLLBACK");
+          if (ownsTransaction) db.exec("ROLLBACK");
           skipped.push({
             runId: candidate.runId,
             leaseKind: candidate.leaseKind,
@@ -579,7 +691,7 @@ export function recoverStaleWorkflowLeases(
       } else {
         // The row was released or re-freshed (heartbeated) between the scan and
         // this transaction; leave it for the next pass.
-        db.exec("ROLLBACK");
+        if (ownsTransaction) db.exec("ROLLBACK");
         skipped.push({
           runId: candidate.runId,
           leaseKind: candidate.leaseKind,
@@ -588,7 +700,7 @@ export function recoverStaleWorkflowLeases(
       }
     } catch (error) {
       try {
-        db.exec("ROLLBACK");
+        if (ownsTransaction) db.exec("ROLLBACK");
       } catch {
         // Ignore rollback errors so callers see the original write failure.
       }
@@ -748,14 +860,15 @@ function tryParkStaleRunningDispatchLease(
 
   let parked:
     { lease: WorkflowLeaseRecord; runningStep: WorkflowStepRecord } | undefined;
-  db.exec("BEGIN IMMEDIATE");
+  const ownsTransaction = !db.isTransaction;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
   try {
     const live = getWorkflowLease(db, candidate.runId, candidate.leaseKind);
     if (
       live === undefined ||
       classifyWorkflowLease(live, { now, graceMs }) !== "stale-auto-release"
     ) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
@@ -763,7 +876,7 @@ function tryParkStaleRunningDispatchLease(
       (step) => step.state === "running",
     );
     if (runningStep === undefined) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
@@ -785,7 +898,7 @@ function tryParkStaleRunningDispatchLease(
       attempt.executor === "subworkflow" &&
       !isTerminalExecutorAttemptState(attempt.state)
     ) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
     if (
@@ -797,14 +910,14 @@ function tryParkStaleRunningDispatchLease(
         claimedExecutorNames,
       )
     ) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
     if (
       attempt !== undefined &&
       isTerminalExecutorAttemptState(attempt.state)
     ) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
@@ -817,7 +930,7 @@ function tryParkStaleRunningDispatchLease(
       now,
     });
     if (!marked.ok) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
     const released = releaseWorkflowLease(db, {
@@ -828,15 +941,15 @@ function tryParkStaleRunningDispatchLease(
       now,
     });
     if (!released.ok) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
     parked = { lease: live, runningStep };
-    db.exec("COMMIT");
+    if (ownsTransaction) db.exec("COMMIT");
   } catch (error) {
     try {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
     } catch {}
     throw error;
   }
@@ -1026,7 +1139,8 @@ export function claimRunnableWorkflowStep(
   const graceMs = input.graceMs ?? 0;
   const stalePolicy = input.stalePolicy ?? "auto-release";
 
-  db.exec("BEGIN IMMEDIATE");
+  const ownsTransaction = !db.isTransaction;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
   try {
     const run = db
       .prepare(
@@ -1038,14 +1152,14 @@ export function claimRunnableWorkflowStep(
       (WorkflowRunScanRow & { needs_manual_recovery: number }) | undefined;
 
     if (run === undefined) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return { ok: false, reason: "run_not_found" };
     }
     if (
       run.needs_manual_recovery !== 0 ||
       RUN_TERMINAL_STATE_SET.has(run.state)
     ) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return { ok: false, reason: "run_not_runnable" };
     }
 
@@ -1061,7 +1175,7 @@ export function claimRunnableWorkflowStep(
       signals.outstandingNonMonitorLease !== undefined &&
       signals.freshNonMonitorLease === undefined;
     if (signals.hasStaleManualRecoveryLease || hasStaleNonMonitorLease) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return { ok: false, reason: "run_not_runnable" };
     }
 
@@ -1071,17 +1185,17 @@ export function claimRunnableWorkflowStep(
       graceMs,
     });
     if (derivedRunState !== "approved") {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return { ok: false, reason: "run_not_runnable" };
     }
 
     const step = nextRunnableStep(steps);
     if (step === undefined) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return { ok: false, reason: "run_not_runnable" };
     }
     if (step.stepId !== input.stepId) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return {
         ok: false,
         reason: "step_superseded",
@@ -1103,11 +1217,11 @@ export function claimRunnableWorkflowStep(
       stalePolicy,
     );
     if (!acquired.ok) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return { ok: false, reason: "lease_held", existing: acquired.existing };
     }
 
-    db.exec("COMMIT");
+    if (ownsTransaction) db.exec("COMMIT");
     return {
       ok: true,
       claim: {
@@ -1123,7 +1237,7 @@ export function claimRunnableWorkflowStep(
     };
   } catch (error) {
     try {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
     } catch {
       // Ignore rollback errors so callers see the original failure.
     }
@@ -1238,6 +1352,11 @@ export type AsyncWorkflowStepDispatch = (
   context: WorkflowStepDispatchContext,
 ) => MaybePromise<WorkflowStepDispatchResult>;
 
+export type WorkflowStepPreClaim = (input: {
+  db: MomentumDb;
+  candidate: RunnableWorkflowStep;
+}) => void;
+
 /**
  * The lane's durable primitives, overridable for tests (mirrors the dependency
  * injection `runDaemonLoop` uses for `runWorker` / `now` / `sleep`). Production
@@ -1257,6 +1376,7 @@ export type RunWorkflowSchedulerOnceInput = {
   runId?: string;
   /** The executor-dispatch seam invoked with a successfully claimed step. */
   dispatch: WorkflowStepDispatch;
+  preClaim?: WorkflowStepPreClaim;
   /** Tick clock. Defaults to `Date.now`. */
   now?: WorkflowSchedulerNow;
   /** Clock-skew tolerance forwarded to recovery / scan / claim. Defaults to 0. */
@@ -1308,62 +1428,71 @@ export type RunWorkflowSchedulerOnceResult =
       dispatch: WorkflowStepDispatchResult;
     };
 
+/**
+ * Non-terminal, non-parked runs ordered by dispatch-lease heartbeat (leaseless
+ * runs first), then creation. Shared by the active-dispatch recheck and the
+ * read-only pre-claim preflight so both walk runs in the same order.
+ */
+function scanDispatchLeaseOrderedRuns(
+  db: MomentumDb,
+  runId?: string,
+): WorkflowRunScanRow[] {
+  return runId === undefined
+    ? (db
+        .prepare(
+          `SELECT id, state, repo_path
+             FROM workflow_runs
+            WHERE needs_manual_recovery = 0
+              AND state NOT IN ('succeeded', 'failed', 'canceled')
+            ORDER BY COALESCE(
+                       (SELECT heartbeat_at
+                          FROM workflow_leases
+                         WHERE run_id = workflow_runs.id
+                           AND lease_kind = 'dispatch'),
+                       -1
+                     ) ASC,
+                     created_at ASC,
+                     id ASC`,
+        )
+        .all() as WorkflowRunScanRow[])
+    : (db
+        .prepare(
+          `SELECT id, state, repo_path
+             FROM workflow_runs
+            WHERE id = ?
+              AND needs_manual_recovery = 0
+              AND state NOT IN ('succeeded', 'failed', 'canceled')
+            ORDER BY COALESCE(
+                       (SELECT heartbeat_at
+                          FROM workflow_leases
+                         WHERE run_id = workflow_runs.id
+                           AND lease_kind = 'dispatch'),
+                       -1
+                     ) ASC,
+                     created_at ASC,
+                     id ASC`,
+        )
+        .all(runId) as WorkflowRunScanRow[]);
+}
+
+type ActiveSubworkflowDispatchSelection = {
+  claim?: ClaimedWorkflowStep;
+  pendingCandidate?: RunnableWorkflowStep;
+  continuationPending: boolean;
+};
+
 function selectActiveSubworkflowDispatchRecheck(
   db: MomentumDb,
   input: {
     now: number;
     graceMs: number;
     holder: string;
-    leaseDurationMs: number;
     continuationPollIntervalMs: number;
-    stalePolicy: WorkflowLeaseStalePolicy;
     claimedExecutorNames?: ReadonlySet<string>;
     runId?: string;
   },
-): {
-  claim?: ClaimedWorkflowStep;
-  continuationPending: boolean;
-  staleDispatchTakeover?: NonNullable<
-    WorkflowStepDispatchContext["staleDispatchTakeover"]
-  >;
-} {
-  const runs =
-    input.runId === undefined
-      ? (db
-          .prepare(
-            `SELECT id, state, repo_path
-               FROM workflow_runs
-              WHERE needs_manual_recovery = 0
-                AND state NOT IN ('succeeded', 'failed', 'canceled')
-              ORDER BY COALESCE(
-                         (SELECT heartbeat_at
-                            FROM workflow_leases
-                           WHERE run_id = workflow_runs.id
-                             AND lease_kind = 'dispatch'),
-                         -1
-                       ) ASC,
-                       created_at ASC,
-                       id ASC`,
-          )
-          .all() as WorkflowRunScanRow[])
-      : (db
-          .prepare(
-            `SELECT id, state, repo_path
-               FROM workflow_runs
-              WHERE id = ?
-                AND needs_manual_recovery = 0
-                AND state NOT IN ('succeeded', 'failed', 'canceled')
-              ORDER BY COALESCE(
-                         (SELECT heartbeat_at
-                            FROM workflow_leases
-                           WHERE run_id = workflow_runs.id
-                             AND lease_kind = 'dispatch'),
-                         -1
-                       ) ASC,
-                       created_at ASC,
-                       id ASC`,
-          )
-          .all(input.runId) as WorkflowRunScanRow[]);
+): ActiveSubworkflowDispatchSelection {
+  const runs = scanDispatchLeaseOrderedRuns(db, input.runId);
 
   let continuationPending = false;
   for (const run of runs) {
@@ -1390,14 +1519,11 @@ function selectActiveSubworkflowDispatchRecheck(
       continue;
     }
 
-    const acquired = acquireActiveSubworkflowDispatchClaim(db, run.id, input);
-    if (acquired !== undefined) {
+    const candidate = selectActiveSubworkflowCandidateStep(db, run, input);
+    if (candidate !== undefined) {
       return {
-        claim: acquired.claim,
+        pendingCandidate: candidate,
         continuationPending: true,
-        ...(acquired.staleDispatchTakeover === undefined
-          ? {}
-          : { staleDispatchTakeover: acquired.staleDispatchTakeover }),
       };
     }
   }
@@ -1670,12 +1796,10 @@ function isActiveSubworkflowRecheckDue(
 }
 
 function isActiveSubworkflowRecheckUrgent(
-  claim: ClaimedWorkflowStep,
+  lease: WorkflowLeaseRecord,
   input: { now: number; continuationPollIntervalMs: number },
 ): boolean {
-  return (
-    input.now - claim.lease.heartbeatAt >= input.continuationPollIntervalMs * 2
-  );
+  return input.now - lease.heartbeatAt >= input.continuationPollIntervalMs * 2;
 }
 
 function buildActiveSubworkflowClaim(
@@ -1688,6 +1812,25 @@ function buildActiveSubworkflowClaim(
     claimedExecutorNames?: ReadonlySet<string>;
   },
 ): ClaimedWorkflowStep | undefined {
+  const candidate = selectActiveSubworkflowCandidateStep(db, run, input);
+  return candidate === undefined ? undefined : { ...candidate, lease };
+}
+
+/**
+ * The lease-independent half of {@link buildActiveSubworkflowClaim}: the run's
+ * running step, when its latest attempt is an active deferred `subworkflow`
+ * dispatch or a resumable registered-SDK tick. Read-only, so the pre-claim
+ * preflight can predict the recheck's candidate before any lease is touched.
+ */
+function selectActiveSubworkflowCandidateStep(
+  db: MomentumDb,
+  run: WorkflowRunScanRow,
+  input: {
+    now: number;
+    graceMs: number;
+    claimedExecutorNames?: ReadonlySet<string>;
+  },
+): RunnableWorkflowStep | undefined {
   const steps = loadStepRecords(db, run.id);
   const runningStep = steps.find((step) => step.state === "running");
   if (runningStep === undefined) return undefined;
@@ -1730,7 +1873,6 @@ function buildActiveSubworkflowClaim(
       now: input.now,
       graceMs: input.graceMs,
     }),
-    lease,
   };
 }
 
@@ -1743,6 +1885,7 @@ function acquireActiveSubworkflowDispatchClaim(
     holder: string;
     leaseDurationMs: number;
     stalePolicy: WorkflowLeaseStalePolicy;
+    expectedStepId: string;
     claimedExecutorNames?: ReadonlySet<string>;
   },
 ):
@@ -1753,7 +1896,8 @@ function acquireActiveSubworkflowDispatchClaim(
       >;
     }
   | undefined {
-  db.exec("BEGIN IMMEDIATE");
+  const ownsTransaction = !db.isTransaction;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
   try {
     const run = db
       .prepare(
@@ -1765,13 +1909,26 @@ function acquireActiveSubworkflowDispatchClaim(
       )
       .get(runId) as WorkflowRunScanRow | undefined;
     if (run === undefined) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
+      return undefined;
+    }
+
+    const expectedCandidate = selectActiveSubworkflowCandidateStep(
+      db,
+      run,
+      input,
+    );
+    if (
+      expectedCandidate === undefined ||
+      expectedCandidate.stepId !== input.expectedStepId
+    ) {
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
     const existing = getWorkflowLease(db, run.id, WORKFLOW_DISPATCH_LEASE_KIND);
     if (existing !== undefined && existing.releasedAt === null) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
@@ -1789,17 +1946,17 @@ function acquireActiveSubworkflowDispatchClaim(
       input.stalePolicy,
     );
     if (!acquired.ok) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
     const claim = buildActiveSubworkflowClaim(db, run, acquired.lease, input);
-    if (claim === undefined) {
-      db.exec("ROLLBACK");
+    if (claim === undefined || claim.stepId !== input.expectedStepId) {
+      if (ownsTransaction) db.exec("ROLLBACK");
       return undefined;
     }
 
-    db.exec("COMMIT");
+    if (ownsTransaction) db.exec("COMMIT");
     const staleDispatchTakeover =
       existing !== undefined &&
       existing.releasedAt !== null &&
@@ -1816,7 +1973,7 @@ function acquireActiveSubworkflowDispatchClaim(
     };
   } catch (error) {
     try {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
     } catch {}
     throw error;
   }
@@ -2064,6 +2221,121 @@ export async function runWorkflowSchedulerOnceAsync(
   );
 }
 
+/**
+ * Read-only pre-claim preflight for {@link runWorkflowSchedulerOnceCore}.
+ *
+ * The pre-claim refusal contract is "refuse before any durable mutation": when
+ * a `preClaim` hook is wired (the daemon's fail-closed native host-bindings
+ * guard), a refusal must propagate before this tick's mutating passes —
+ * `recoverStaleLeases` releasing a stale lease, or the active-dispatch recheck
+ * taking over a stale dispatch lease — touch durable state. This preflight
+ * predicts, with reads only, the candidates the tick could act on:
+ *
+ *   - the active dispatch claim the recheck would return (including the
+ *     takeover candidate it would acquire after recovery releases a stale
+ *     auto-release dispatch lease), and
+ *   - the first runnable step as the scan would see it after stale
+ *     auto-release recovery, including successors of steps recovery would
+ *     reconcile from terminal dispatch evidence,
+ *
+ * then mirrors the tick's winner-selection rule and invokes `preClaim` on the
+ * single candidate the tick would actually dispatch — the active claim only
+ * when no runnable candidate exists or the active recheck is urgent, the
+ * runnable candidate otherwise — so a refusal throws before any lease or
+ * recovery row changes, and a refusal-bound candidate the tick would not
+ * dispatch never aborts it. The in-tick `preClaim` calls stay in place as the
+ * final guards against scan/claim races.
+ */
+export function runWorkflowPreClaimPreflight(
+  db: MomentumDb,
+  input: {
+    now: number;
+    graceMs: number;
+    holder: string;
+    continuationPollIntervalMs: number;
+    preClaim: WorkflowStepPreClaim;
+    claimedExecutorNames?: ReadonlySet<string>;
+    runId?: string;
+  },
+): void {
+  const active = selectActiveDispatchPreflightCandidate(db, input);
+  const runnableCandidate = scanRunnableWorkflowWork(db, {
+    now: input.now,
+    graceMs: input.graceMs,
+    ...(input.runId === undefined ? {} : { runId: input.runId }),
+    assumeStaleAutoReleaseLeasesRecovered: true,
+    assumeTerminalDispatchEvidenceReconciled: true,
+  }).runnable[0];
+  // Mirror the tick's winner rule: the active claim is dispatched only when no
+  // runnable candidate exists or the recheck is urgent; otherwise the runnable
+  // candidate wins. At most one candidate is preflighted.
+  if (
+    active !== undefined &&
+    (runnableCandidate === undefined || active.urgent)
+  ) {
+    input.preClaim({ db, candidate: active.candidate });
+  } else if (runnableCandidate !== undefined) {
+    input.preClaim({ db, candidate: runnableCandidate });
+  }
+}
+
+/**
+ * Predict, read-only, the claim {@link selectActiveSubworkflowDispatchRecheck}
+ * would return this tick, and whether that recheck would be urgent (the tick
+ * dispatches a non-urgent active claim only when no runnable candidate
+ * exists). Mirrors the recheck's walk, but where the recheck runs after
+ * recovery (a stale auto-release dispatch lease is already released and
+ * eligible for takeover), this runs before it, so an unreleased stale
+ * auto-release lease is treated as the takeover candidate it becomes. A
+ * takeover acquires a fresh lease heartbeated at `now`, so it is never
+ * urgent.
+ */
+function selectActiveDispatchPreflightCandidate(
+  db: MomentumDb,
+  input: {
+    now: number;
+    graceMs: number;
+    holder: string;
+    continuationPollIntervalMs: number;
+    claimedExecutorNames?: ReadonlySet<string>;
+    runId?: string;
+  },
+): { candidate: RunnableWorkflowStep; urgent: boolean } | undefined {
+  const runs = scanDispatchLeaseOrderedRuns(db, input.runId);
+  for (const run of runs) {
+    const lease = getWorkflowLease(db, run.id, WORKFLOW_DISPATCH_LEASE_KIND);
+    if (lease !== undefined && lease.releasedAt === null) {
+      const classification = classifyWorkflowLease(lease, {
+        now: input.now,
+        graceMs: input.graceMs,
+      });
+      if (classification === "fresh") {
+        if (lease.holder !== input.holder) continue;
+        const candidate = selectActiveSubworkflowCandidateStep(db, run, input);
+        if (
+          candidate !== undefined &&
+          isActiveSubworkflowRecheckDue(lease, input)
+        ) {
+          return {
+            candidate,
+            urgent: isActiveSubworkflowRecheckUrgent(lease, input),
+          };
+        }
+        continue;
+      }
+      // A stale manual-recovery lease parks the run during recovery; it can
+      // never surface an active claim this tick.
+      if (classification === "stale-manual-recovery-required") continue;
+      // Stale auto-release: recovery releases it, then the recheck's takeover
+      // path may re-acquire — fall through and predict that candidate.
+    }
+
+    const candidate = selectActiveSubworkflowCandidateStep(db, run, input);
+    if (candidate !== undefined) return { candidate, urgent: false };
+  }
+  return undefined;
+}
+
 function runWorkflowSchedulerOnceCore(
   input: Omit<RunWorkflowSchedulerOnceInput, "dispatch">,
   dispatch: AsyncWorkflowStepDispatch,
@@ -2107,122 +2379,185 @@ function runWorkflowSchedulerOnceCore(
   // freshness against one consistent clock. (recover / scan validate now/graceMs.)
   const tickNow = now();
   const runScope = input.runId === undefined ? {} : { runId: input.runId };
+  const ownsPreClaimTransaction =
+    input.preClaim !== undefined && !db.isTransaction;
+  if (ownsPreClaimTransaction) db.exec("BEGIN IMMEDIATE");
 
-  const recovery = recoverStaleLeases(db, {
-    now: tickNow,
-    graceMs,
-    ...(input.claimedExecutorNames === undefined
-      ? {}
-      : { claimedExecutorNames: input.claimedExecutorNames }),
-    ...runScope,
-  });
-  const recoveredDispatchLeases = new Map<string, WorkflowLeaseRecord>();
-  for (const recovered of recovery.recovered) {
-    if (
-      recovered.action !== "released" ||
-      recovered.leaseKind !== WORKFLOW_DISPATCH_LEASE_KIND
-    ) {
-      continue;
-    }
-    const released = getWorkflowLease(
-      db,
-      recovered.runId,
-      WORKFLOW_DISPATCH_LEASE_KIND,
-    );
-    if (released !== undefined && released.releasedAt !== null) {
-      recoveredDispatchLeases.set(recovered.runId, released);
-    }
-  }
-
-  const activeSelection = selectActiveSubworkflowDispatchRecheck(db, {
-    now: tickNow,
-    graceMs,
-    holder: workerId,
-    leaseDurationMs,
-    continuationPollIntervalMs,
-    stalePolicy,
-    ...(input.claimedExecutorNames === undefined
-      ? {}
-      : { claimedExecutorNames: input.claimedExecutorNames }),
-    ...runScope,
-  });
-  const scan = selectRunnableWork(db, { now: tickNow, graceMs, ...runScope });
-  const candidate = scan.runnable[0];
-  const activeClaim = activeSelection.claim;
-  if (
-    activeClaim !== undefined &&
-    (candidate === undefined ||
-      isActiveSubworkflowRecheckUrgent(activeClaim, {
+  try {
+    // Refuse before any durable mutation: when a pre-claim guard is wired, run
+    // the read-only preflight ahead of stale-lease recovery so a refusal (e.g.
+    // unconfigured native host bindings) leaves stale leases and recovery state
+    // untouched. Skipped entirely when no guard is wired — no extra scan cost.
+    if (input.preClaim !== undefined) {
+      runWorkflowPreClaimPreflight(db, {
         now: tickNow,
+        graceMs,
+        holder: workerId,
         continuationPollIntervalMs,
-      }))
-  ) {
-    const refreshedClaim = heartbeatActiveDispatchClaim(db, {
-      claim: activeClaim,
-      now: tickNow,
-      leaseDurationMs,
-    });
-    if (refreshedClaim !== undefined) {
-      return dispatchClaim(
-        {
-          db,
-          workerId,
-          recovery,
-          claim: refreshedClaim,
-          tickNow,
-          now,
-          leaseDurationMs,
-          recoveredDispatchLeases,
-          ...(activeSelection.staleDispatchTakeover === undefined
-            ? {}
-            : {
-                durableStaleDispatchTakeover:
-                  activeSelection.staleDispatchTakeover,
-              }),
-        },
-        dispatch,
-      );
+        preClaim: input.preClaim,
+        ...(input.claimedExecutorNames === undefined
+          ? {}
+          : { claimedExecutorNames: input.claimedExecutorNames }),
+        ...runScope,
+      });
     }
-  }
 
-  if (candidate === undefined) {
-    return {
-      code: "idle",
-      workerId,
-      recovery,
-      ...(activeSelection.continuationPending
-        ? { continuationPending: true as const }
-        : {}),
-    };
-  }
+    const recovery = recoverStaleLeases(db, {
+      now: tickNow,
+      graceMs,
+      ...(input.claimedExecutorNames === undefined
+        ? {}
+        : { claimedExecutorNames: input.claimedExecutorNames }),
+      ...runScope,
+    });
+    const recoveredDispatchLeases = new Map<string, WorkflowLeaseRecord>();
+    for (const recovered of recovery.recovered) {
+      if (
+        recovered.action !== "released" ||
+        recovered.leaseKind !== WORKFLOW_DISPATCH_LEASE_KIND
+      ) {
+        continue;
+      }
+      const released = getWorkflowLease(
+        db,
+        recovered.runId,
+        WORKFLOW_DISPATCH_LEASE_KIND,
+      );
+      if (released !== undefined && released.releasedAt !== null) {
+        recoveredDispatchLeases.set(recovered.runId, released);
+      }
+    }
 
-  const claimResult = claimStep(db, {
-    runId: candidate.runId,
-    stepId: candidate.stepId,
-    holder: workerId,
-    leaseExpiresAt: tickNow + leaseDurationMs,
-    now: tickNow,
-    graceMs,
-    stalePolicy,
-  });
-  if (!claimResult.ok) {
-    return { code: "claim_contended", workerId, recovery, claimResult };
-  }
+    const activeSelection = selectActiveSubworkflowDispatchRecheck(db, {
+      now: tickNow,
+      graceMs,
+      holder: workerId,
+      continuationPollIntervalMs,
+      ...(input.claimedExecutorNames === undefined
+        ? {}
+        : { claimedExecutorNames: input.claimedExecutorNames }),
+      ...runScope,
+    });
+    const scan = selectRunnableWork(db, { now: tickNow, graceMs, ...runScope });
+    const candidate = scan.runnable[0];
+    const activeClaim = activeSelection.claim;
+    const pendingActiveCandidate = activeSelection.pendingCandidate;
+    const activeCandidate = activeClaim ?? pendingActiveCandidate;
+    if (
+      activeCandidate !== undefined &&
+      (candidate === undefined ||
+        (activeClaim !== undefined &&
+          isActiveSubworkflowRecheckUrgent(activeClaim.lease, {
+            now: tickNow,
+            continuationPollIntervalMs,
+          })))
+    ) {
+      input.preClaim?.({ db, candidate: activeCandidate });
+      let activeClaimForDispatch = activeClaim;
+      let staleDispatchTakeover:
+        | NonNullable<WorkflowStepDispatchContext["staleDispatchTakeover"]>
+        | undefined;
+      if (activeClaimForDispatch === undefined) {
+        const acquired = acquireActiveSubworkflowDispatchClaim(
+          db,
+          activeCandidate.runId,
+          {
+            now: tickNow,
+            graceMs,
+            holder: workerId,
+            leaseDurationMs,
+            stalePolicy,
+            expectedStepId: activeCandidate.stepId,
+            ...(input.claimedExecutorNames === undefined
+              ? {}
+              : { claimedExecutorNames: input.claimedExecutorNames }),
+          },
+        );
+        activeClaimForDispatch = acquired?.claim;
+        staleDispatchTakeover = acquired?.staleDispatchTakeover;
+      }
+      if (activeClaimForDispatch !== undefined) {
+        const dispatchClaimCandidate =
+          activeClaim === undefined
+            ? activeClaimForDispatch
+            : heartbeatActiveDispatchClaim(db, {
+                claim: activeClaimForDispatch,
+                now: tickNow,
+                leaseDurationMs,
+              });
+        if (dispatchClaimCandidate !== undefined) {
+          if (ownsPreClaimTransaction) db.exec("COMMIT");
+          return dispatchClaim(
+            {
+              db,
+              workerId,
+              recovery,
+              claim: dispatchClaimCandidate,
+              tickNow,
+              now,
+              leaseDurationMs,
+              recoveredDispatchLeases,
+              ...(staleDispatchTakeover === undefined
+                ? {}
+                : { durableStaleDispatchTakeover: staleDispatchTakeover }),
+            },
+            dispatch,
+          );
+        }
+      }
+    }
 
-  const claim = claimResult.claim;
-  return dispatchClaim(
-    {
-      db,
-      workerId,
-      recovery,
-      claim,
-      tickNow,
-      now,
-      leaseDurationMs,
-      recoveredDispatchLeases,
-    },
-    dispatch,
-  );
+    if (candidate === undefined) {
+      if (ownsPreClaimTransaction) db.exec("COMMIT");
+      return {
+        code: "idle",
+        workerId,
+        recovery,
+        ...(activeSelection.continuationPending
+          ? { continuationPending: true as const }
+          : {}),
+      };
+    }
+
+    input.preClaim?.({ db, candidate });
+
+    const claimResult = claimStep(db, {
+      runId: candidate.runId,
+      stepId: candidate.stepId,
+      holder: workerId,
+      leaseExpiresAt: tickNow + leaseDurationMs,
+      now: tickNow,
+      graceMs,
+      stalePolicy,
+    });
+    if (!claimResult.ok) {
+      if (ownsPreClaimTransaction) db.exec("COMMIT");
+      return { code: "claim_contended", workerId, recovery, claimResult };
+    }
+
+    const claim = claimResult.claim;
+    if (ownsPreClaimTransaction) db.exec("COMMIT");
+    return dispatchClaim(
+      {
+        db,
+        workerId,
+        recovery,
+        claim,
+        tickNow,
+        now,
+        leaseDurationMs,
+        recoveredDispatchLeases,
+      },
+      dispatch,
+    );
+  } catch (error) {
+    if (ownsPreClaimTransaction) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {}
+    }
+    throw error;
+  }
 }
 
 function isPromiseLike<T>(value: MaybePromise<T>): value is Promise<T> {

@@ -206,11 +206,12 @@ function finalizeDispatchedStep(
     leaseIdentity,
     now,
   } = args;
-  db.exec("BEGIN IMMEDIATE");
+  const ownsTransaction = !db.isTransaction;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
   try {
     const step = getWorkflowStep(db, runId, stepId);
     if (step === undefined) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return {
         status: WORKFLOW_RECONCILE_RESULT_STATUS.stepNotFound,
         detail: stepId,
@@ -231,7 +232,7 @@ function finalizeDispatchedStep(
         leaseIdentity,
       );
       refreshWorkflowRunRuntimeState(db, { runId, now });
-      db.exec("COMMIT");
+      if (ownsTransaction) db.exec("COMMIT");
       return {
         status: WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized,
         detail: step.state,
@@ -242,7 +243,7 @@ function finalizeDispatchedStep(
       // A dispatched step should be `running` before reconciliation finalizes it.
       // Anything else (approved / pending / blocked) is an unexpected lane state
       // the seam refuses rather than forcing a terminal over.
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return {
         status: WORKFLOW_RECONCILE_RESULT_STATUS.stepNotRunning,
         detail: step.state,
@@ -265,10 +266,10 @@ function finalizeDispatchedStep(
         now,
       );
       if (recovered !== undefined) {
-        db.exec("COMMIT");
+        if (ownsTransaction) db.exec("COMMIT");
         return recovered;
       }
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return mapFinishRefusal(finished);
     }
 
@@ -281,7 +282,7 @@ function finalizeDispatchedStep(
       leaseIdentity,
     );
     refreshWorkflowRunRuntimeState(db, { runId, now });
-    db.exec("COMMIT");
+    if (ownsTransaction) db.exec("COMMIT");
     return {
       status: finished.idempotent
         ? WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized
@@ -289,7 +290,7 @@ function finalizeDispatchedStep(
       detail: stepState,
     };
   } catch (error) {
-    safeRollback(db);
+    if (ownsTransaction) safeRollback(db);
     throw error;
   }
 }
@@ -328,11 +329,12 @@ function parkForManualRecovery(
     leaseIdentity,
     now,
   } = args;
-  db.exec("BEGIN IMMEDIATE");
+  const ownsTransaction = !db.isTransaction;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
   try {
     const step = getWorkflowStep(db, runId, stepId);
     if (step === undefined) {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return {
         status: WORKFLOW_RECONCILE_RESULT_STATUS.stepNotFound,
         detail: stepId,
@@ -348,14 +350,14 @@ function parkForManualRecovery(
         leaseIdentity,
       );
       refreshWorkflowRunRuntimeState(db, { runId, now });
-      db.exec("COMMIT");
+      if (ownsTransaction) db.exec("COMMIT");
       return {
         status: WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized,
         detail: step.state,
       };
     }
     if (step.state !== "running") {
-      db.exec("ROLLBACK");
+      if (ownsTransaction) db.exec("ROLLBACK");
       return {
         status: WORKFLOW_RECONCILE_RESULT_STATUS.stepNotRunning,
         detail: step.state,
@@ -414,13 +416,13 @@ function parkForManualRecovery(
       leaseIdentity,
     );
     refreshWorkflowRunRuntimeState(db, { runId, now });
-    db.exec("COMMIT");
+    if (ownsTransaction) db.exec("COMMIT");
     return {
       status: WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
       detail: attemptState,
     };
   } catch (error) {
-    safeRollback(db);
+    if (ownsTransaction) safeRollback(db);
     throw error;
   }
 }

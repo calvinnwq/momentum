@@ -2,14 +2,14 @@ import type { DaemonLoopResult } from "../core/daemon/loop.js";
 import type { DaemonStatusSuccess } from "../core/daemon/status.js";
 import {
   DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS,
-  DEFAULT_DAEMON_STALE_AFTER_MS
+  DEFAULT_DAEMON_STALE_AFTER_MS,
 } from "../config/daemon-defaults.js";
 import type { getActiveDaemonRun } from "../core/daemon/runs.js";
 import type {
   StaleClaimedJobRecoverySkipped,
   StaleDaemonRunRecoverySkipped,
   StaleRepoLockRecoverySkipped,
-  StartupRecoveryResult
+  StartupRecoveryResult,
 } from "../core/daemon/stale-recovery.js";
 import { write, writeJson, type CliIo } from "./cli-output.js";
 
@@ -52,7 +52,7 @@ export type DaemonStopFailurePayload = {
 export function emitDaemonStopSuccess(
   parsed: JsonFlags,
   io: CliIo,
-  data: DaemonStopSuccessPayload
+  data: DaemonStopSuccessPayload,
 ): number {
   const payload = {
     ok: true,
@@ -72,7 +72,7 @@ export function emitDaemonStopSuccess(
     stopNowRequestedAt: data.stopNowRequestedAt,
     heartbeatAt: data.heartbeatAt,
     heartbeatAgeMs: data.heartbeatAgeMs,
-    stale: data.stale
+    stale: data.stale,
   };
 
   if (parsed.json) {
@@ -95,13 +95,13 @@ export function emitDaemonStopSuccess(
     `Requested at: ${data.stopRequestedAt}`,
     ...(data.immediate
       ? [
-          `Stop-now requested at: ${data.stopNowRequestedAt ?? data.stopRequestedAt}`
+          `Stop-now requested at: ${data.stopNowRequestedAt ?? data.stopRequestedAt}`,
         ]
       : []),
     `Pid: ${data.pid ?? "(unset)"}`,
     `Host: ${data.host ?? "(unset)"}`,
     `Data dir: ${data.dataDir}`,
-    ""
+    "",
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -110,13 +110,13 @@ export function emitDaemonStopSuccess(
 export function emitDaemonStopFailure(
   parsed: JsonFlags,
   io: CliIo,
-  failure: DaemonStopFailurePayload
+  failure: DaemonStopFailurePayload,
 ): number {
   const payload: Record<string, unknown> = {
     ok: false,
     command: "daemon stop",
     code: failure.code,
-    message: failure.message
+    message: failure.message,
   };
   if (failure.latest !== undefined) payload["latest"] = failure.latest;
 
@@ -142,7 +142,9 @@ export type DaemonStartFailurePayload = {
   code:
     | "daemon_already_active"
     | "data_dir_failed"
-    | "daemon_live_wrapper_profile_invalid";
+    | "daemon_host_bindings_invalid"
+    | "daemon_host_bindings_required"
+    | "executor_config_invalid";
   message: string;
   existing?: {
     runId: string;
@@ -159,7 +161,7 @@ export type DaemonStartFailurePayload = {
 export function emitDaemonStartSuccess(
   parsed: JsonFlags,
   io: CliIo,
-  data: DaemonStartSuccessPayload
+  data: DaemonStartSuccessPayload,
 ): number {
   const payload = {
     ok: true,
@@ -170,7 +172,7 @@ export function emitDaemonStartSuccess(
     host: data.host,
     state: data.state,
     startedAt: data.startedAt,
-    heartbeatAt: data.heartbeatAt
+    heartbeatAt: data.heartbeatAt,
   };
 
   if (parsed.json) {
@@ -178,15 +180,18 @@ export function emitDaemonStartSuccess(
     return 0;
   }
 
-  write(io.stdout, [
-    `Daemon run started: ${data.runId}`,
-    `State: ${data.state}`,
-    `Pid: ${data.pid ?? "(unset)"}`,
-    `Host: ${data.host ?? "(unset)"}`,
-    `Started at: ${data.startedAt}`,
-    `Data dir: ${data.dataDir}`,
-    ""
-  ].join("\n"));
+  write(
+    io.stdout,
+    [
+      `Daemon run started: ${data.runId}`,
+      `State: ${data.state}`,
+      `Pid: ${data.pid ?? "(unset)"}`,
+      `Host: ${data.host ?? "(unset)"}`,
+      `Started at: ${data.startedAt}`,
+      `Data dir: ${data.dataDir}`,
+      "",
+    ].join("\n"),
+  );
   return 0;
 }
 
@@ -202,7 +207,7 @@ export type DaemonStartLoopPayload = {
 export function emitDaemonStartLoopResult(
   parsed: JsonFlags,
   io: CliIo,
-  data: DaemonStartLoopPayload
+  data: DaemonStartLoopPayload,
 ): number {
   const loop = data.loop;
   const loopSummary = {
@@ -220,7 +225,7 @@ export function emitDaemonStartLoopResult(
     lastObservedState: loop.lastObservedState,
     lastWorkerCode: loop.lastWorkerCode,
     startupRecovery: summarizeStartupRecovery(loop.startupRecovery),
-    ...(loop.error !== undefined ? { error: loop.error } : {})
+    ...(loop.error !== undefined ? { error: loop.error } : {}),
   };
 
   const payload: Record<string, unknown> = {
@@ -234,7 +239,7 @@ export function emitDaemonStartLoopResult(
     startedAt: data.startedAt,
     state: loop.terminalState,
     workerId: loop.workerId,
-    loop: loopSummary
+    loop: loopSummary,
   };
 
   const exitCode = loop.ok && loop.workSucceeded ? 0 : 1;
@@ -264,7 +269,7 @@ export function emitDaemonStartLoopResult(
     `Pid: ${data.pid ?? "(unset)"}`,
     `Host: ${data.host ?? "(unset)"}`,
     `Started at: ${data.startedAt}`,
-    `Data dir: ${data.dataDir}`
+    `Data dir: ${data.dataDir}`,
   ];
   if (loop.error !== undefined) {
     lines.push(`Error: ${loop.error}`);
@@ -286,7 +291,7 @@ export type StartupRecoverySummary = {
 };
 
 export function summarizeStartupRecovery(
-  recovery: StartupRecoveryResult | null
+  recovery: StartupRecoveryResult | null,
 ): StartupRecoverySummary | null {
   if (recovery === null) return null;
   return {
@@ -297,12 +302,12 @@ export function summarizeStartupRecovery(
     recoveredDaemonRunCount: recovery.daemonRuns.recovered.length,
     skippedRepoLocks: recovery.repoLocks.skipped,
     skippedClaimedJobs: recovery.claimedJobs.skipped,
-    skippedDaemonRuns: recovery.daemonRuns.skipped
+    skippedDaemonRuns: recovery.daemonRuns.skipped,
   };
 }
 
 export function formatStartupRecoveryLines(
-  recovery: StartupRecoveryResult | null
+  recovery: StartupRecoveryResult | null,
 ): string[] {
   if (recovery === null) return [];
   const recoveredLocks = recovery.repoLocks.recovered.length;
@@ -322,20 +327,20 @@ export function formatStartupRecoveryLines(
     return [];
   }
   return [
-    `Startup recovery: locks recovered=${recoveredLocks} skipped=${skippedLocks}; claims recovered=${recoveredJobs} skipped=${skippedJobs}; daemons recovered=${recoveredDaemons} skipped=${skippedDaemons}`
+    `Startup recovery: locks recovered=${recoveredLocks} skipped=${skippedLocks}; claims recovered=${recoveredJobs} skipped=${skippedJobs}; daemons recovered=${recoveredDaemons} skipped=${skippedDaemons}`,
   ];
 }
 
 export function emitDaemonStartFailure(
   parsed: JsonFlags,
   io: CliIo,
-  failure: DaemonStartFailurePayload
+  failure: DaemonStartFailurePayload,
 ): number {
   const payload: Record<string, unknown> = {
     ok: false,
     command: "daemon start",
     code: failure.code,
-    message: failure.message
+    message: failure.message,
   };
   if (failure.existing) payload["existing"] = failure.existing;
 
@@ -350,13 +355,13 @@ export function emitDaemonStartFailure(
 export function emitDaemonStatusFailure(
   parsed: JsonFlags,
   io: CliIo,
-  failure: { code: string; message: string }
+  failure: { code: string; message: string },
 ): number {
   const payload = {
     ok: false,
     command: "daemon status",
     code: failure.code,
-    message: failure.message
+    message: failure.message,
   };
   if (parsed.json) {
     writeJson(io.stderr, payload);
@@ -369,7 +374,7 @@ export function emitDaemonStatusFailure(
 export function emitDaemonStatus(
   parsed: JsonFlags,
   io: CliIo,
-  data: DaemonStatusSuccess
+  data: DaemonStatusSuccess,
 ): number {
   const payload = {
     ok: true,
@@ -384,7 +389,7 @@ export function emitDaemonStatus(
     staleRepoLocks: data.staleRepoLocks,
     staleClaimedJobs: data.staleClaimedJobs,
     goalsNeedingRecovery: data.goalsNeedingRecovery,
-    observedAt: data.observedAt
+    observedAt: data.observedAt,
   };
 
   if (parsed.json) {
@@ -395,7 +400,7 @@ export function emitDaemonStatus(
   if (!data.daemonRun) {
     const noDaemonLines: string[] = [
       "Daemon: never started",
-      `Data dir: ${data.dataDir}`
+      `Data dir: ${data.dataDir}`,
     ];
     if (data.staleRepoLocks.length > 0) {
       noDaemonLines.push(`Stale repo locks: ${data.staleRepoLocks.length}`);
@@ -405,11 +410,11 @@ export function emitDaemonStatus(
     }
     if (data.goalsNeedingRecovery.length > 0) {
       noDaemonLines.push(
-        `Goals needing manual recovery: ${data.goalsNeedingRecovery.length}`
+        `Goals needing manual recovery: ${data.goalsNeedingRecovery.length}`,
       );
       for (const entry of data.goalsNeedingRecovery) {
         noDaemonLines.push(
-          `  - ${entry.goalId} [${entry.goalState}] ${entry.recoveryMdPath}`
+          `  - ${entry.goalId} [${entry.goalState}] ${entry.recoveryMdPath}`,
         );
       }
     }
@@ -428,16 +433,16 @@ export function emitDaemonStatus(
     `Heartbeat at: ${run.heartbeatAt} (age ${run.heartbeatAgeMs}ms)`,
     `Active job: ${run.activeJob.jobId ?? "(none)"}`,
     `Active lock: ${run.activeJob.lockId ?? "(none)"}`,
-    `Reconcile count: ${run.reconciliation.count}`
+    `Reconcile count: ${run.reconciliation.count}`,
   ];
   if (run.stopRequest) {
     lines.push(
-      `Stop requested at: ${run.stopRequest.requestedAt} (reason: ${run.stopRequest.reason})`
+      `Stop requested at: ${run.stopRequest.requestedAt} (reason: ${run.stopRequest.reason})`,
     );
   }
   if (run.stopNowRequest) {
     lines.push(
-      `Stop-now requested at: ${run.stopNowRequest.requestedAt} (reason: ${run.stopNowRequest.reason})`
+      `Stop-now requested at: ${run.stopNowRequest.requestedAt} (reason: ${run.stopNowRequest.reason})`,
     );
   }
   if (run.cancelOutcome) {
@@ -460,11 +465,11 @@ export function emitDaemonStatus(
   }
   if (data.goalsNeedingRecovery.length > 0) {
     lines.push(
-      `Goals needing manual recovery: ${data.goalsNeedingRecovery.length}`
+      `Goals needing manual recovery: ${data.goalsNeedingRecovery.length}`,
     );
     for (const entry of data.goalsNeedingRecovery) {
       lines.push(
-        `  - ${entry.goalId} [${entry.goalState}] ${entry.recoveryMdPath}`
+        `  - ${entry.goalId} [${entry.goalState}] ${entry.recoveryMdPath}`,
       );
     }
   }
@@ -474,8 +479,10 @@ export function emitDaemonStatus(
 }
 
 export function summarizeExistingDaemonRun(
-  run: ReturnType<typeof getActiveDaemonRun> extends infer T ? NonNullable<T> : never,
-  now: number
+  run: ReturnType<typeof getActiveDaemonRun> extends infer T
+    ? NonNullable<T>
+    : never,
+  now: number,
 ): NonNullable<DaemonStartFailurePayload["existing"]> {
   const heartbeatAgeMs = Math.max(0, now - run.heartbeat_at);
   const staleAfterMs =
@@ -490,6 +497,6 @@ export function summarizeExistingDaemonRun(
     startedAt: run.started_at,
     heartbeatAt: run.heartbeat_at,
     heartbeatAgeMs,
-    stale: heartbeatAgeMs >= staleAfterMs
+    stale: heartbeatAgeMs >= staleAfterMs,
   };
 }

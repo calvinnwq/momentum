@@ -74,13 +74,21 @@ import {
   resolveWorkflowStepDispatchRouteSelection,
 } from "../../core/workflow/dispatch/execute.js";
 import { resolveClaimedWorkflowStepExecutor } from "../../core/workflow/dispatch/persist.js";
-import { legacyApprovalBoundarySynonyms } from "../../core/workflow/definition/legacy.js";
+import {
+  canonicalExecutorIdentity,
+  legacyApprovalBoundarySynonyms,
+} from "../../core/workflow/definition/legacy.js";
 import { resolveWorkflowGateAndResumeRegisteredExecutor } from "../../core/workflow/dispatch/executor-gate.js";
 import {
+  hasCompletedNativeHostBindingEvidenceForStep,
   resolveDaemonWorkflowStepDispatch,
   type DaemonWorkflowDispatchDeps,
 } from "../../core/daemon/workflow-dispatch.js";
-import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../../core/workflow/live-wrapper/daemon-profile.js";
+import {
+  DAEMON_HOST_BINDINGS_FILE_ENV_VAR,
+  readDaemonHostBindingsSource,
+  resolveDaemonHostBindings,
+} from "../../core/workflow/live-wrapper/daemon-host-bindings.js";
 import {
   DAEMON_EXECUTOR_CONFIG_ENV_VAR,
   resolveDaemonExecutorRegistry,
@@ -89,7 +97,9 @@ import type { ExecutorRegistry } from "../../core/executors/sdk/registry.js";
 import {
   runWorkflowSchedulerOnceAsync,
   type RecoverStaleWorkflowLeasesResult,
+  type WorkflowStepPreClaim,
 } from "../../core/workflow/dispatch/scheduler.js";
+import { RegisteredExecutorHostBindingsError } from "../../core/workflow/dispatch/registered-executor.js";
 import {
   loadWorkflowRuntimeStateRows,
   refreshWorkflowRunRuntimeState,
@@ -2561,6 +2571,15 @@ async function workflowRunWatch(
     });
   }
 
+  const hostBindingsFailure = workflowWatchHostBindingsFailure(io.env ?? {});
+  if (hostBindingsFailure !== null) {
+    return emitWorkflowRunWatchFailure(parsed, io, {
+      ...hostBindingsFailure,
+      dataDir,
+      runId,
+    });
+  }
+
   let envelope: WorkflowMonitorEnvelope | null;
   let db: MomentumDb | undefined;
   let readOnlyFallback = false;
@@ -2878,7 +2897,7 @@ function isWorkflowWatchTailStepDispatchBlocked(
   );
 }
 
-function isWorkflowWatchLiveWrapperProfileRequired(
+function isWorkflowWatchHostBindingsRequired(
   db: MomentumDb,
   envelope: WorkflowMonitorEnvelope,
 ): boolean {
@@ -2886,19 +2905,51 @@ function isWorkflowWatchLiveWrapperProfileRequired(
   if (envelope.nextAction.code !== "advance_to_step" || stepId === null) {
     return false;
   }
-  if (stepId === "preflight" || stepId === "postflight") return true;
+  const hasCompletedEvidence = hasCompletedNativeHostBindingEvidenceForStep(
+    db,
+    {
+      runId: envelope.runId,
+      stepId,
+    },
+  );
+  if (stepId === "preflight" || stepId === "postflight") {
+    return !hasCompletedEvidence;
+  }
 
   const resolution = resolveClaimedWorkflowStepExecutor(db, {
     runId: envelope.runId,
     stepId,
   });
-  return resolution.ok && resolution.executor === "delegate-supervisor";
+  return (
+    resolution.ok &&
+    !hasCompletedEvidence &&
+    (resolution.executor === "delegate-supervisor" ||
+      ["agent-loop", "agent-once", "script"].includes(
+        canonicalExecutorIdentity(resolution.executor),
+      ))
+  );
 }
 
-function hasDaemonLiveWrapperProfileConfigured(
+function hasDaemonHostBindingsConfigured(
   env: Record<string, string | undefined>,
 ): boolean {
-  return (env[DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR] ?? "").trim().length > 0;
+  return (env[DAEMON_HOST_BINDINGS_FILE_ENV_VAR] ?? "").trim().length > 0;
+}
+
+function workflowWatchHostBindingsFailure(
+  env: Record<string, string | undefined>,
+): WorkflowWatchDispatchFailure | null {
+  const resolution = resolveDaemonHostBindings(env, {
+    loadSource: readDaemonHostBindingsSource,
+  });
+  if (resolution.status !== "invalid") return null;
+  return {
+    code: "daemon_host_bindings_invalid",
+    message:
+      resolution.code === "retired_selector"
+        ? resolution.error
+        : `Invalid ${DAEMON_HOST_BINDINGS_FILE_ENV_VAR} (${resolution.source}): ${resolution.code}: ${resolution.error}`,
+  };
 }
 
 async function runWorkflowWatchDispatcherTick(
@@ -2907,6 +2958,8 @@ async function runWorkflowWatchDispatcherTick(
   env: Record<string, string | undefined>,
   deps: CliDeps,
 ): Promise<WorkflowWatchDispatchFailure | null> {
+  const hostBindingsFailure = workflowWatchHostBindingsFailure(env);
+  if (hostBindingsFailure !== null) return hostBindingsFailure;
   const stepId = envelope.nextAction.stepId;
   const canDispatchNextStep =
     envelope.nextAction.code === "advance_to_step" && stepId !== null;
@@ -2924,38 +2977,65 @@ async function runWorkflowWatchDispatcherTick(
 
   const now = Date.now();
   const workerId = `workflow-watch:${envelope.runId}`;
-  let dispatchResolution: ReturnType<
-    typeof resolveDaemonWorkflowStepDispatch
-  > | null = null;
   if (canDispatchNextStep) {
     if (
-      isWorkflowWatchLiveWrapperProfileRequired(db, envelope) &&
-      !hasDaemonLiveWrapperProfileConfigured(env) &&
+      isWorkflowWatchHostBindingsRequired(db, envelope) &&
+      !hasDaemonHostBindingsConfigured(env) &&
       resolveWorkflowStepDispatchRouteSelection(db, {
         runId: envelope.runId,
         stepId,
       }).ok
     ) {
       return {
-        code: "daemon_live_wrapper_profile_required",
+        code: "daemon_host_bindings_required",
         message:
-          `${DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR} is required before ` +
+          `${DAEMON_HOST_BINDINGS_FILE_ENV_VAR} is required before ` +
           `workflow run watch --once can dispatch ${stepId}; refusing to ` +
           "start the step without terminal live-wrapper evidence.",
       };
     }
-    dispatchResolution = resolveDaemonWorkflowStepDispatch(
-      env,
-      executeWorkflowStepDispatch,
-      deps,
-    );
-    if (!dispatchResolution.ok) {
-      return {
-        code: "daemon_live_wrapper_profile_invalid",
-        message: dispatchResolution.message,
-      };
-    }
   }
+  // Resolve eagerly for the recheck-only path too so the scheduler's
+  // pre-claim guard exists before any active claim can heartbeat.
+  const dispatchResolution = resolveDaemonWorkflowStepDispatch(
+    env,
+    executeWorkflowStepDispatch,
+    deps,
+  );
+  if (!dispatchResolution.ok) {
+    return {
+      code: dispatchResolution.code,
+      message: dispatchResolution.message,
+    };
+  }
+  const resolvedPreClaim = dispatchResolution.preClaim;
+  const preClaim: WorkflowStepPreClaim | undefined =
+    resolvedPreClaim === undefined
+      ? undefined
+      : (preClaimInput) => {
+          // Route validation takes precedence: an invalid route must reach
+          // dispatch so it parks the run behind a route_config_invalid gate
+          // instead of refusing on missing host bindings first.
+          if (
+            !resolveWorkflowStepDispatchRouteSelection(preClaimInput.db, {
+              runId: preClaimInput.candidate.runId,
+              stepId: preClaimInput.candidate.stepId,
+            }).ok
+          ) {
+            return;
+          }
+          try {
+            resolvedPreClaim(preClaimInput);
+          } catch (error) {
+            if (error instanceof RegisteredExecutorHostBindingsError) {
+              throw new WorkflowWatchDispatchConfigError({
+                code: "daemon_host_bindings_required",
+                message: error.message,
+              });
+            }
+            throw error;
+          }
+        };
   const recovery: RecoverStaleWorkflowLeasesResult = {
     recovered: [],
     skipped: [],
@@ -2965,24 +3045,11 @@ async function runWorkflowWatchDispatcherTick(
       db,
       runId: envelope.runId,
       workerId,
-      dispatch: (claim, context) => {
-        dispatchResolution ??= resolveDaemonWorkflowStepDispatch(
-          env,
-          executeWorkflowStepDispatch,
-          deps,
-        );
-        if (!dispatchResolution.ok) {
-          throw new WorkflowWatchDispatchConfigError({
-            code: "daemon_live_wrapper_profile_invalid",
-            message: dispatchResolution.message,
-          });
-        }
-        return dispatchResolution.dispatch(claim, context);
-      },
+      dispatch: dispatchResolution.dispatch,
+      ...(preClaim === undefined ? {} : { preClaim }),
       now: () => now,
       claimedExecutorNames: configuredExecutorNames(env),
-      ...(dispatchResolution?.ok &&
-      dispatchResolution.leaseDurationMs !== undefined
+      ...(dispatchResolution.leaseDurationMs !== undefined
         ? { leaseDurationMs: dispatchResolution.leaseDurationMs }
         : {}),
       deps: {

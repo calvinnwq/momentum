@@ -1,9 +1,9 @@
 /**
  * Opt-in coding-workflow live-wrapper command seam.
  *
- * The daemon live-wrapper profile owns process supervision, iteration-directory
+ * The daemon host bindings own process supervision, iteration-directory
  * result placement, and dispatch reconciliation. This module is the command the
- * checked-in dogfood profile runs: it reads
+ * checked-in host-binding file runs: it reads
  * `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the current
  * `MOMENTUM_STEP_KIND`, validates the run-local config before spawning,
  * executes the configured child command, and writes a normalized `RunnerResult`
@@ -227,7 +227,7 @@ export function runCodingWorkflowLiveWrapper(
   if (configPath === undefined || configPath.length === 0) {
     return processSetupFailure(
       deps,
-      `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG is required when the daemon live-wrapper profile uses the coding workflow wrapper for "${stepKind}".`,
+      `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG is required when the daemon host bindings use the coding workflow wrapper for "${stepKind}".`,
     );
   }
 

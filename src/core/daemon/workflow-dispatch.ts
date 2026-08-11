@@ -13,9 +13,9 @@ import {
   resolvePreparedDelegateCommitEvidence,
 } from "../../adapters/profile-backed-delegate-tool-adapter.js";
 import type {
-  LiveWrapperConfig,
-  LiveWrapperProfile,
-} from "../../adapters/live-wrapper-registry.js";
+  HostBindingConfig,
+  HostBindings,
+} from "../../adapters/host-bindings-registry.js";
 import type { LinearExternalUpdateClient } from "../../adapters/linear-external-update-client.js";
 import type { LinearIssueRefreshClient } from "../../adapters/linear-issue-refresh.js";
 import { inspectRepo, type PreparedCommitEvidence } from "../repo/guard.js";
@@ -103,10 +103,10 @@ import {
   resolveDispatchedStepExecutorContext,
 } from "../workflow/live-wrapper/daemon-exec-context.js";
 import {
-  readDaemonLiveWrapperProfileSource,
-  resolveDaemonLiveWrapperProfile,
-  DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR,
-} from "../workflow/live-wrapper/daemon-profile.js";
+  readDaemonHostBindingsSource,
+  resolveDaemonHostBindings,
+  DAEMON_HOST_BINDINGS_FILE_ENV_VAR,
+} from "../workflow/live-wrapper/daemon-host-bindings.js";
 import {
   buildCodingWorkflowChildEnv,
   loadCodingWorkflowWrapperConfig,
@@ -169,6 +169,7 @@ import {
 import type {
   AsyncWorkflowStepDispatch,
   WorkflowStepDispatch,
+  WorkflowStepPreClaim,
 } from "../workflow/dispatch/scheduler.js";
 
 export type LinearIssueRefreshClientFactoryInput = {
@@ -191,18 +192,194 @@ export type DaemonWorkflowDispatchDeps = {
 };
 
 export type DaemonWorkflowDispatchResolution =
-  | { ok: true; dispatch: AsyncWorkflowStepDispatch; leaseDurationMs?: number }
-  | { ok: false; message: string };
+  | {
+      ok: true;
+      dispatch: AsyncWorkflowStepDispatch;
+      leaseDurationMs?: number;
+      preClaim?: WorkflowStepPreClaim;
+    }
+  | {
+      ok: false;
+      code: "daemon_host_bindings_invalid" | "executor_config_invalid";
+      message: string;
+    };
 
-const NATIVE_PROFILE_EXECUTORS: ReadonlySet<string> = new Set([
+const NATIVE_HOST_BINDING_EXECUTORS: ReadonlySet<string> = new Set([
   "agent-loop",
   "agent-once",
   "script",
+  DELEGATE_SUPERVISOR_EXECUTOR_NAME,
 ]);
 
-/** Whether a recorded identity resolves to a native profile-backed built-in. */
-function isNativeProfileExecutorIdentity(executorName: string): boolean {
-  return NATIVE_PROFILE_EXECUTORS.has(canonicalExecutorIdentity(executorName));
+/** Whether a recorded identity resolves to a native binding-backed built-in. */
+function isNativeHostBindingExecutorIdentity(executorName: string): boolean {
+  return NATIVE_HOST_BINDING_EXECUTORS.has(
+    canonicalExecutorIdentity(executorName),
+  );
+}
+
+/**
+ * Whether the step's latest attempt already carries completed work whose
+ * classification/settlement must never be blocked before a claim in the
+ * *not-configured* bindings lane, where
+ * `createMissingHostBindingsNativeDispatch` classifies completed native
+ * mechanisms without consulting any binding. When a bindings source *is*
+ * resolved, completed native evidence does not bypass selected-binding
+ * presence validation: the post-claim resolver still looks the binding up.
+ * Delegate handoffs record their completion through the live-step mechanism
+ * and handoff stages, not the unclassified native-mechanism shape.
+ */
+function hasCompletedNativeHostBindingEvidence(
+  db: MomentumDb,
+  executorName: string,
+  attemptId: string,
+): boolean {
+  return canonicalExecutorIdentity(executorName) ===
+    DELEGATE_SUPERVISOR_EXECUTOR_NAME
+    ? hasCompletedLiveStepMechanism(db, attemptId) ||
+        hasCompletedDelegateHandoff(db, attemptId)
+    : hasUnclassifiedCompletedNativeMechanism(db, attemptId);
+}
+
+function assertNativeHostBindingsConfigured(
+  db: MomentumDb,
+  target: { runId: string; stepId: string },
+): void {
+  const runtime = resolveWorkflowStepExecutorRuntime(db, target);
+  if (
+    !runtime.ok ||
+    hasExecutorDefinition(db, runtime.executorName) ||
+    !isNativeHostBindingExecutorIdentity(runtime.executorName)
+  ) {
+    return;
+  }
+  const attempt = loadLatestExecutorAttemptForStep(
+    db,
+    target.runId,
+    target.stepId,
+  );
+  if (
+    attempt !== undefined &&
+    hasCompletedNativeHostBindingEvidence(
+      db,
+      runtime.executorName,
+      attempt.attemptId,
+    )
+  ) {
+    return;
+  }
+  // Route validation owns precedence: an invalid route must reach dispatch so
+  // the run parks behind a durable route_config_invalid gate instead of a
+  // pre-claim host-binding refusal.
+  if (!resolveWorkflowStepDispatchRouteSelection(db, target).ok) return;
+  throw new RegisteredExecutorHostBindingsError(
+    "runtime_unavailable",
+    `${DAEMON_HOST_BINDINGS_FILE_ENV_VAR} is required for native ${runtime.executorName} host bindings`,
+  );
+}
+
+/**
+ * Pre-claim guard for a *resolved* bindings source that still cannot serve the
+ * selected native step: claiming would only create attempt/round state for
+ * the post-claim binding lookup to reject with `runtime_unavailable`.
+ * Kind-selected native executors validate the step-kind binding; delegate
+ * handoffs validate the binding their tool config selects, mirroring the
+ * post-claim resolver's tool-to-binding mapping. Completed evidence never
+ * bypasses this presence check unless the matching post-claim resolver path
+ * also settles without consulting any binding. Read-only: mirrors the
+ * resolver's rejection without mutating any workflow, attempt, or round
+ * state.
+ */
+function assertSelectedNativeHostBindingPresent(
+  db: MomentumDb,
+  target: { runId: string; stepId: string },
+  hostBindings: HostBindings,
+): void {
+  const runtime = resolveWorkflowStepExecutorRuntime(db, target);
+  if (
+    !runtime.ok ||
+    hasExecutorDefinition(db, runtime.executorName) ||
+    !isNativeHostBindingExecutorIdentity(runtime.executorName)
+  ) {
+    return;
+  }
+  if (
+    canonicalExecutorIdentity(runtime.executorName) ===
+    DELEGATE_SUPERVISOR_EXECUTOR_NAME
+  ) {
+    assertSelectedDelegateToolHostBindingPresent(
+      db,
+      target,
+      hostBindings,
+      runtime.config,
+    );
+    return;
+  }
+  const step = getWorkflowStep(db, target.runId, target.stepId);
+  if (step === undefined || hostBindings.bindings.has(step.kind)) return;
+  // Route validation owns precedence: an invalid route must reach dispatch so
+  // the run parks behind a durable route_config_invalid gate instead of a
+  // pre-claim host-binding refusal.
+  if (!resolveWorkflowStepDispatchRouteSelection(db, target).ok) return;
+  throw new RegisteredExecutorHostBindingsError(
+    "runtime_unavailable",
+    `host bindings have no ${step.kind} binding for native ${runtime.executorName}`,
+  );
+}
+
+/**
+ * Delegate arm of {@link assertSelectedNativeHostBindingPresent}: a delegated
+ * tool selects its binding through step config, so mirror exactly the
+ * post-claim resolver paths that consult bindings. Exempt only the paths the
+ * resolver settles without a binding lookup: an unmapped tool (empty tools),
+ * a completed live-step mechanism, and a completed handoff replayed through
+ * the persisted adapter (which for `no-mistakes` still resolves the status
+ * runtime first, so that tool stays validated). Invalid tool config is owned
+ * by route validation and the post-claim `invalid_input` refusal, not a
+ * host-bindings refusal.
+ */
+function assertSelectedDelegateToolHostBindingPresent(
+  db: MomentumDb,
+  target: { runId: string; stepId: string },
+  hostBindings: HostBindings,
+  config: Readonly<Record<string, unknown>>,
+): void {
+  const tool = config["tool"];
+  if (typeof tool !== "string" || tool.trim().length === 0) return;
+  const stepKind = resolveProfileBackedDelegateToolStepKind(tool);
+  if (stepKind === null) return;
+  const attempt = loadLatestExecutorAttemptForStep(
+    db,
+    target.runId,
+    target.stepId,
+  );
+  if (attempt !== undefined) {
+    if (hasCompletedLiveStepMechanism(db, attempt.attemptId)) return;
+    if (
+      tool !== "no-mistakes" &&
+      hasCompletedDelegateHandoff(db, attempt.attemptId)
+    ) {
+      return;
+    }
+  }
+  // New host-binding files key the no-mistakes status wrapper under the
+  // canonical `validate` kind; the tool's own legacy spelling stays readable.
+  const bound =
+    tool === "no-mistakes"
+      ? hostBindings.bindings.has(stepKind) ||
+        (hostBindings.bindings as ReadonlyMap<string, HostBindingConfig>).has(
+          "no-mistakes",
+        )
+      : hostBindings.bindings.has(stepKind);
+  if (bound) return;
+  // Route validation owns precedence: an invalid route must reach dispatch so
+  // the run parks behind a durable route_config_invalid gate instead of a
+  // pre-claim host-binding refusal.
+  if (!resolveWorkflowStepDispatchRouteSelection(db, target).ok) return;
+  throw new RegisteredExecutorHostBindingsError(
+    "runtime_unavailable",
+    `host bindings have no ${stepKind} binding for delegated ${tool} tool`,
+  );
 }
 
 /**
@@ -235,22 +412,29 @@ export function resolveDaemonWorkflowStepDispatch(
   baseDispatch: WorkflowStepDispatch,
   deps: DaemonWorkflowDispatchDeps,
 ): DaemonWorkflowDispatchResolution {
-  const profile = resolveDaemonLiveWrapperProfile(env, {
-    loadSource: readDaemonLiveWrapperProfileSource,
+  const hostBindings = resolveDaemonHostBindings(env, {
+    loadSource: readDaemonHostBindingsSource,
   });
 
-  if (profile.status === "invalid") {
+  if (hostBindings.status === "invalid") {
     return {
       ok: false,
-      message: `Invalid ${DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR} (${profile.source}): ${profile.code}: ${profile.error}`,
+      code: "daemon_host_bindings_invalid",
+      message:
+        hostBindings.code === "retired_selector"
+          ? hostBindings.error
+          : `Invalid ${DAEMON_HOST_BINDINGS_FILE_ENV_VAR} (${hostBindings.source}): ${hostBindings.code}: ${hostBindings.error}`,
     };
   }
   const builtIns =
-    profile.status === "resolved" ? buildProfileBackedSdkExecutors() : [];
+    hostBindings.status === "resolved"
+      ? buildHostBindingBackedSdkExecutors()
+      : [];
   const executorConfig = resolveDaemonExecutorRegistry(env, builtIns);
   if (executorConfig.status === "invalid") {
     return {
       ok: false,
+      code: "executor_config_invalid",
       message: `Invalid ${DAEMON_EXECUTOR_CONFIG_ENV_VAR} (${executorConfig.source}): ${executorConfig.message}`,
     };
   }
@@ -266,7 +450,7 @@ export function resolveDaemonWorkflowStepDispatch(
   );
 
   let legacy: DaemonWorkflowDispatchResolution;
-  if (profile.status === "not_configured") {
+  if (hostBindings.status === "not_configured") {
     legacy = {
       ok: true,
       dispatch: withSubworkflowDispatch(
@@ -279,7 +463,7 @@ export function resolveDaemonWorkflowStepDispatch(
     };
   } else {
     const liveRegistry = buildRealWorkflowStepExecutorRegistry({
-      profile: profile.profile,
+      bindings: hostBindings.bindings,
     });
     const registry = new Map(
       builtIns.map((executor) => [executor.name, executor]),
@@ -287,10 +471,10 @@ export function resolveDaemonWorkflowStepDispatch(
     const resolveHostBindings = createLiveStepHostBindingsResolver(
       env,
       liveRegistry,
-      profile.profile,
+      hostBindings.bindings,
     );
     const resolveOwnedRoundMaterializer =
-      createNativeOwnedRoundMaterializerResolver(env, profile.profile);
+      createNativeOwnedRoundMaterializerResolver(env, hostBindings.bindings);
     legacy = {
       ok: true,
       dispatch: withSubworkflowDispatch(
@@ -300,31 +484,43 @@ export function resolveDaemonWorkflowStepDispatch(
             canonicalBuiltInExecutorNames,
             resolveHostBindings,
             resolveOwnedRoundMaterializer,
-            // A delegated handoff is one durable SDK round; allow only that
-            // executor to perform its first bounded read under the same claim.
+            // A fresh delegated handoff is one durable SDK round followed by
+            // its first bounded read; a retry with any prior handoff must only
+            // replay that handoff under the same claim.
             resolveMaxTicks: ({ executorName, attempt, context }) =>
-              executorName === DELEGATE_SUPERVISOR_EXECUTOR_NAME &&
-              !hasAnyCompletedDelegateHandoff(
-                context.db,
-                attempt.workflowRunId,
-                attempt.stepRunId,
-              )
-                ? 2
-                : 1,
+              executorName !== DELEGATE_SUPERVISOR_EXECUTOR_NAME
+                ? 1
+                : hasPriorCompletedDelegateHandoff(
+                      context.db,
+                      attempt.workflowRunId,
+                      attempt.stepRunId,
+                      attempt.attemptNumber,
+                    )
+                  ? 1
+                  : 2,
           }),
           env,
           deps,
         ),
       ),
-      leaseDurationMs: maxDaemonLiveWrapperProfileTimeoutMs(profile.profile),
+      leaseDurationMs: maxHostBindingTimeoutMs(hostBindings.bindings),
     };
   }
   if (!legacy.ok) return legacy;
 
-  const missingProfileDispatch =
-    profile.status === "not_configured"
-      ? createMissingProfileNativeDispatch(baseDispatch)
+  const missingHostBindingsDispatch =
+    hostBindings.status === "not_configured"
+      ? createMissingHostBindingsNativeDispatch(baseDispatch)
       : undefined;
+  const hostBindingsPreClaim: WorkflowStepPreClaim =
+    hostBindings.status === "not_configured"
+      ? ({ db, candidate }) => assertNativeHostBindingsConfigured(db, candidate)
+      : ({ db, candidate }) =>
+          assertSelectedNativeHostBindingPresent(
+            db,
+            candidate,
+            hostBindings.bindings,
+          );
 
   if (executorConfig.status === "not_configured") {
     const unavailableDispatch = createRegisteredExecutorWorkflowDispatch(
@@ -343,10 +539,26 @@ export function resolveDaemonWorkflowStepDispatch(
         if (
           runtime.ok &&
           !durablyClaimed &&
-          isNativeProfileExecutorIdentity(runtime.executorName) &&
-          missingProfileDispatch !== undefined
+          isNativeHostBindingExecutorIdentity(runtime.executorName) &&
+          hostBindings.status === "not_configured"
         ) {
-          return missingProfileDispatch(claim, context);
+          const attempt = loadLatestExecutorAttemptForStep(
+            context.db,
+            claim.runId,
+            claim.stepId,
+          );
+          if (
+            attempt !== undefined &&
+            hasCompletedNativeHostBindingEvidence(
+              context.db,
+              runtime.executorName,
+              attempt.attemptId,
+            ) &&
+            missingHostBindingsDispatch !== undefined
+          ) {
+            return missingHostBindingsDispatch(claim, context);
+          }
+          assertNativeHostBindingsConfigured(context.db, claim);
         }
         return runtime.ok &&
           (durablyClaimed || !isBuiltInExecutorIdentity(runtime.executorName))
@@ -356,22 +568,25 @@ export function resolveDaemonWorkflowStepDispatch(
       ...(legacy.leaseDurationMs !== undefined
         ? { leaseDurationMs: legacy.leaseDurationMs }
         : {}),
+      preClaim: hostBindingsPreClaim,
     };
   }
 
   let registeredDispatch: AsyncWorkflowStepDispatch | undefined;
   let registeredLoad: ExecutorRegistryLoadResult | undefined;
-  const profileHostBindings =
-    profile.status === "resolved"
+  const boundHostBindingsResolver =
+    hostBindings.status === "resolved"
       ? createLiveStepHostBindingsResolver(
           env,
-          buildRealWorkflowStepExecutorRegistry({ profile: profile.profile }),
-          profile.profile,
+          buildRealWorkflowStepExecutorRegistry({
+            bindings: hostBindings.bindings,
+          }),
+          hostBindings.bindings,
         )
       : undefined;
-  const profileOwnedRoundMaterializer =
-    profile.status === "resolved"
-      ? createNativeOwnedRoundMaterializerResolver(env, profile.profile)
+  const boundOwnedRoundMaterializer =
+    hostBindings.status === "resolved"
+      ? createNativeOwnedRoundMaterializerResolver(env, hostBindings.bindings)
       : undefined;
   return {
     ok: true,
@@ -408,13 +623,12 @@ export function resolveDaemonWorkflowStepDispatch(
               registry: loaded.registry,
               canonicalBuiltInExecutorNames,
               unavailableReasons,
-              ...(profileHostBindings !== undefined
-                ? { resolveHostBindings: profileHostBindings }
+              ...(boundHostBindingsResolver !== undefined
+                ? { resolveHostBindings: boundHostBindingsResolver }
                 : {}),
-              ...(profileOwnedRoundMaterializer !== undefined
+              ...(boundOwnedRoundMaterializer !== undefined
                 ? {
-                    resolveOwnedRoundMaterializer:
-                      profileOwnedRoundMaterializer,
+                    resolveOwnedRoundMaterializer: boundOwnedRoundMaterializer,
                   }
                 : {}),
             },
@@ -426,36 +640,238 @@ export function resolveDaemonWorkflowStepDispatch(
       if (
         runtime.ok &&
         !durablyClaimed &&
-        isNativeProfileExecutorIdentity(runtime.executorName) &&
-        missingProfileDispatch !== undefined
+        isNativeHostBindingExecutorIdentity(runtime.executorName) &&
+        hostBindings.status === "not_configured"
       ) {
-        return missingProfileDispatch(claim, context);
+        const attempt = loadLatestExecutorAttemptForStep(
+          context.db,
+          claim.runId,
+          claim.stepId,
+        );
+        if (
+          attempt !== undefined &&
+          hasCompletedNativeHostBindingEvidence(
+            context.db,
+            runtime.executorName,
+            attempt.attemptId,
+          ) &&
+          missingHostBindingsDispatch !== undefined
+        ) {
+          return missingHostBindingsDispatch(claim, context);
+        }
+        assertNativeHostBindingsConfigured(context.db, claim);
       }
       return legacy.dispatch(claim, context);
     },
     ...(legacy.leaseDurationMs !== undefined
       ? { leaseDurationMs: legacy.leaseDurationMs }
       : {}),
+    preClaim: hostBindingsPreClaim,
   };
 }
 
-function createMissingProfileNativeDispatch(
+function createMissingHostBindingsNativeDispatch(
   baseDispatch: WorkflowStepDispatch,
 ): AsyncWorkflowStepDispatch {
   const registry = new Map(
-    buildProfileBackedSdkExecutors()
-      .filter((executor) => NATIVE_PROFILE_EXECUTORS.has(executor.name))
+    buildHostBindingBackedSdkExecutors()
+      .filter((executor) => NATIVE_HOST_BINDING_EXECUTORS.has(executor.name))
       .map((executor) => [executor.name, executor]),
   );
   return createRegisteredExecutorWorkflowDispatch(baseDispatch, {
     registry,
-    canonicalBuiltInExecutorNames: new Set(NATIVE_PROFILE_EXECUTORS),
-    resolveHostBindings: ({ claim, context, executorName }) => {
+    canonicalBuiltInExecutorNames: new Set(NATIVE_HOST_BINDING_EXECUTORS),
+    resolveMaxTicks: ({ executorName, attempt, context }) =>
+      executorName !== DELEGATE_SUPERVISOR_EXECUTOR_NAME
+        ? 1
+        : hasPriorCompletedDelegateHandoff(
+              context.db,
+              attempt.workflowRunId,
+              attempt.stepRunId,
+              attempt.attemptNumber,
+            )
+          ? 1
+          : 2,
+    resolveHostBindings: ({ claim, context, executorName, config }) => {
       const attempt = loadLatestExecutorAttemptForStep(
         context.db,
         claim.runId,
         claim.stepId,
       );
+      const completedNativeMechanism =
+        attempt !== undefined &&
+        hasUnclassifiedCompletedNativeMechanism(context.db, attempt.attemptId);
+      if (
+        completedNativeMechanism &&
+        (executorName === "agent-loop" ||
+          executorName === "agent-once" ||
+          executorName === "script")
+      ) {
+        const rounds = listExecutorRoundsForStep(
+          context.db,
+          claim.runId,
+          claim.stepId,
+        );
+        const round = [...rounds]
+          .reverse()
+          .find(
+            (candidate) =>
+              candidate.attemptNumber === attempt?.attemptNumber &&
+              candidate.classification === null &&
+              listExecutorCheckpointsForRound(
+                context.db,
+                candidate.roundId,
+              ).some(
+                (checkpoint) => checkpoint.stage === "mechanism_completed",
+              ),
+          );
+        if (attempt === undefined || round === undefined) {
+          throw new RegisteredExecutorHostBindingsError(
+            "runtime_unavailable",
+            "completed native mechanism evidence has no resumable round",
+          );
+        }
+        const settleRepoOwnership = recoverCompletedLiveStepRepoOwnership(
+          context.db,
+          claim.runId,
+          claim.stepId,
+          attempt.attemptNumber,
+          context.now,
+        );
+        const provenance = loadDispatchedStepRunProvenance(
+          context.db,
+          claim.runId,
+        );
+        const resolved =
+          provenance === undefined
+            ? { ok: false as const, reason: "run_not_found" }
+            : resolveDispatchedStepExecutorContext(claim.runId, provenance);
+        if (!resolved.ok) {
+          settleRepoOwnership?.(false);
+          throw new RegisteredExecutorHostBindingsError(
+            "runtime_unavailable",
+            resolved.reason,
+          );
+        }
+        try {
+          assertCompletedNativeMechanismRepositoryProof({
+            db: context.db,
+            runId: claim.runId,
+            stepId: claim.stepId,
+            attemptId: attempt.attemptId,
+            attemptNumber: attempt.attemptNumber,
+            repoPath: resolved.exec.repoPath,
+            now: context.now,
+          });
+        } catch (error) {
+          settleRepoOwnership?.(false);
+          throw error;
+        }
+        const start = {
+          roundId: round.roundId,
+          attemptId: round.attemptId,
+          workflowRunId: round.workflowRunId,
+          stepRunId: round.stepRunId,
+          stepKey: round.stepKey,
+          attemptNumber: round.attemptNumber,
+          roundIndex: round.roundIndex,
+          inputDigest: round.inputDigest,
+          artifactRoot: round.artifactRoot,
+          logPaths: [...round.logPaths],
+          startedAt: round.startedAt ?? context.now,
+        };
+        if (executorName === "agent-loop") {
+          return {
+            start,
+            selection: resolveGoalLoopRoundSelection({}),
+            replayOnly: true,
+            ...(settleRepoOwnership === undefined
+              ? {}
+              : { settleRepoOwnership }),
+          } satisfies GoalLoopExecutorHostBindings;
+        }
+        const singleShotExecutor =
+          executorName === "agent-once" ? "agent-once" : "script";
+        return {
+          start: { ...start, executor: singleShotExecutor },
+          selection: resolveSingleShotRoundSelection({}),
+          replayOnly: true,
+          ...(settleRepoOwnership === undefined ? {} : { settleRepoOwnership }),
+        } satisfies SingleShotExecutorHostBindings;
+      }
+      if (
+        canonicalExecutorIdentity(executorName) ===
+        DELEGATE_SUPERVISOR_EXECUTOR_NAME
+      ) {
+        const completedLiveStep =
+          attempt !== undefined &&
+          hasCompletedLiveStepMechanism(context.db, attempt.attemptId);
+        const completedHandoff =
+          attempt !== undefined &&
+          hasCompletedDelegateHandoff(context.db, attempt.attemptId);
+        if (completedLiveStep || completedHandoff) {
+          const settleHandoff =
+            attempt === undefined
+              ? undefined
+              : recoverCompletedLiveStepRepoOwnership(
+                  context.db,
+                  claim.runId,
+                  claim.stepId,
+                  attempt.attemptNumber,
+                  context.now,
+                );
+          const provenance = loadDispatchedStepRunProvenance(
+            context.db,
+            claim.runId,
+          );
+          const resolved =
+            provenance === undefined
+              ? { ok: false as const, reason: "run_not_found" }
+              : resolveDispatchedStepExecutorContext(claim.runId, provenance);
+          if (!resolved.ok) {
+            settleHandoff?.(false);
+            throw new RegisteredExecutorHostBindingsError(
+              "runtime_unavailable",
+              resolved.reason,
+            );
+          }
+          try {
+            assertCompletedNativeMechanismRepositoryProof({
+              db: context.db,
+              runId: claim.runId,
+              stepId: claim.stepId,
+              attemptId: attempt!.attemptId,
+              attemptNumber: attempt!.attemptNumber,
+              repoPath: resolved.exec.repoPath,
+              now: context.now,
+              completionStage: completedLiveStep
+                ? "mechanism_completed"
+                : DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+            });
+          } catch (error) {
+            settleHandoff?.(false);
+            throw error;
+          }
+          if (completedLiveStep) {
+            return {
+              tools: new Map(),
+              ...(settleHandoff === undefined ? {} : { settleHandoff }),
+            };
+          }
+          const delegateTool = resolveDelegateToolName(config);
+          const adapter = createPersistedProfileDelegateToolAdapter({
+            tool: delegateTool,
+            repoPath: resolved.exec.repoPath,
+            command: "",
+            argsPrefix: [],
+            env: {},
+          });
+          return {
+            tools: new Map([[adapter.name, adapter]]),
+            ...(settleHandoff === undefined ? {} : { settleHandoff }),
+          };
+        }
+      }
       const settleRepoOwnership =
         attempt !== undefined &&
         hasUnclassifiedCompletedNativeMechanism(context.db, attempt.attemptId)
@@ -469,7 +885,7 @@ function createMissingProfileNativeDispatch(
           : undefined;
       throw new RegisteredExecutorHostBindingsError(
         "runtime_unavailable",
-        `${DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR} is required for native ${executorName} host bindings`,
+        `${DAEMON_HOST_BINDINGS_FILE_ENV_VAR} is required for native ${executorName} host bindings`,
         settleRepoOwnership === undefined
           ? undefined
           : () => settleRepoOwnership(false),
@@ -478,7 +894,7 @@ function createMissingProfileNativeDispatch(
   });
 }
 
-export function buildProfileBackedSdkExecutors(): Executor[] {
+export function buildHostBindingBackedSdkExecutors(): Executor[] {
   // Canonical built-ins register under their new names; the retained legacy
   // `no-mistakes` identity stays registered as-is so recorded definitions keep
   // selecting the exact executor they recorded.
@@ -511,7 +927,7 @@ export function buildProfileBackedSdkExecutors(): Executor[] {
 
 function createNativeOwnedRoundMaterializerResolver(
   env: Record<string, string | undefined>,
-  profile: LiveWrapperProfile,
+  hostBindings: HostBindings,
 ) {
   return (input: {
     claim: Parameters<AsyncWorkflowStepDispatch>[0];
@@ -539,7 +955,7 @@ function createNativeOwnedRoundMaterializerResolver(
       input.claim.stepId,
     );
     if (step === undefined) return undefined;
-    const wrapper = profile.wrappers.get(step.kind);
+    const wrapper = hostBindings.bindings.get(step.kind);
     if (wrapper === undefined) return undefined;
 
     return ({ attempt, selection, now, roundId: requestedRoundId }) => {
@@ -569,7 +985,9 @@ function createNativeOwnedRoundMaterializerResolver(
               ...(typeof input.config.maxRounds === "number"
                 ? { maxRounds: input.config.maxRounds }
                 : {}),
-              policyEnvelope: profile.name,
+              ...(typeof input.config.policyEnvelope === "string"
+                ? { policyEnvelope: input.config.policyEnvelope }
+                : {}),
             },
           })
         : resolveSingleShotRoundSelection({
@@ -582,7 +1000,9 @@ function createNativeOwnedRoundMaterializerResolver(
                   }
                 : {}),
               timeoutMs: wrapper.timeoutSec * 1_000,
-              policyEnvelope: profile.name,
+              ...(typeof input.config.policyEnvelope === "string"
+                ? { policyEnvelope: input.config.policyEnvelope }
+                : {}),
             },
           });
       const capability =
@@ -590,7 +1010,6 @@ function createNativeOwnedRoundMaterializerResolver(
           ? (wrapper.commandIdentity ?? step.kind)
           : step.kind;
       const hostBindingIdentity = nativeHostBindingIdentity({
-        profile: profile.name,
         capability,
         command: wrapper.command,
         args: wrapper.args,
@@ -729,7 +1148,7 @@ function goalLoopInputDigest(
 function createLiveStepHostBindingsResolver(
   env: Record<string, string | undefined>,
   liveRegistry: ReturnType<typeof buildRealWorkflowStepExecutorRegistry>,
-  profile: LiveWrapperProfile,
+  hostBindings: HostBindings,
 ) {
   return (input: {
     claim: Parameters<AsyncWorkflowStepDispatch>[0];
@@ -792,6 +1211,20 @@ function createLiveStepHostBindingsResolver(
         attempt.attemptNumber,
         context.now,
       );
+      try {
+        assertCompletedNativeMechanismRepositoryProof({
+          db: context.db,
+          runId: claim.runId,
+          stepId: claim.stepId,
+          attemptId: attempt.attemptId,
+          attemptNumber: attempt.attemptNumber,
+          repoPath: resolved.exec.repoPath,
+          now: context.now,
+        });
+      } catch (error) {
+        settleRepoOwnership?.(false);
+        throw error;
+      }
       return {
         repoPath: resolved.exec.repoPath,
         run: () => {
@@ -843,7 +1276,7 @@ function createLiveStepHostBindingsResolver(
     };
     const noMistakesRuntime =
       delegateTool === "no-mistakes"
-        ? resolveNoMistakesStatusRuntime(env, profile)
+        ? resolveNoMistakesStatusRuntime(env, hostBindings)
         : undefined;
     if (
       isDelegate &&
@@ -852,7 +1285,7 @@ function createLiveStepHostBindingsResolver(
       const adapter = createPersistedProfileDelegateToolAdapter({
         tool: delegateTool!,
         repoPath: resolved.exec.repoPath,
-        command: noMistakesRuntime?.command ?? "no-mistakes",
+        command: noMistakesRuntime?.command ?? "",
         argsPrefix: noMistakesRuntime?.argsPrefix ?? [],
         env: noMistakesRuntime?.env ?? {},
       });
@@ -1027,12 +1460,14 @@ function createLiveStepHostBindingsResolver(
       return failRecoveredNativeRepoOwnership(new Error(selection.reason));
     }
     const nativeWrapper =
-      isSingleShot || isGoalLoop ? profile.wrappers.get(step.kind) : undefined;
+      isSingleShot || isGoalLoop
+        ? hostBindings.bindings.get(step.kind)
+        : undefined;
     if ((isSingleShot || isGoalLoop) && nativeWrapper === undefined) {
       return failRecoveredNativeRepoOwnership(
         new RegisteredExecutorHostBindingsError(
           "runtime_unavailable",
-          `live-wrapper profile ${profile.name} has no ${step.kind} binding for native ${input.executor.name}`,
+          `host bindings have no ${step.kind} binding for native ${input.executor.name}`,
         ),
       );
     }
@@ -1048,18 +1483,6 @@ function createLiveStepHostBindingsResolver(
         ),
       );
     }
-    if (
-      isGoalLoop &&
-      typeof input.config.policyEnvelope === "string" &&
-      input.config.policyEnvelope !== profile.name
-    ) {
-      return failRecoveredNativeRepoOwnership(
-        new RegisteredExecutorHostBindingsError(
-          "host_binding_mismatch",
-          "portable agent-loop policyEnvelope does not match resolved host policy",
-        ),
-      );
-    }
     if (isSingleShot || isGoalLoop) {
       guardRecoveredNativeRepoOwnership(() =>
         validatePortableAgentBinding(input.config, selection.selection),
@@ -1071,10 +1494,13 @@ function createLiveStepHostBindingsResolver(
     ) {
       assertCompletedNativeMechanismRepositoryProof({
         db: context.db,
+        runId: claim.runId,
+        stepId: claim.stepId,
         attemptId: attempt.attemptId,
         attemptNumber: attempt.attemptNumber,
         repoPath: safety.repoPath,
         baseHead: safety.repoSafety.baseHead,
+        now: context.now,
       });
     }
     const repoOwnership = completedNativeMechanism
@@ -1085,7 +1511,7 @@ function createLiveStepHostBindingsResolver(
           repoPath: safety.repoPath,
           attemptNumber,
           repoSafety: safety.repoSafety,
-          runnerWindowMs: maxDaemonLiveWrapperProfileTimeoutMs(profile),
+          runnerWindowMs: maxHostBindingTimeoutMs(hostBindings),
           reclaimHandoffAttempt: isDelegate
             ? findInterruptedDelegateHandoffAttempt(
                 context.db,
@@ -1170,7 +1596,7 @@ function createLiveStepHostBindingsResolver(
         path.basename(safety.repoSafety.verificationLogPath),
       );
       const promptPath = path.join(roundArtifactDirectory, "prompt.md");
-      // Profiles must be safe on case-insensitive filesystems too.
+      // Host bindings must be safe on case-insensitive filesystems too.
       const resultPathIdentity = path.normalize(roundResultPath).toLowerCase();
       const collidingArtifact = Object.entries({
         executorLog: roundLogPath,
@@ -1259,11 +1685,12 @@ function createLiveStepHostBindingsResolver(
             ...(typeof input.config.maxRounds === "number"
               ? { maxRounds: input.config.maxRounds }
               : {}),
-            policyEnvelope: profile.name,
+            ...(typeof input.config.policyEnvelope === "string"
+              ? { policyEnvelope: input.config.policyEnvelope }
+              : {}),
           },
         }),
         hostBindingIdentity: nativeHostBindingIdentity({
-          profile: profile.name,
           capability: step.kind,
           command: nativeWrapper!.command,
           args: nativeWrapper!.args,
@@ -1371,7 +1798,9 @@ function createLiveStepHostBindingsResolver(
               kind: step.kind,
               env,
               hostIdentity: {
-                policyEnvelope: profile.name,
+                ...(typeof input.config.policyEnvelope === "string"
+                  ? { policyEnvelope: input.config.policyEnvelope }
+                  : {}),
                 agent: {
                   ...(selection.selection.agentProvider !== null
                     ? { harness: selection.selection.agentProvider }
@@ -1400,7 +1829,9 @@ function createLiveStepHostBindingsResolver(
               cwd: wrapper.cwd === "repo" ? safety.repoPath : runDir,
               repoPath: safety.repoPath,
               timeoutSec: wrapper.timeoutSec,
-              policyEnvelopeIdentity: profile.name,
+              ...(typeof input.config.policyEnvelope === "string"
+                ? { policyEnvelopeIdentity: input.config.policyEnvelope }
+                : {}),
               env: buildLiveStepRuntimeEnvironment(
                 {
                   kind: step.kind,
@@ -1467,11 +1898,12 @@ function createLiveStepHostBindingsResolver(
                 }
               : {}),
             timeoutMs: wrapper.timeoutSec * 1_000,
-            policyEnvelope: profile.name,
+            ...(typeof input.config.policyEnvelope === "string"
+              ? { policyEnvelope: input.config.policyEnvelope }
+              : {}),
           },
         }),
         hostBindingIdentity: nativeHostBindingIdentity({
-          profile: profile.name,
           capability:
             singleShot.name === "script"
               ? (wrapper.commandIdentity ?? step.kind)
@@ -1633,8 +2065,16 @@ function completedMechanismRepoOwnership(
   };
 }
 
+/**
+ * The version-2 digest deliberately carries no binding-set name: durable state
+ * must never embed profile or binding-set identity. Profile-era version-1
+ * digests hashed the retired profile name, which durable state never stored in
+ * the clear, so they are unrecomputable by design; a nonterminal native round
+ * recorded before the cutover reattaches only through the existing
+ * changed-host-inputs manual-recovery lane (`workflow run clear-recovery`
+ * prepares the fresh attempt), exactly like an edited binding file.
+ */
 function nativeHostBindingIdentity(input: {
-  profile: string;
   capability: string;
   command: string;
   args: readonly string[];
@@ -1646,8 +2086,7 @@ function nativeHostBindingIdentity(input: {
     .createHash("sha256")
     .update(
       JSON.stringify({
-        version: 1,
-        profile: input.profile,
+        version: 2,
         capability: input.capability,
         command: input.command,
         args: [...input.args],
@@ -1730,11 +2169,40 @@ function expectedSettledRepoHeadFromSingleShotMechanism(
  */
 function assertCompletedNativeMechanismRepositoryProof(input: {
   db: MomentumDb;
+  runId: string;
+  stepId: string;
   attemptId: string;
   attemptNumber: number;
   repoPath: string;
-  baseHead: string;
+  now: number;
+  completionStage?:
+    "mechanism_completed" | typeof DELEGATE_SUPERVISOR_HANDOFF_STAGE;
+  baseHead?: string;
 }): void {
+  const repoLock = getActiveRepoLockForJob(
+    input.db,
+    deriveDispatchCorrelationId(input.runId, input.stepId),
+  );
+  const repoRoot = (() => {
+    try {
+      return fs.realpathSync(input.repoPath);
+    } catch {
+      return path.resolve(input.repoPath);
+    }
+  })();
+  if (
+    repoLock === undefined ||
+    repoLock.goal_id !== input.runId ||
+    repoLock.iteration !== input.attemptNumber ||
+    repoLock.lease_expires_at < input.now ||
+    repoLock.repo_root !== repoRoot
+  ) {
+    throw new RegisteredExecutorHostBindingsError(
+      "repo_ownership_unproven",
+      "completed native mechanism cannot be reattached because repository ownership is no longer proven",
+    );
+  }
+  const completionStage = input.completionStage ?? "mechanism_completed";
   const completedRound = [
     ...listExecutorRoundsForAttempt(input.db, input.attemptId),
   ]
@@ -1744,16 +2212,75 @@ function assertCompletedNativeMechanismRepositoryProof(input: {
         round.attemptNumber === input.attemptNumber &&
         round.classification === null &&
         listExecutorCheckpointsForRound(input.db, round.roundId).some(
-          (checkpoint) => checkpoint.stage === "mechanism_completed",
+          (checkpoint) => checkpoint.stage === completionStage,
         ),
     );
-  const expectedHead = expectedSettledRepoHead(completedRound, input.baseHead);
+  const completionCheckpoints =
+    completedRound === undefined
+      ? []
+      : listExecutorCheckpointsForRound(input.db, completedRound.roundId);
+  const expectedHead =
+    completedRound?.commitSha !== null && completedRound !== undefined
+      ? completedRound.commitSha
+      : completionStage === DELEGATE_SUPERVISOR_HANDOFF_STAGE
+        ? recordedDelegateHandoffHead(completionCheckpoints)
+        : input.baseHead === undefined
+          ? null
+          : expectedSettledRepoHead(completedRound, input.baseHead);
   const repo = inspectRepo(input.repoPath);
   if (repo.ok && expectedHead !== null && repo.head === expectedHead) return;
   throw new RegisteredExecutorHostBindingsError(
     "head_mismatch",
     "completed native mechanism cannot be reattached because its recorded repository HEAD is no longer proven",
   );
+}
+
+function recordedDelegateHandoffHead(
+  checkpoints: readonly Readonly<{
+    stage: string;
+    detail: string | null;
+  }>[],
+): string | null {
+  const checkpoint = [...checkpoints]
+    .reverse()
+    .find((candidate) => candidate.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE);
+  if (checkpoint?.detail === null || checkpoint === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(checkpoint.detail);
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed)
+    ) {
+      return null;
+    }
+    const record = parsed as Record<string, unknown>;
+    const handoff =
+      record["handoff"] !== undefined ? record["handoff"] : parsed;
+    if (
+      handoff === null ||
+      typeof handoff !== "object" ||
+      Array.isArray(handoff)
+    ) {
+      return null;
+    }
+    const externalIdentity = (handoff as Record<string, unknown>)[
+      "externalIdentity"
+    ];
+    if (
+      externalIdentity === null ||
+      typeof externalIdentity !== "object" ||
+      Array.isArray(externalIdentity)
+    ) {
+      return null;
+    }
+    const headSha = (externalIdentity as Record<string, unknown>)["headSha"];
+    return typeof headSha === "string" && /^[0-9a-f]{40}$/.test(headSha)
+      ? headSha
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function validatePortableAgentBinding(
@@ -1793,6 +2320,35 @@ function hasCompletedLiveStepMechanism(
   attemptId: string,
 ): boolean {
   return hasExecutorCheckpoint(db, attemptId, "mechanism_completed");
+}
+
+/** Whether a native step has durable completion evidence that can reattach
+ * without consulting a machine-local host binding. */
+export function hasCompletedNativeHostBindingEvidenceForStep(
+  db: MomentumDb,
+  target: { runId: string; stepId: string },
+): boolean {
+  const runtime = resolveWorkflowStepExecutorRuntime(db, target);
+  if (
+    !runtime.ok ||
+    hasExecutorDefinition(db, runtime.executorName) ||
+    !isNativeHostBindingExecutorIdentity(runtime.executorName)
+  ) {
+    return false;
+  }
+  const attempt = loadLatestExecutorAttemptForStep(
+    db,
+    target.runId,
+    target.stepId,
+  );
+  return (
+    attempt !== undefined &&
+    hasCompletedNativeHostBindingEvidence(
+      db,
+      runtime.executorName,
+      attempt.attemptId,
+    )
+  );
 }
 
 function hasUnclassifiedCompletedNativeMechanism(
@@ -1872,10 +2428,11 @@ function findInterruptedDelegateHandoffAttempt(
   return row?.attempt_number;
 }
 
-function hasAnyCompletedDelegateHandoff(
+function hasPriorCompletedDelegateHandoff(
   db: MomentumDb,
   runId: string,
   stepId: string,
+  attemptNumber: number,
 ): boolean {
   const row = db
     .prepare(
@@ -1884,10 +2441,11 @@ function hasAnyCompletedDelegateHandoff(
          JOIN executor_checkpoints AS c ON c.round_id = r.round_id
         WHERE r.workflow_run_id = ?
           AND r.step_run_id = ?
+          AND r.attempt_number < ?
           AND c.stage = ?
         LIMIT 1`,
     )
-    .get(runId, stepId, DELEGATE_SUPERVISOR_HANDOFF_STAGE);
+    .get(runId, stepId, attemptNumber, DELEGATE_SUPERVISOR_HANDOFF_STAGE);
   return row !== undefined;
 }
 
@@ -1940,24 +2498,24 @@ export function resolveProfileBackedDelegateToolStepKind(
 
 function resolveNoMistakesStatusRuntime(
   daemonEnv: Record<string, string | undefined>,
-  profile: LiveWrapperProfile,
+  hostBindings: HostBindings,
 ): {
   command: string;
   argsPrefix: readonly string[];
   env: Record<string, string | undefined>;
 } {
-  // The status wrapper drives the external no-mistakes TOOL. New profiles key
-  // it under the canonical `validate` step kind; legacy profiles keyed it
-  // under the tool's own `no-mistakes` spelling, which stays readable.
+  // The status wrapper drives the external no-mistakes TOOL. New host-binding
+  // files key it under the canonical `validate` step kind; legacy configs
+  // keyed it under the tool's own `no-mistakes` spelling, which stays readable.
   const outerWrapper =
-    profile.wrappers.get("validate") ??
-    (profile.wrappers as ReadonlyMap<string, LiveWrapperConfig>).get(
+    hostBindings.bindings.get("validate") ??
+    (hostBindings.bindings as ReadonlyMap<string, HostBindingConfig>).get(
       "no-mistakes",
     );
   if (outerWrapper === undefined) {
     throw new RegisteredExecutorHostBindingsError(
       "runtime_unavailable",
-      "no-mistakes live-wrapper config is unavailable for status polling",
+      "no-mistakes host binding is unavailable for status polling",
     );
   }
   const wrapperEnv: NodeJS.ProcessEnv = {};
@@ -3046,11 +3604,9 @@ function loadWorkflowRunObjective(
   return objective === undefined || objective.length === 0 ? null : objective;
 }
 
-function maxDaemonLiveWrapperProfileTimeoutMs(
-  profile: LiveWrapperProfile,
-): number {
+function maxHostBindingTimeoutMs(hostBindings: HostBindings): number {
   let maxSeconds = 0;
-  for (const wrapper of profile.wrappers.values()) {
+  for (const wrapper of hostBindings.bindings.values()) {
     maxSeconds = Math.max(
       maxSeconds,
       wrapper.timeoutSec + (wrapper.probe?.timeoutSec ?? 0),

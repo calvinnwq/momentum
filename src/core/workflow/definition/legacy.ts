@@ -16,7 +16,7 @@
  *     user-defined executor identity that merely resembles an old built-in
  *     value is never rewritten.
  *   - The legacy `no-mistakes` executor identity is not an alias: it stays a
- *     dispatchable legacy identity (the profile-backed mirror executor) so
+ *     dispatchable legacy identity (the binding-backed mirror executor) so
  *     recorded runs keep selecting the exact executor they recorded.
  *   - Approval boundaries stored on mutable run rows migrate in place;
  *     `workflow_approvals` rows are frozen approval evidence (their digest

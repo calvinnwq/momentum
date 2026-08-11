@@ -63,6 +63,11 @@ import {
   DEFAULT_DAEMON_POLL_INTERVAL_MS,
   DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS,
 } from "./core/daemon/loop.js";
+import { RegisteredExecutorHostBindingsError } from "./core/workflow/dispatch/registered-executor.js";
+import {
+  DEFAULT_REGISTERED_SDK_CONTINUATION_POLL_MS,
+  runWorkflowPreClaimPreflight,
+} from "./core/workflow/dispatch/scheduler.js";
 import {
   runStartupRecovery,
   type StartupRecoveryResult,
@@ -467,8 +472,53 @@ async function daemonStart(
   const pid = process.pid;
   const host = os.hostname() || null;
 
+  // Host-binding configuration is resolved before any durable read or
+  // startup recovery so a retired or invalid selector refuses without
+  // mutating daemon-run, lock, or workflow state.
+  let workflowDispatchResolution: DaemonWorkflowDispatchResolution = {
+    ok: true,
+    dispatch: executeWorkflowStepDispatch,
+  };
+  if (loopRequested) {
+    workflowDispatchResolution = resolveDaemonWorkflowStepDispatch(
+      io.env ?? {},
+      executeWorkflowStepDispatch,
+      deps,
+    );
+    if (!workflowDispatchResolution.ok) {
+      return emitDaemonStartFailure(parsed, io, {
+        code: workflowDispatchResolution.code,
+        message: workflowDispatchResolution.message,
+      });
+    }
+  }
+
   const db = openDb(dataDir);
   try {
+    if (workflowDispatchResolution.preClaim !== undefined) {
+      try {
+        runWorkflowPreClaimPreflight(db, {
+          now,
+          graceMs: DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS,
+          holder: `daemon-${pid}`,
+          continuationPollIntervalMs: Math.max(
+            1,
+            parsed.pollIntervalMs ??
+              DEFAULT_REGISTERED_SDK_CONTINUATION_POLL_MS,
+          ),
+          preClaim: workflowDispatchResolution.preClaim,
+          claimedExecutorNames: configuredExecutorNames(io.env ?? process.env),
+        });
+      } catch (error) {
+        if (error instanceof RegisteredExecutorHostBindingsError) {
+          return emitDaemonStartFailure(parsed, io, {
+            code: "daemon_host_bindings_required",
+            message: error.message,
+          });
+        }
+        throw error;
+      }
+    }
     let existing = getActiveDaemonRun(db);
     let preLoopStartupRecovery: StartupRecoveryResult | null = null;
     if (existing && loopRequested && isExistingDaemonRunStale(existing, now)) {
@@ -488,24 +538,6 @@ async function daemonStart(
           : `An active daemon run already exists (${existing.id}, state ${existing.state}). Stop it before starting another.`,
         existing: existingSummary,
       });
-    }
-
-    let workflowDispatchResolution: DaemonWorkflowDispatchResolution = {
-      ok: true,
-      dispatch: executeWorkflowStepDispatch,
-    };
-    if (loopRequested) {
-      workflowDispatchResolution = resolveDaemonWorkflowStepDispatch(
-        io.env ?? {},
-        executeWorkflowStepDispatch,
-        deps,
-      );
-      if (!workflowDispatchResolution.ok) {
-        return emitDaemonStartFailure(parsed, io, {
-          code: "daemon_live_wrapper_profile_invalid",
-          message: workflowDispatchResolution.message,
-        });
-      }
     }
 
     let runId: string;
@@ -554,11 +586,14 @@ async function daemonStart(
       // Production workflow-first dispatch (M10-09a, NGX-367): bounded loops
       // drive the workflow scheduler lane. Register-only `daemon start` returns
       // above and never reaches here, so it stays inert. The lane is harmlessly
-      // idle when no workflow run has a runnable step. Without a live-wrapper
-      // profile, the dogfood resolver keeps the default dispatch unchanged
-      // unless its explicit fixture opt-in is set.
+      // idle when no workflow run has a runnable step. Without host bindings,
+      // the dogfood resolver keeps the default dispatch unchanged unless its
+      // explicit fixture opt-in is set.
       workflowLane: {
         dispatch: workflowDispatchResolution.dispatch,
+        ...(workflowDispatchResolution.preClaim === undefined
+          ? {}
+          : { preClaim: workflowDispatchResolution.preClaim }),
         claimedExecutorNames: configuredExecutorNames(io.env ?? process.env),
         ...(workflowDispatchResolution.leaseDurationMs !== undefined
           ? { leaseDurationMs: workflowDispatchResolution.leaseDurationMs }

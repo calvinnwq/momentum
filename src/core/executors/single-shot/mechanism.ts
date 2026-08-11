@@ -41,7 +41,7 @@ import {
   runProcessGroupSync,
   type LiveStepWrapperRecoveryCode,
 } from "../../../adapters/live-step-wrapper.js";
-import type { LiveWrapperConfig } from "../../../adapters/live-wrapper-registry.js";
+import type { HostBindingConfig } from "../../../adapters/host-bindings-registry.js";
 import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../../../shared/process-limits.js";
 import type { ExecutorRoundRecord } from "../loop/reducer.js";
 import type { CommitIntent } from "../runner/types.js";
@@ -159,7 +159,7 @@ const SHA40_RE = /^[0-9a-f]{40}$/;
  * into stable single-shot recovery codes for the orchestrator.
  */
 export function createOneShotLiveWrapperRoundRunner(
-  config: LiveWrapperConfig,
+  config: HostBindingConfig,
   options: OneShotLiveWrapperRoundRunnerOptions,
 ): HybridSingleShotRoundRunner {
   const runner = (
@@ -1418,7 +1418,7 @@ function validatePortableScriptConfig(
 
 function validatePortableOneShotConfig(
   portable: Readonly<import("./sdk.js").SingleShotExecutorConfig>,
-  resolved: LiveWrapperConfig,
+  resolved: HostBindingConfig,
   hostIdentity: OneShotLiveWrapperHostIdentity | undefined,
 ): { ok: true } | { ok: false; error: string } {
   if (

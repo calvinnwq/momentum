@@ -46,10 +46,10 @@
  * ({@link DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR}, off by default), never the
  * production terminal path. It is retained — not deleted — because it remains the
  * cheap opt-in way to exercise single-process multi-dispatch without a configured
- * daemon live-wrapper profile, spawning an agent, running verification, or
+ * daemon host bindings, spawning an agent, running verification, or
  * writing anything external. the real-adapter seam's fake demotion has landed — production
  * dispatch no longer resolves to shipped fake successes by default, and the dispatched-step producer
- * has wired configured daemon profiles to real terminal executor evidence, while
+ * has wired configured daemon host bindings to real terminal executor evidence, while
  * unconfigured adapters still refuse honestly with `runtime_unavailable`.
  */
 
