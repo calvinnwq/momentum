@@ -1319,6 +1319,23 @@ describe("workflow route-state migration", () => {
     });
   });
 
+  it("refuses unexpected workflow_runs columns before route-state writes commit", () => {
+    const dataDir = seedReleasedFixture();
+    withRawDb(dataDir, (db) => {
+      db.exec("ALTER TABLE workflow_runs ADD COLUMN rogue_extra TEXT");
+    });
+    // The rebuild's column contract must refuse before the vocabulary and
+    // route-state migrations commit; a post-commit refusal would leave the
+    // canonical destinations populated alongside route_json (mixed state).
+    // expectRouteRefusal asserts the database hash is byte-identical after
+    // the refusal.
+    expectRouteRefusal(dataDir, {
+      runId: "<schema>",
+      jsonPath: "$schema.workflow_runs",
+      code: "route_state_schema_partial",
+    });
+  });
+
   it("refuses invalid route state before unrelated additive migration writes", () => {
     const dataDir = seedReleasedFixture();
     withRawDb(dataDir, (db) => {

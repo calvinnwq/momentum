@@ -2200,6 +2200,11 @@ export function applyQueueMigrations(
   validatedRouteStatePlan?: WorkflowRouteStatePlan,
 ): void {
   const routeStatePlan = validatedRouteStatePlan ?? preScanRouteState(db);
+  // Fail closed before any mutation: the final route_json rebuild refuses
+  // unexpected workflow_runs columns, so its column contract is checked up
+  // front. Otherwise the vocabulary/route-state migration would commit its
+  // canonical writes and the later rebuild refusal would leave a mixed state.
+  assertWorkflowRunsRebuildColumnContract(db);
   // Runs before the main additive pass because it must rebuild tables with
   // foreign keys disabled, which SQLite only allows outside a transaction.
   migrateLegacyExecutorInvocationSchema(db, options);
@@ -2347,6 +2352,38 @@ const WORKFLOW_RUNS_REBUILD_COLUMNS = [
 ] as const;
 
 /**
+ * Fail-closed column-contract preflight for the `route_json` rebuild. Columns
+ * outside the fresh contract would be silently truncated by the rebuild, so an
+ * unknown column refuses the migration. Missing optional columns are
+ * legitimate for old partial databases: the rebuild copies the intersection
+ * and the fresh DDL's defaults fill the rest (the base-schema contract already
+ * guarantees the NOT NULL columns without defaults exist). Called at the top
+ * of the migration chain - before any mutation commits - so the refusal leaves
+ * the original database unchanged, and again inside the rebuild as defense in
+ * depth. No-op once `route_json` is gone, so migrated and partial/historical
+ * databases behave exactly as before.
+ */
+function assertWorkflowRunsRebuildColumnContract(db: MomentumDb): void {
+  if (!tableExists(db, "workflow_runs")) return;
+  if (!columnExists(db, "workflow_runs", "route_json")) return;
+  const liveColumns = (
+    db.prepare("PRAGMA table_info(workflow_runs)").all() as PragmaColumnRow[]
+  ).map((row) => row.name);
+  const expected = new Set<string>(WORKFLOW_RUNS_REBUILD_COLUMNS);
+  const unexpected = liveColumns.filter(
+    (name) => name !== "route_json" && !expected.has(name),
+  );
+  if (unexpected.length > 0) {
+    throw new RouteStateMigrationError({
+      runId: "<schema>",
+      jsonPath: "$schema.workflow_runs",
+      code: "route_state_schema_partial",
+      detail: `workflow_runs rebuild refused: unexpected columns [${unexpected.join(", ")}]`,
+    });
+  }
+}
+
+/**
  * Transactionally rebuild `workflow_runs` without the retired `route_json`
  * column. Runs only after the route-state migration has moved every legacy
  * value to its canonical destination and cleared the column to `'{}'`; a
@@ -2361,26 +2398,12 @@ function rebuildWorkflowRunsDropRouteJson(db: MomentumDb): void {
   if (!tableExists(db, "workflow_runs")) return;
   if (!columnExists(db, "workflow_runs", "route_json")) return;
 
+  // Defense in depth: the migration chain already asserted this before any
+  // mutation, but the rebuild is cheap to re-guard against direct callers.
+  assertWorkflowRunsRebuildColumnContract(db);
   const liveColumns = (
     db.prepare("PRAGMA table_info(workflow_runs)").all() as PragmaColumnRow[]
   ).map((row) => row.name);
-  const expected = new Set<string>(WORKFLOW_RUNS_REBUILD_COLUMNS);
-  // Columns outside the fresh contract would be silently truncated by the
-  // rebuild, so an unknown column fails closed. Missing optional columns are
-  // legitimate for old partial databases: the copy uses the intersection and
-  // the fresh DDL's defaults fill the rest (the base-schema contract already
-  // guarantees the NOT NULL columns without defaults exist).
-  const unexpected = liveColumns.filter(
-    (name) => name !== "route_json" && !expected.has(name),
-  );
-  if (unexpected.length > 0) {
-    throw new RouteStateMigrationError({
-      runId: "<schema>",
-      jsonPath: "$schema.workflow_runs",
-      code: "route_state_schema_partial",
-      detail: `workflow_runs rebuild refused: unexpected columns [${unexpected.join(", ")}]`,
-    });
-  }
   const copyColumns = WORKFLOW_RUNS_REBUILD_COLUMNS.filter((name) =>
     liveColumns.includes(name),
   );
