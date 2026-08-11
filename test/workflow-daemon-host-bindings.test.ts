@@ -1353,12 +1353,14 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
     "fails closed when binding-free completed %s evidence has no repository ownership",
     async (completionKind) => {
       const repoPath = initRepo();
-      const db = openDb(makeTempDir("momentum-daemon-completed-delegate-data-"));
+      const db = openDb(
+        makeTempDir("momentum-daemon-completed-delegate-data-"),
+      );
       const runId = `delegate-completed-without-repo-ownership-${completionKind.replaceAll(" ", "-")}-run`;
       startApprovedRun(
         db,
         {
-          key: `daemon-completed-delegate-without-repo-ownership-${completionKind}`,
+          key: `daemon-completed-delegate-without-repo-ownership-${completionKind.replaceAll(" ", "-")}`,
           title: "Daemon Completed Delegate Without Repo Ownership",
           version: 1,
           steps: [
@@ -1417,7 +1419,9 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
       expect(result.code).toBe("dispatched");
       expect(
         db
-          .prepare("SELECT state FROM executor_attempts WHERE workflow_run_id = ?")
+          .prepare(
+            "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
+          )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required" });
       expect(
@@ -1606,7 +1610,7 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
       startApprovedRun(
         db,
         {
-          key: `daemon-completed-native-invalid-lock-${lockKind}`,
+          key: `daemon-completed-native-invalid-lock-${lockKind.replaceAll(" ", "-")}`,
           title: "Daemon Completed Native Invalid Lock",
           version: 1,
           steps: [

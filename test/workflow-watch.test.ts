@@ -857,8 +857,8 @@ describe("momentum workflow run watch", () => {
         goalId: runId,
         iteration: 1,
         jobId: deriveDispatchCorrelationId(runId, "preflight"),
-        leaseExpiresAt: SEED_NOW + 30_000,
-        now: SEED_NOW,
+        leaseExpiresAt: Date.now() + 30_000,
+        now: Date.now(),
       });
       expect(lock.ok).toBe(true);
     } finally {

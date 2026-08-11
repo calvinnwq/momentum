@@ -2175,7 +2175,8 @@ function assertCompletedNativeMechanismRepositoryProof(input: {
   attemptNumber: number;
   repoPath: string;
   now: number;
-  completionStage?: "mechanism_completed" | typeof DELEGATE_SUPERVISOR_HANDOFF_STAGE;
+  completionStage?:
+    "mechanism_completed" | typeof DELEGATE_SUPERVISOR_HANDOFF_STAGE;
   baseHead?: string;
 }): void {
   const repoLock = getActiveRepoLockForJob(
@@ -2242,19 +2243,25 @@ function recordedDelegateHandoffHead(
 ): string | null {
   const checkpoint = [...checkpoints]
     .reverse()
-    .find(
-      (candidate) => candidate.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,
-    );
+    .find((candidate) => candidate.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE);
   if (checkpoint?.detail === null || checkpoint === undefined) return null;
   try {
     const parsed: unknown = JSON.parse(checkpoint.detail);
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed)
+    ) {
       return null;
     }
     const record = parsed as Record<string, unknown>;
     const handoff =
       record["handoff"] !== undefined ? record["handoff"] : parsed;
-    if (handoff === null || typeof handoff !== "object" || Array.isArray(handoff)) {
+    if (
+      handoff === null ||
+      typeof handoff !== "object" ||
+      Array.isArray(handoff)
+    ) {
       return null;
     }
     const externalIdentity = (handoff as Record<string, unknown>)[
