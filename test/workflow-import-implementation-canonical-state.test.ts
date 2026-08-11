@@ -19,6 +19,8 @@ import {
   listWorkflowRunSummaries,
   loadWorkflowRunDetail,
 } from "../src/core/workflow/run/status.js";
+import { loadWorkflowHandoff } from "../src/core/workflow/run/handoff.js";
+import { loadWorkflowRunLogs } from "../src/core/workflow/run/logs.js";
 import { workflowRunToJsonShape } from "../src/renderers/workflow.js";
 import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
@@ -526,64 +528,74 @@ describe("imported profile is historical metadata only", () => {
   });
 });
 
-describe("active readers do not use route state for import / implementation authority", () => {
-  const forbidden: Array<{ file: string; token: string }> = [
-    {
-      file: "src/core/daemon/workflow-dispatch.ts",
-      token: "resolveLegacyWorkflowStepDispatchRouteSelection",
-    },
-    {
-      file: "src/core/workflow/dispatch/execute.ts",
-      token: "resolveLegacyWorkflowStepDispatchRouteSelection",
-    },
-    {
-      file: "src/renderers/workflow.ts",
-      token: 'route["implementationEngine"]',
-    },
-    // The runtime read surfaces must not import the migration-only legacy
-    // route module or the retired projector wrapper at all.
-    {
-      file: "src/core/workflow/run/status.ts",
-      token: "legacy-route-migration",
-    },
-    {
-      file: "src/core/workflow/run/status.ts",
-      token: "projectValidatedLegacyWorkflowRunRoute",
-    },
-    {
-      file: "src/core/workflow/dispatch/execute.ts",
-      token: "projectValidatedLegacyWorkflowRunRoute",
-    },
-    {
-      file: "src/renderers/workflow.ts",
-      token: "legacy-route-migration",
-    },
-    {
-      file: "src/adapters/db/legacy-route-migration.ts",
-      token: 'route["implementationEngine"]',
-    },
-    {
-      file: "src/adapters/db/legacy-route-migration.ts",
-      token: 'route["mode"]',
-    },
-    {
-      file: "src/adapters/db/legacy-route-migration.ts",
-      token: 'route["risk"]',
-    },
-    {
-      file: "src/adapters/db/legacy-route-migration.ts",
-      token: 'route["quotaPolicy"]',
-    },
-    {
-      file: "src/adapters/db/legacy-route-migration.ts",
-      token: 'route["profile"]',
-    },
-  ];
+describe("active readers do not use retired route projection state", () => {
+  it("ignores a divergent legacy route_json column on status, logs, handoff, and JSON surfaces", () => {
+    const db = openTempDb();
+    try {
+      seedImportedRun(
+        db,
+        "cwfp-stale-route-json",
+        {
+          mode: "execute-ready",
+          profile: "canonical-imported-profile",
+          risk: "medium",
+          quotaPolicy: { maxTurns: 12, overflow: "refuse" },
+        },
+        "agent-workflow-plan@v1",
+      );
+      db.exec("ALTER TABLE workflow_runs ADD COLUMN route_json TEXT");
+      db.prepare("UPDATE workflow_runs SET route_json = ? WHERE id = ?").run(
+        JSON.stringify({
+          implementationEngine: "retired-engine",
+          profile: "stale-profile",
+          mode: "stale-mode",
+          risk: "stale-risk",
+          quotaPolicy: { maxTurns: 999, overflow: "continue" },
+          steps: {
+            implementation: {
+              harness: "stale-harness",
+              model: "stale-model",
+              effort: "low",
+            },
+          },
+        }),
+        "cwfp-stale-route-json",
+      );
 
-  for (const { file, token } of forbidden) {
-    it(`${file} does not reference ${JSON.stringify(token)}`, () => {
-      const source = fs.readFileSync(path.join(__dirname, "..", file), "utf8");
-      expect(source).not.toContain(token);
-    });
-  }
+      const detail = loadWorkflowRunDetail(db, "cwfp-stale-route-json", {
+        now: NOW,
+      });
+      const summary = listWorkflowRunSummaries(db, { now: NOW })[0];
+      const logs = loadWorkflowRunLogs(db, "cwfp-stale-route-json", {
+        generatedAt: NOW,
+        now: NOW,
+      });
+      const handoff = loadWorkflowHandoff(db, "cwfp-stale-route-json", {
+        generatedAt: NOW,
+        now: NOW,
+      });
+      const shape = workflowRunToJsonShape(detail!.run);
+
+      expect(detail?.run.importMetadata).toEqual({
+        mode: "execute-ready",
+        profile: "canonical-imported-profile",
+        risk: "medium",
+        quotaPolicy: { maxTurns: 12, overflow: "refuse" },
+        sourceFormat: "agent-workflow-plan@v1",
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+      expect(summary?.run.importMetadata).toEqual(detail?.run.importMetadata);
+      expect(logs?.detail.run.importMetadata).toEqual(detail?.run.importMetadata);
+      expect(handoff?.detail.run.importMetadata).toEqual(
+        detail?.run.importMetadata,
+      );
+      expect(shape).not.toHaveProperty("route");
+      expect(shape).not.toHaveProperty("implementationEngine");
+      expect(shape).not.toHaveProperty("selectedProfile");
+      expect(shape["importMetadata"]).toEqual(detail?.run.importMetadata);
+    } finally {
+      db.close();
+    }
+  });
 });
