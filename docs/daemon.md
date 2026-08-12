@@ -347,7 +347,7 @@ workflow wrapper for `preflight`, `implementation`, `postflight`,
 `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG` to point at the run-local command
 configuration. If the host bindings are present but that run-local config is missing,
 unreadable, invalid, or lacks the current step, the wrapper exits as an operator
-setup failure without writing normalized runner evidence; the daemon then parks
+setup failure without writing normalized agent-result evidence; the daemon then parks
 the dispatched step for recovery instead of finalizing it as an ordinary failed
 workflow step.
 The config file must use canonical snake_case keys.
@@ -476,7 +476,7 @@ script entrypoint itself is missing, the failure is classified as
 remain ordinary command failures. For retryable `no-mistakes` and
 `merge-cleanup` setup failures, `workflow run clear-recovery` can prepare a
 new scheduler attempt after the operator repairs the wrapper path or external
-runner state.
+agent state.
 Delegate-supervisor adapter, handoff, unreadable or inconsistent external-state failures are likewise retryable after the operator repairs the correlated evidence, and an externally blocked attempt is retryable after its blocker clears.
 The retry inserts a fresh immutable attempt that keeps the step-scoped dispatch correlation for handoff and repo-lock identity, preserves a valid non-terminal handoff and prior decisions, and starts a fresh semantic-stall window.
 It sends a prior handoff through adapter recovery before reuse.

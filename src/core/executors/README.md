@@ -93,7 +93,7 @@ Before artifact writes, result observations, or completion checkpoints, the life
 Malformed JavaScript or casted returns leave only the atomically materialized attempt, running round, and dispatch-binding checkpoint for recovery.
 Successful `agent-once` turns require a successful normalized `AgentResult`; exit-code-based `script` turns forbid result-document evidence.
 The native `agent-loop` executor renders deterministic per-round prompts through `agent-loop/prompt.ts`, then treats agent-authored `AgentResult` JSON as input to finalization only.
-The prompted-result bridge clears stale result files before handing the prompt and configured result path to the runner, so an old result cannot be finalized as new progress.
+The prompted-result bridge clears stale result files before handing the prompt and configured result path to the agent, so an old result cannot be finalized as new progress.
 After finalization, its authoritative evidence is the `executor_attempts` / `executor_rounds` tree plus child artifacts, checkpoints, findings, and decisions that `workflow run logs` reads today.
 The concrete agent-loop mechanism writes `commit_or_reset_evidence` as a digested finalization sidecar at `<verification-log>.finalization.json` when the verification log path is a usable absolute path.
 The current coding workflow selects GNHF as portable tool config below `delegate-supervisor`, while retained legacy definitions follow the raw-identity compatibility rule in `SPEC.md` when running beneath the legacy `goal-loop` spelling.
