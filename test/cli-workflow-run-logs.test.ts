@@ -233,9 +233,9 @@ const timer = setInterval(() => {
 function seedRunWithRound(db: MomentumDb, runId: string): void {
   db.prepare(
     `INSERT INTO workflow_runs
-       (id, state, source, plan_json, objective, issue_scope_json, route_json,
+       (id, state, source, plan_json, objective, issue_scope_json,
         needs_manual_recovery, created_at, updated_at)
-       VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
+       VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', 0, 1, 1)`,
   ).run(runId);
   db.prepare(
     `INSERT INTO workflow_steps
@@ -427,8 +427,8 @@ describe("momentum workflow run logs", () => {
         schemaVersion: number;
         steps: Array<{ kind: string }>;
       };
-      expect(payload.schemaVersion).toBe(3);
       expect(payload.steps[0]?.kind).toBe("validate");
+      expect(payload.schemaVersion).toBe(4);
     } finally {
       await releaseWriter();
     }
@@ -544,7 +544,7 @@ describe("momentum workflow run logs", () => {
     };
     expect(payload.ok).toBe(true);
     expect(payload.command).toBe("workflow run logs");
-    expect(payload.schemaVersion).toBe(3);
+    expect(payload.schemaVersion).toBe(4);
     expect(Object.keys(payload).sort()).toEqual(
       [
         "approvals",
@@ -751,9 +751,9 @@ describe("momentum workflow run logs", () => {
     try {
       db.prepare(
         `INSERT INTO workflow_runs
-           (id, state, source, plan_json, objective, issue_scope_json, route_json,
+           (id, state, source, plan_json, objective, issue_scope_json,
             needs_manual_recovery, created_at, updated_at)
-           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', 0, 1, 1)`,
       ).run(runId);
       db.prepare(
         `INSERT INTO workflow_steps
@@ -946,9 +946,9 @@ describe("momentum workflow run logs", () => {
     try {
       db.prepare(
         `INSERT INTO workflow_runs
-           (id, state, source, plan_json, objective, issue_scope_json, route_json,
+           (id, state, source, plan_json, objective, issue_scope_json,
             needs_manual_recovery, created_at, updated_at)
-           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', 0, 1, 1)`,
       ).run(runId);
       db.prepare(
         `INSERT INTO workflow_steps
@@ -1014,9 +1014,9 @@ describe("momentum workflow run logs", () => {
     try {
       db.prepare(
         `INSERT INTO workflow_runs
-           (id, state, source, plan_json, objective, issue_scope_json, route_json,
+           (id, state, source, plan_json, objective, issue_scope_json,
             needs_manual_recovery, created_at, updated_at)
-           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', 0, 1, 1)`,
       ).run(runId);
       db.prepare(
         `INSERT INTO workflow_steps
@@ -1074,9 +1074,9 @@ describe("momentum workflow run logs", () => {
     try {
       db.prepare(
         `INSERT INTO workflow_runs
-           (id, state, source, plan_json, objective, issue_scope_json, route_json,
+           (id, state, source, plan_json, objective, issue_scope_json,
             needs_manual_recovery, created_at, updated_at)
-           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', 0, 1, 1)`,
       ).run(runId);
       db.prepare(
         `INSERT INTO workflow_steps
@@ -1133,9 +1133,9 @@ describe("momentum workflow run logs", () => {
     try {
       db.prepare(
         `INSERT INTO workflow_runs
-           (id, state, source, plan_json, objective, issue_scope_json, route_json,
+           (id, state, source, plan_json, objective, issue_scope_json,
             needs_manual_recovery, created_at, updated_at)
-           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', 0, 1, 1)`,
       ).run(runId);
       db.prepare(
         `INSERT INTO workflow_steps
@@ -1186,9 +1186,9 @@ describe("momentum workflow run logs", () => {
     try {
       db.prepare(
         `INSERT INTO workflow_runs
-           (id, state, source, plan_json, objective, issue_scope_json, route_json,
+           (id, state, source, plan_json, objective, issue_scope_json,
             needs_manual_recovery, created_at, updated_at)
-           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', 0, 1, 1)`,
       ).run(runId);
       db.prepare(
         `INSERT INTO workflow_steps
@@ -1254,7 +1254,7 @@ describe("momentum workflow run logs", () => {
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Workflow run logs: cwfp-logs-text");
-    expect(result.stdout).toContain("Schema version: 3");
+    expect(result.stdout).toContain("Schema version: 4");
     expect(result.stdout).toContain("round-1");
     expect(result.stdout).toContain("implemented the slice");
     expect(result.stdout).toContain("key changes: added reader");
@@ -1279,7 +1279,7 @@ describe("momentum workflow run logs", () => {
     expect(result.stdout).toContain("gate-open-1");
   });
 
-  it("renders the selected implementation engine in text readback when route evidence exists", async () => {
+  it("renders historical coding compatibility labels in text readback when marker evidence exists", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
@@ -1315,7 +1315,9 @@ describe("momentum workflow run logs", () => {
     ]);
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain("Implementation engine: native-goal-loop");
+    expect(result.stdout).toContain(
+      "Compatibility (coding): engine=native-goal-loop, profile=(none)",
+    );
   });
 
   it("projects migrated invocation gate scopes into the v2 attempt vocabulary", async () => {
@@ -1355,7 +1357,7 @@ describe("momentum workflow run logs", () => {
         roundId: string | null;
       }>;
     };
-    expect(payload.schemaVersion).toBe(3);
+    expect(payload.schemaVersion).toBe(4);
     expect(
       payload.gates.find((gate) => gate.gateId === "gate-invocation"),
     ).toEqual(

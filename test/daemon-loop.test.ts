@@ -837,9 +837,9 @@ function seedWorkflowRun(
 ): void {
   db.prepare(
     `INSERT INTO workflow_runs
-       (id, state, source, plan_json, repo_path, issue_scope_json, route_json,
+       (id, state, source, plan_json, repo_path, issue_scope_json,
         needs_manual_recovery, created_at, updated_at)
-     VALUES (?, ?, 'workflow-run-start', '{}', ?, '{}', '{}', 0, ?, ?)`,
+     VALUES (?, ?, 'workflow-run-start', '{}', ?, '{}', 0, ?, ?)`,
   ).run(
     input.runId,
     input.state ?? "approved",

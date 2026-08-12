@@ -1,3 +1,15 @@
+/**
+ * Migration-only legacy route vocabulary and canonical-equivalence projection.
+ *
+ * The operator-facing route compatibility projector is retired: no runtime
+ * read surface consumes a `route` object, and current databases have no
+ * `workflow_runs.route_json` column. This module survives solely so the
+ * one-time NAM-03 upgrade of a pre-rebuild data directory can (a) recognize the
+ * retired legacy route vocabulary and (b) prove, at migration and audit time,
+ * that the canonical destinations reconstruct the migrated step-selection
+ * values exactly. It must not be imported by command, renderer, or runtime
+ * dispatch/read paths.
+ */
 import type { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
 

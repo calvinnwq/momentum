@@ -1,21 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
-
-vi.mock("../src/adapters/db/route-state.js", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../src/adapters/db/route-state.js")>();
-  return {
-    ...actual,
-    projectValidatedLegacyWorkflowRunRoute: vi.fn(
-      actual.projectValidatedLegacyWorkflowRunRoute,
-    ),
-  };
-});
+import { afterEach, describe, expect, it } from "vitest";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { projectValidatedLegacyWorkflowRunRoute } from "../src/adapters/db/route-state.js";
 import {
   DELEGATE_SUPERVISOR_CONFIG_SCHEMA,
   DelegateSupervisorExecutor,
@@ -71,18 +59,9 @@ function seedNativeImplementationRun(runId: string): MomentumDb {
       },
     },
   });
-  db.prepare("UPDATE workflow_runs SET route_json = ? WHERE id = ?").run(
-    JSON.stringify({
-      steps: {
-        implementation: {
-          harness: "claude",
-          model: "stale-model",
-          effort: "low",
-        },
-      },
-    }),
-    runId,
-  );
+  // The retired `workflow_runs.route_json` column no longer exists, so a
+  // stale route-shaped selection cannot be injected at all: the frozen
+  // `workflow_steps.agent_config_json` row is the only durable selection.
   return db;
 }
 
@@ -344,9 +323,6 @@ describe("native dispatch canonical agent config", () => {
           resolveHostBindings: () => ({ tools: { gnhf: adapter } }),
         },
       );
-      const projectRoute = vi.mocked(projectValidatedLegacyWorkflowRunRoute);
-      projectRoute.mockClear();
-
       await production(claimImplementation(db, runId), {
         db,
         workerId: WORKER,
@@ -366,7 +342,6 @@ describe("native dispatch canonical agent config", () => {
         model: "gpt-5.6-codex",
         effort: "high",
       });
-      expect(projectRoute).toHaveBeenCalledTimes(1);
     } finally {
       db.close();
     }
@@ -771,7 +746,9 @@ describe("native dispatch canonical agent config", () => {
       expect(listWorkflowGatesForRun(db, runId)).toEqual([
         expect.objectContaining({
           evidence: "route_config_invalid",
-          reason: expect.stringContaining("route.profile is invalid"),
+          reason: expect.stringContaining(
+            "compatibility profile marker is invalid",
+          ),
         }),
       ]);
     } finally {

@@ -1,22 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-vi.mock("../src/adapters/db/route-state.js", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../src/adapters/db/route-state.js")>();
-  return {
-    ...actual,
-    projectValidatedLegacyWorkflowRunRoute: vi.fn(
-      actual.projectValidatedLegacyWorkflowRunRoute,
-    ),
-  };
-});
-
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { projectValidatedLegacyWorkflowRunRoute } from "../src/adapters/db/route-state.js";
 import { resolveDaemonWorkflowStepDispatch } from "../src/core/daemon/workflow-dispatch.js";
 import { DAEMON_HOST_BINDINGS_FILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-host-bindings.js";
 import {
@@ -538,24 +526,10 @@ describe("executeWorkflowStepDispatch — supported family", () => {
         },
       },
     });
-    const actualRouteState = await vi.importActual<
-      typeof import("../src/adapters/db/route-state.js")
-    >("../src/adapters/db/route-state.js");
-    expect(
-      actualRouteState.projectValidatedLegacyWorkflowRunRoute(db, runId, {
-        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
-        definitionKey: CODING_WORKFLOW_DEFINITION_V1.key,
-        definitionVersion: CODING_WORKFLOW_DEFINITION_V1.version,
-      }),
-    ).toEqual({
-      steps: {
-        validate: {
-          harness: "claude",
-          model: "compatibility-model",
-          effort: "low",
-        },
-      },
-    });
+    // Diverge the canonical frozen step row from the start-time selection.
+    // The retired route compatibility projection no longer exists, so the
+    // frozen `workflow_steps.agent_config_json` row is the only selection
+    // representation the retained legacy live-wrapper lane can consult.
     db.prepare(
       "UPDATE workflow_steps SET agent_config_json = ? WHERE run_id = ? AND step_id = ?",
     ).run(
@@ -568,36 +542,19 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       "no-mistakes",
     );
     const claim = approveAndClaim(db, "no-mistakes", runId);
-    // Even when the compatibility projection reports a stale conflicting
-    // selection, the retained legacy live-wrapper lane must dispatch from the
-    // canonical frozen step row.
-    const projectedRoute = vi.mocked(projectValidatedLegacyWorkflowRunRoute);
-    projectedRoute.mockImplementation(() => ({
-      steps: {
-        validate: {
-          harness: "claude",
-          model: "compatibility-model",
-          effort: "low",
-        },
-      },
-    }));
 
-    try {
-      const production = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
-        executeWorkflowStepDispatch,
-        {},
-      );
-      if (!production.ok) throw new Error(production.message);
+    const production = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!production.ok) throw new Error(production.message);
 
-      await production.dispatch(claim, {
-        db,
-        workerId: WORKER,
-        now: NOW + 1,
-      });
-    } finally {
-      projectedRoute.mockRestore();
-    }
+    await production.dispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 1,
+    });
 
     expect(
       db
@@ -902,6 +859,38 @@ describe("executeWorkflowStepDispatch — supported family", () => {
         evidence: "route_config_invalid",
         reason: expect.stringContaining(
           "$canonical.workflow_run_coding_compatibility",
+        ),
+      }),
+    ]);
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
+    ).toBe(true);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
+    expect(stepState(db, RUN_ID, "implementation")).toBe("approved");
+  });
+
+  it("routes source-conflicting canonical metadata to manual recovery", () => {
+    const db = openNativeCodingDbWithRoute({});
+    db.prepare(
+      `INSERT INTO workflow_run_import_metadata
+         (run_id, mode, profile, risk, quota_policy_json, source_format,
+          created_at, updated_at)
+       VALUES (?, NULL, NULL, NULL, NULL, ?, ?, ?)`,
+    ).run(RUN_ID, "legacy-route", NOW, NOW);
+    const claim = approveAndClaim(db, "implementation");
+
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 1,
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
+    expect(listWorkflowGatesForRun(db, RUN_ID)).toEqual([
+      expect.objectContaining({
+        evidence: "route_config_invalid",
+        reason: expect.stringContaining(
+          "$canonical.workflow_run_import_metadata",
         ),
       }),
     ]);

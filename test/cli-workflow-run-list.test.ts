@@ -64,12 +64,12 @@ function seedRun(db: MomentumDb, input: SeedRunInput): void {
   db.prepare(
     `INSERT INTO workflow_runs
        (id, state, source, source_artifact_path, plan_json,
-        repo_path, objective, issue_scope_json, route_json,
+        repo_path, objective, issue_scope_json,
         approval_boundary, skill_revision,
         needs_manual_recovery, manual_recovery_reason, manual_recovery_at,
         started_at, finished_at,
         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.state,
@@ -79,7 +79,6 @@ function seedRun(db: MomentumDb, input: SeedRunInput): void {
     input.repoPath ?? null,
     null,
     input.issueScopeJson ?? "{}",
-    "{}",
     input.approvalBoundary ?? null,
     null,
     0,

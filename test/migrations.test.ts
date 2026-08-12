@@ -1159,7 +1159,6 @@ describe("applyQueueMigrations", () => {
           "repo_path",
           "objective",
           "issue_scope_json",
-          "route_json",
           "approval_boundary",
           "skill_revision",
         ]) {
@@ -1167,8 +1166,9 @@ describe("applyQueueMigrations", () => {
             true,
           );
         }
+        // The retired route_json compatibility column is rebuilt away.
+        expect(byName.has("route_json")).toBe(false);
         expect(byName.get("issue_scope_json")?.notnull).toBe(1);
-        expect(byName.get("route_json")?.notnull).toBe(1);
         expect(byName.get("repo_path")?.notnull).toBe(0);
         expect(byName.get("objective")?.notnull).toBe(0);
         expect(byName.get("approval_boundary")?.notnull).toBe(0);
@@ -1187,7 +1187,7 @@ describe("applyQueueMigrations", () => {
       }
     });
 
-    it("defaults issue_scope_json and route_json to empty objects on fresh inserts", () => {
+    it("defaults issue_scope_json to an empty object on fresh inserts", () => {
       const dataDir = makeTempDir();
       const db = openDb(dataDir);
       try {
@@ -1199,7 +1199,7 @@ describe("applyQueueMigrations", () => {
         ).run();
         const row = db
           .prepare(
-            `SELECT repo_path, objective, issue_scope_json, route_json,
+            `SELECT repo_path, objective, issue_scope_json,
                     approval_boundary, skill_revision,
                     monitor_last_seen_state, monitor_terminal, monitor_step,
                     monitor_last_seen_digest, monitor_last_emitted_digest,
@@ -1210,7 +1210,6 @@ describe("applyQueueMigrations", () => {
         expect(row["repo_path"]).toBeNull();
         expect(row["objective"]).toBeNull();
         expect(row["issue_scope_json"]).toBe("{}");
-        expect(row["route_json"]).toBe("{}");
         expect(row["approval_boundary"]).toBeNull();
         expect(row["skill_revision"]).toBeNull();
         expect(row["monitor_last_seen_state"]).toBeNull();
@@ -1280,7 +1279,6 @@ describe("applyQueueMigrations", () => {
           "repo_path",
           "objective",
           "issue_scope_json",
-          "route_json",
           "approval_boundary",
           "skill_revision",
           "monitor_last_seen_state",
@@ -1293,9 +1291,11 @@ describe("applyQueueMigrations", () => {
         ]) {
           expect(cols).toContain(col);
         }
+        // The retired route_json compatibility column is rebuilt away.
+        expect(cols).not.toContain("route_json");
         const preserved = upgraded
           .prepare(
-            `SELECT id, state, plan_json, issue_scope_json, route_json,
+            `SELECT id, state, plan_json, issue_scope_json,
                     repo_path, approval_boundary
                FROM workflow_runs WHERE id = 'cwfp-legacy'`,
           )
@@ -1304,7 +1304,6 @@ describe("applyQueueMigrations", () => {
         expect(preserved["state"]).toBe("pending");
         expect(preserved["plan_json"]).toBe('{"legacy":true}');
         expect(preserved["issue_scope_json"]).toBe("{}");
-        expect(preserved["route_json"]).toBe("{}");
         expect(preserved["repo_path"]).toBeNull();
         expect(preserved["approval_boundary"]).toBeNull();
       } finally {
@@ -3430,7 +3429,7 @@ VALUES
       // then the route-state migration moves it to the canonical step column.
       const runs = db
         .prepare(
-          `SELECT id, approval_boundary, route_json
+          `SELECT id, approval_boundary
              FROM workflow_runs ORDER BY id`,
         )
         .all() as Array<Record<string, unknown>>;
@@ -3438,9 +3437,11 @@ VALUES
         id: "vocab-run-1",
         approval_boundary: "validate",
       });
-      expect(runs[0]).toMatchObject({
-        route_json: "{}",
-      });
+      // The retired route_json compatibility column is rebuilt away after the
+      // canonical migration clears it.
+      expect(
+        getColumns(db, "workflow_runs").map((row) => row.name),
+      ).not.toContain("route_json");
       expect(
         db
           .prepare(
@@ -3578,8 +3579,8 @@ VALUES
       current
         .prepare(
           `INSERT INTO workflow_runs
-             (id, state, source, plan_json, route_json, created_at, updated_at)
-           VALUES ('mixed-columns-run', 'running', 'test', '{}', '{}', 1, 1)`,
+             (id, state, source, plan_json, created_at, updated_at)
+           VALUES ('mixed-columns-run', 'running', 'test', '{}', 1, 1)`,
         )
         .run();
       current
@@ -3909,8 +3910,8 @@ VALUES
     initial
       .prepare(
         `INSERT INTO workflow_runs
-           (id, state, source, plan_json, route_json, created_at, updated_at)
-         VALUES ('locked-legacy-run', 'running', 'test', '{}', '{}', 1, 1)`,
+           (id, state, source, plan_json, created_at, updated_at)
+         VALUES ('locked-legacy-run', 'running', 'test', '{}', 1, 1)`,
       )
       .run();
     initial

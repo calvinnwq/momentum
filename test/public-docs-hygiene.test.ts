@@ -179,4 +179,68 @@ describe("public docs hygiene", () => {
       }
     });
   });
+
+  describe("retired route/profile vocabulary stays out of current docs", () => {
+    // NGX-669 closeout guard: the retired CLI flags, route namespaces,
+    // route_json column, and live-wrapper-profile selector may appear in
+    // current docs only as explicit retirement/migration documentation.
+    // A line mentioning a retired term must carry a migration marker on the
+    // same line so current-behavior framing cannot quietly return.
+    const retiredTerms = [
+      "--profile",
+      "--implementation-engine",
+      "--steps-json",
+      "route.profile",
+      "route.implementationEngine",
+      "route.steps",
+      "route.subworkflow",
+      "route_json",
+      "MOMENTUM_LIVE_WRAPPER_PROFILE",
+      "live-wrapper profile",
+    ] as const;
+    const migrationMarker =
+      /\bretired\b|\bremoved\b|no longer|replaced by|\blegacy\b|\bhistorical\b|migrat|compatibility column|\bupgrad/i;
+
+    const anchorSurfaces = [
+      ...publicSurfaces,
+      {
+        label: "SPEC.md",
+        file: "SPEC.md",
+        body: fs.readFileSync(path.join(repoRoot, "SPEC.md"), "utf8"),
+      },
+      {
+        label: "src/core/workflow/README.md",
+        file: "src/core/workflow/README.md",
+        body: fs.readFileSync(
+          path.join(repoRoot, "src/core/workflow/README.md"),
+          "utf8",
+        ),
+      },
+      {
+        label: "skills/momentum/references/workflow-runs.md",
+        file: "skills/momentum/references/workflow-runs.md",
+        body: fs.readFileSync(
+          path.join(repoRoot, "skills/momentum/references/workflow-runs.md"),
+          "utf8",
+        ),
+      },
+    ];
+
+    for (const surface of anchorSurfaces) {
+      it(`${surface.label} mentions retired route/profile vocabulary only as migration documentation`, () => {
+        const offending = surface.body
+          .split("\n")
+          .map((line, index) => ({ line, lineNumber: index + 1 }))
+          .filter(({ line }) =>
+            retiredTerms.some((term) => line.includes(term)),
+          )
+          .filter(({ line }) => !migrationMarker.test(line))
+          .map(({ line, lineNumber }) => `${lineNumber}: ${line.trim()}`);
+        expect(
+          offending,
+          `${surface.label} frames retired route/profile vocabulary as current behavior`,
+        ).toEqual([]);
+      });
+    }
+  });
 });

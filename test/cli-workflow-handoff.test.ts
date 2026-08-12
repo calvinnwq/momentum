@@ -59,12 +59,12 @@ function seedRunningRun(db: MomentumDb, runId: string): void {
   db.prepare(
     `INSERT INTO workflow_runs
        (id, state, source, source_artifact_path, plan_json,
-        repo_path, objective, issue_scope_json, route_json,
+        repo_path, objective, issue_scope_json,
         approval_boundary, skill_revision,
         needs_manual_recovery, manual_recovery_reason, manual_recovery_at,
         started_at, finished_at,
         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     runId,
     "running",
@@ -73,7 +73,6 @@ function seedRunningRun(db: MomentumDb, runId: string): void {
     "{}",
     null,
     "exercise handoff envelope",
-    "{}",
     "{}",
     "through-merge-cleanup",
     null,
@@ -221,7 +220,7 @@ describe("momentum workflow handoff", () => {
     };
     expect(payload.ok).toBe(true);
     expect(payload.command).toBe("workflow handoff");
-    expect(payload.schemaVersion).toBe(3);
+    expect(payload.schemaVersion).toBe(4);
     expect(typeof payload.generatedAt).toBe("number");
     expect(payload.run.runId).toBe("cwfp-handoff01");
     expect(payload.run.state).toBe("running");
@@ -306,7 +305,7 @@ describe("momentum workflow handoff", () => {
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Workflow handoff: cwfp-text-handoff");
-    expect(result.stdout).toContain("Schema version: 3");
+    expect(result.stdout).toContain("Schema version: 4");
     expect(result.stdout).toContain("Workflow run: cwfp-text-handoff");
     expect(result.stdout).toContain("- Next action: resume_running");
   });

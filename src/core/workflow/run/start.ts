@@ -44,7 +44,6 @@
 import { isDeepStrictEqual } from "node:util";
 
 import { isSafeWorkflowRunPathSegment } from "../recovery/artifact.js";
-import { CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY } from "../route/coding.js";
 import {
   BUILT_IN_WORKFLOW_DEFINITIONS,
   validateWorkflowDefinition,
@@ -432,8 +431,6 @@ export type WorkflowCodingPlanPreview = {
   repoPath: string;
   objective: string;
   issueScope: Record<string, unknown>;
-  route: Record<string, unknown>;
-  implementationEngine: string | null;
   approvalBoundary: WorkflowApprovalBoundary | null;
   skillRevision: string | null;
   definitionKey: string;
@@ -444,16 +441,6 @@ export type WorkflowCodingPlanPreview = {
 export type WorkflowCodingPlanPreviewResult =
   | { ok: true; preview: WorkflowCodingPlanPreview }
   | { ok: false; errors: WorkflowRunStartError[] };
-
-function readImplementationEngine(
-  route: Record<string, unknown>,
-): string | null {
-  const value = route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY];
-  if (typeof value === "string" && value.trim().length > 0) {
-    return value;
-  }
-  return null;
-}
 
 /**
  * Materialize a {@link WorkflowCodingPlanPreview} from the same
@@ -525,8 +512,6 @@ export function materializeWorkflowCodingPlanPreview(
       repoPath: run.repoPath,
       objective: run.objective,
       issueScope: run.issueScope,
-      route: run.route,
-      implementationEngine: readImplementationEngine(run.route),
       approvalBoundary: run.approvalBoundary,
       skillRevision: run.skillRevision,
       definitionKey: run.definitionKey,

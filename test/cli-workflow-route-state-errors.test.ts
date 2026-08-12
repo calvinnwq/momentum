@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
+import { readWorkflowRunLineage } from "../src/adapters/db/route-state.js";
 
 const tempRoots: string[] = [];
 
@@ -16,7 +17,7 @@ afterEach(() => {
   }
 });
 
-function seedRouteRefusal(): string {
+function seedRouteFixture(): string {
   const dataDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "momentum-cli-route-refusal-"),
   );
@@ -29,6 +30,16 @@ function seedRouteRefusal(): string {
         "utf8",
       ),
     );
+  } finally {
+    db.close();
+  }
+  return dataDir;
+}
+
+function seedRouteRefusal(): string {
+  const dataDir = seedRouteFixture();
+  const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+  try {
     db.prepare(
       "UPDATE workflow_runs SET route_json = ? WHERE id = 'native-simple'",
     ).run('{"unknown":true}');
@@ -114,7 +125,7 @@ describe("workflow route-state CLI failure normalization", () => {
     });
   }
 
-  it("preserves route diagnostics from compatibility projection", async () => {
+  it("preserves canonical agent-config diagnostics on status read-back", async () => {
     const dataDir = seedRouteRefusal();
     const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
     try {
@@ -154,8 +165,31 @@ describe("workflow route-state CLI failure normalization", () => {
       command: "workflow status",
       code: "route_state_value_invalid",
       runId: "native-full",
-      jsonPath: "$.steps.implementation.model",
-      repair: expect.stringContaining("manually repair"),
+      jsonPath: "$.steps.implementation.agentConfig",
+      repair: expect.stringContaining("workflow_steps.agent_config_json"),
     });
+  });
+
+  it("fails closed when canonical lineage is corrupt in the read-back reader", () => {
+    const dataDir = seedRouteFixture();
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `UPDATE workflow_run_lineage
+              SET depth = 2
+            WHERE run_id = 'subworkflow-child'`,
+      ).run();
+      expect(() =>
+        readWorkflowRunLineage(db, "subworkflow-child"),
+      ).toThrowError(
+        expect.objectContaining({
+          code: "route_state_lineage_invalid",
+          runId: "subworkflow-child",
+          jsonPath: "$.subworkflow.lineage.depth",
+        }),
+      );
+    } finally {
+      db.close();
+    }
   });
 });

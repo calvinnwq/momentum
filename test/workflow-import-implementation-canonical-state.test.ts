@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { projectLegacyWorkflowRunRoute } from "../src/adapters/db/route-projection.js";
+import { projectLegacyWorkflowRunRoute } from "../src/adapters/db/legacy-route-migration.js";
 import {
   readWorkflowRunCodingCompatibilities,
   readWorkflowRunCodingCompatibility,
@@ -15,7 +15,12 @@ import {
 import { RouteStateMigrationError } from "../src/adapters/db/route-state-errors.js";
 import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
 import { resolveWorkflowStepDispatchRouteSelection } from "../src/core/workflow/dispatch/execute.js";
-import { loadWorkflowRunDetail } from "../src/core/workflow/run/status.js";
+import {
+  listWorkflowRunSummaries,
+  loadWorkflowRunDetail,
+} from "../src/core/workflow/run/status.js";
+import { loadWorkflowHandoff } from "../src/core/workflow/run/handoff.js";
+import { loadWorkflowRunLogs } from "../src/core/workflow/run/logs.js";
 import { workflowRunToJsonShape } from "../src/renderers/workflow.js";
 import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
@@ -79,9 +84,9 @@ function seedImportedRun(
 ): void {
   db.prepare(
     `INSERT INTO workflow_runs (
-       id, state, source, plan_json, issue_scope_json, route_json,
+       id, state, source, plan_json, issue_scope_json,
        created_at, updated_at
-     ) VALUES (?, 'succeeded', 'agent-workflow', '{}', '{}', '{}', ?, ?)`,
+     ) VALUES (?, 'succeeded', 'agent-workflow', '{}', '{}', ?, ?)`,
   ).run(runId, NOW, NOW);
   writeCanonicalWorkflowRunRouteState(db, {
     runId,
@@ -322,20 +327,51 @@ describe("readWorkflowRunCodingCompatibility — historical read-back only", () 
 });
 
 describe("operator read-back reads canonical state through direct typed readers", () => {
-  it("exposes the historical implementation engine on run detail without route keys", () => {
+  it("keeps legacy runs readable when canonical route tables are absent", () => {
     const db = openTempDb();
     try {
-      seedNativeCodingRun(db, "native-detail-readback");
-      const detail = loadWorkflowRunDetail(db, "native-detail-readback");
-      expect(detail?.run.implementationEngine).toBe("gnhf");
-      expect(detail?.run.route).not.toHaveProperty("implementationEngine");
-      expect(detail?.run.route).not.toHaveProperty("profile");
+      db.exec(`
+        DROP TABLE workflow_run_coding_compatibility;
+        DROP TABLE workflow_run_import_metadata;
+      `);
+      db.prepare(
+        `INSERT INTO workflow_runs (
+           id, state, source, plan_json, issue_scope_json,
+           created_at, updated_at
+         ) VALUES (?, 'succeeded', 'legacy-runner', '{}', '{}', ?, ?)`,
+      ).run("legacy-readable", NOW, NOW);
+
+      expect(loadWorkflowRunDetail(db, "legacy-readable")?.run).toMatchObject({
+        runId: "legacy-readable",
+        compatibility: null,
+        importMetadata: null,
+      });
+      expect(
+        listWorkflowRunSummaries(db).map((summary) => summary.run.runId),
+      ).toEqual(["legacy-readable"]);
     } finally {
       db.close();
     }
   });
 
-  it("keeps imported run detail readable with an empty projected route", () => {
+  it("exposes the historical implementation engine on run detail without route keys", () => {
+    const db = openTempDb();
+    try {
+      seedNativeCodingRun(db, "native-detail-readback");
+      const detail = loadWorkflowRunDetail(db, "native-detail-readback");
+      expect(detail?.run.compatibility).toEqual({
+        coding: {
+          implementationEngine: "gnhf",
+          selectedProfile: "operator-profile",
+        },
+      });
+      expect(detail?.run).not.toHaveProperty("route");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps imported run detail readable without any route projection", () => {
     const db = openTempDb();
     try {
       seedImportedRun(db, "cwfp-detail-readback", {
@@ -343,8 +379,8 @@ describe("operator read-back reads canonical state through direct typed readers"
         profile: "imported-profile",
       });
       const detail = loadWorkflowRunDetail(db, "cwfp-detail-readback");
-      expect(detail?.run.route).toEqual({});
-      expect(detail?.run.implementationEngine).toBeNull();
+      expect(detail?.run).not.toHaveProperty("route");
+      expect(detail?.run.compatibility).toBeNull();
       expect(
         readWorkflowRunImportMetadata(db, "cwfp-detail-readback"),
       ).toMatchObject({
@@ -411,11 +447,16 @@ describe("run JSON read-back exposes canonical metadata through typed fields", (
       seedNativeCodingRun(db, "native-json-readback");
       const detail = loadWorkflowRunDetail(db, "native-json-readback");
       const shape = workflowRunToJsonShape(detail!.run);
-      expect(shape["implementationEngine"]).toBe("gnhf");
-      expect(shape["selectedProfile"]).toBe("operator-profile");
+      expect(shape["compatibility"]).toEqual({
+        coding: {
+          implementationEngine: "gnhf",
+          selectedProfile: "operator-profile",
+        },
+      });
       expect(shape["importMetadata"]).toBeNull();
-      expect(shape["route"]).not.toHaveProperty("implementationEngine");
-      expect(shape["route"]).not.toHaveProperty("profile");
+      expect(shape).not.toHaveProperty("route");
+      expect(shape).not.toHaveProperty("implementationEngine");
+      expect(shape).not.toHaveProperty("selectedProfile");
     } finally {
       db.close();
     }
@@ -437,9 +478,8 @@ describe("run JSON read-back exposes canonical metadata through typed fields", (
       );
       const detail = loadWorkflowRunDetail(db, "cwfp-json-readback");
       const shape = workflowRunToJsonShape(detail!.run);
-      expect(shape["route"]).toEqual({});
-      expect(shape["implementationEngine"]).toBeNull();
-      expect(shape["selectedProfile"]).toBeNull();
+      expect(shape).not.toHaveProperty("route");
+      expect(shape["compatibility"]).toBeNull();
       expect(shape["importMetadata"]).toEqual({
         mode: "execute-ready",
         profile: "imported-profile",
@@ -488,46 +528,76 @@ describe("imported profile is historical metadata only", () => {
   });
 });
 
-describe("active readers do not use route state for import / implementation authority", () => {
-  const forbidden: Array<{ file: string; token: string }> = [
-    {
-      file: "src/core/daemon/workflow-dispatch.ts",
-      token: "resolveLegacyWorkflowStepDispatchRouteSelection",
-    },
-    {
-      file: "src/core/workflow/dispatch/execute.ts",
-      token: "resolveLegacyWorkflowStepDispatchRouteSelection",
-    },
-    {
-      file: "src/renderers/workflow.ts",
-      token: 'route["implementationEngine"]',
-    },
-    {
-      file: "src/adapters/db/route-projection.ts",
-      token: 'route["implementationEngine"]',
-    },
-    {
-      file: "src/adapters/db/route-projection.ts",
-      token: 'route["mode"]',
-    },
-    {
-      file: "src/adapters/db/route-projection.ts",
-      token: 'route["risk"]',
-    },
-    {
-      file: "src/adapters/db/route-projection.ts",
-      token: 'route["quotaPolicy"]',
-    },
-    {
-      file: "src/adapters/db/route-projection.ts",
-      token: 'route["profile"]',
-    },
-  ];
+describe("active readers do not use retired route projection state", () => {
+  it("ignores a divergent legacy route_json column on status, logs, handoff, and JSON surfaces", () => {
+    const db = openTempDb();
+    try {
+      seedImportedRun(
+        db,
+        "cwfp-stale-route-json",
+        {
+          mode: "execute-ready",
+          profile: "canonical-imported-profile",
+          risk: "medium",
+          quotaPolicy: { maxTurns: 12, overflow: "refuse" },
+        },
+        "agent-workflow-plan@v1",
+      );
+      db.exec("ALTER TABLE workflow_runs ADD COLUMN route_json TEXT");
+      db.prepare("UPDATE workflow_runs SET route_json = ? WHERE id = ?").run(
+        JSON.stringify({
+          implementationEngine: "retired-engine",
+          profile: "stale-profile",
+          mode: "stale-mode",
+          risk: "stale-risk",
+          quotaPolicy: { maxTurns: 999, overflow: "continue" },
+          steps: {
+            implementation: {
+              harness: "stale-harness",
+              model: "stale-model",
+              effort: "low",
+            },
+          },
+        }),
+        "cwfp-stale-route-json",
+      );
 
-  for (const { file, token } of forbidden) {
-    it(`${file} does not reference ${JSON.stringify(token)}`, () => {
-      const source = fs.readFileSync(path.join(__dirname, "..", file), "utf8");
-      expect(source).not.toContain(token);
-    });
-  }
+      const detail = loadWorkflowRunDetail(db, "cwfp-stale-route-json", {
+        now: NOW,
+      });
+      const summary = listWorkflowRunSummaries(db, { now: NOW })[0];
+      const logs = loadWorkflowRunLogs(db, "cwfp-stale-route-json", {
+        generatedAt: NOW,
+        now: NOW,
+      });
+      const handoff = loadWorkflowHandoff(db, "cwfp-stale-route-json", {
+        generatedAt: NOW,
+        now: NOW,
+      });
+      const shape = workflowRunToJsonShape(detail!.run);
+
+      expect(detail?.run.importMetadata).toEqual({
+        mode: "execute-ready",
+        profile: "canonical-imported-profile",
+        risk: "medium",
+        quotaPolicy: { maxTurns: 12, overflow: "refuse" },
+        sourceFormat: "agent-workflow-plan@v1",
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+      expect(summary?.run.importMetadata).toEqual(detail?.run.importMetadata);
+      expect(logs?.detail.run.importMetadata).toEqual(
+        detail?.run.importMetadata,
+      );
+      expect(handoff?.detail.run.importMetadata).toEqual(
+        detail?.run.importMetadata,
+      );
+      expect(shape).not.toHaveProperty("route");
+      expect(shape).not.toHaveProperty("implementationEngine");
+      expect(shape).not.toHaveProperty("selectedProfile");
+      expect(shape["importMetadata"]).toEqual(detail?.run.importMetadata);
+    } finally {
+      db.close();
+    }
+  });
 });

@@ -9,6 +9,7 @@
  */
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
+  WORKFLOW_RUN_SURFACE_SCHEMA_VERSION,
   loadWorkflowRunDetail,
   type LoadWorkflowRunDetailOptions,
   type WorkflowRunDetail,
@@ -18,7 +19,8 @@ import {
  * Version 2 renamed the embedded gate anchor `invocationId` to `attemptId`
  * alongside the attempt/round model migration.
  */
-export const WORKFLOW_HANDOFF_SCHEMA_VERSION = 3;
+export const WORKFLOW_HANDOFF_SCHEMA_VERSION =
+  WORKFLOW_RUN_SURFACE_SCHEMA_VERSION;
 
 export type LoadWorkflowHandoffOptions = LoadWorkflowRunDetailOptions & {
   generatedAt?: number;

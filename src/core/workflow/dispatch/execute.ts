@@ -57,7 +57,6 @@
  */
 
 import type { MomentumDb } from "../../../adapters/db.js";
-import { projectValidatedLegacyWorkflowRunRoute } from "../../../adapters/db/route-state.js";
 import { RouteStateMigrationError } from "../../../adapters/db/route-state-errors.js";
 import {
   allocateExecutorCheckpointId,
@@ -87,8 +86,9 @@ import {
 } from "../route/coding.js";
 import {
   canonicalWorkflowStepExecutorSelection,
-  readCanonicalWorkflowStepAgentConfig,
+  readCanonicalWorkflowStepAgentConfigs,
 } from "../route/canonical-agent-config.js";
+import { validateCanonicalWorkflowRunRouteState } from "../../../adapters/db/route-state.js";
 import { insertWorkflowGate, loadWorkflowGate } from "../gate/persist.js";
 import type { WorkflowGateType } from "../gate/gate.js";
 import { releaseWorkflowLease } from "../leases.js";
@@ -636,7 +636,7 @@ export function resolveWorkflowStepDispatchRoute(
       selection: {
         ok: false,
         reason:
-          `Native coding run ${claim.runId} route is corrupt at $canonical.workflow_run_coding_compatibility; ` +
+          `Native coding run ${claim.runId} canonical state is corrupt at $canonical.workflow_run_coding_compatibility; ` +
           "routing to manual recovery.",
       },
     };
@@ -675,15 +675,24 @@ export function resolveWorkflowStepDispatchRoute(
       };
     }
 
-    const agentConfig = readCanonicalWorkflowStepAgentConfig(db, {
-      runId: claim.runId,
-      stepId: claim.stepId,
-    });
-    projectValidatedLegacyWorkflowRunRoute(db, claim.runId, {
-      source: row.source,
-      definitionKey: row.workflow_definition_key,
-      definitionVersion: row.workflow_definition_version,
-    });
+    // The frozen step-owned rows are the only selection authority; no route
+    // compatibility projection is consulted before dispatch. Every step's
+    // frozen config for the run is validated through the same strict reader so
+    // a corrupt sibling selection still fails the dispatch closed.
+    const agentConfigs = readCanonicalWorkflowStepAgentConfigs(db, claim.runId);
+    const agentConfig = agentConfigs.get(claim.stepId);
+    if (agentConfig === undefined) {
+      return {
+        nativeCoding: true,
+        selection: {
+          ok: false,
+          reason:
+            `Native coding run ${claim.runId} canonical state is corrupt at $.steps.${claim.stepId}.agentConfig; ` +
+            "routing to manual recovery.",
+        },
+      };
+    }
+    validateCanonicalWorkflowRunRouteState(db, claim.runId);
     return {
       nativeCoding: true,
       selection: {
@@ -717,14 +726,14 @@ function readCodingImplementationEngine(
   if (typeof value !== "string" || value.trim().length === 0) {
     return {
       ok: false,
-      reason: `Native coding run ${runId} route.implementationEngine is invalid; routing to manual recovery.`,
+      reason: `Native coding run ${runId} compatibility implementation-engine marker is invalid; routing to manual recovery.`,
     };
   }
   const normalized = value.trim();
   if (!isCodingImplementationEngine(normalized)) {
     return {
       ok: false,
-      reason: `Native coding run ${runId} route.implementationEngine is unsupported (${normalized}); routing to manual recovery.`,
+      reason: `Native coding run ${runId} compatibility implementation-engine marker is unsupported (${normalized}); routing to manual recovery.`,
     };
   }
   return { ok: true, engine: normalized };
@@ -738,7 +747,7 @@ function readCodingSelectedProfile(
   if (typeof value !== "string" || value.trim().length === 0) {
     return {
       ok: false,
-      reason: `Native coding run ${runId} route.profile is invalid; routing to manual recovery.`,
+      reason: `Native coding run ${runId} compatibility profile marker is invalid; routing to manual recovery.`,
     };
   }
   return { ok: true };

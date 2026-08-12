@@ -446,7 +446,7 @@ describe("formatCodingRouteStepSelectionLines - human audit surface", () => {
       resolveCodingRouteStepSelections({}),
     );
     expect(lines).toEqual([
-      "Per-step route:",
+      "Per-step agent config:",
       "  implementation: harness=(default), model=(default), effort=(default)",
       "  postflight: harness=(default), model=(default), effort=(default)",
       "  validate: harness=(default), model=(default), effort=(default)",
@@ -462,7 +462,7 @@ describe("formatCodingRouteStepSelectionLines - human audit surface", () => {
       }),
     );
     expect(lines).toEqual([
-      "Per-step route:",
+      "Per-step agent config:",
       "  implementation: harness=gnhf, model=opus, effort=(default)",
       "  postflight: harness=(default), model=(default), effort=(default)",
       "  validate: harness=(default), model=(default), effort=(default)",

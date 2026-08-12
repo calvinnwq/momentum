@@ -6,8 +6,7 @@ import {
   projectLegacyWorkflowRunRoutes,
   RouteStateProjectionError,
   type WorkflowRunRouteProjectionInput,
-  type WorkflowRunRouteProjectionSource,
-} from "./route-projection.js";
+} from "./legacy-route-migration.js";
 import { RouteStateMigrationError } from "./route-state-errors.js";
 import {
   isPlainObject,
@@ -242,7 +241,8 @@ export function validateCanonicalWorkflowRunLineage(
 ): void {
   const run = db
     .prepare(
-      `SELECT id, source, route_json, workflow_definition_key,
+      `SELECT id, source, ${workflowRunsRouteJsonSelect(db)},
+              workflow_definition_key,
               workflow_definition_version, created_at, updated_at
          FROM workflow_runs WHERE id = ?`,
     )
@@ -355,19 +355,14 @@ function resolveValidatedRouteWithExplicitLineage(input: {
   };
 }
 
-export function projectValidatedLegacyWorkflowRunRoute(
-  db: MomentumDb,
-  runId: string,
-  run: WorkflowRunRouteProjectionSource,
-): Record<string, unknown> {
-  return (
-    projectValidatedLegacyWorkflowRunRoutes(db, [{ runId, ...run }]).get(
-      runId,
-    ) ?? {}
-  );
-}
-
-export function projectValidatedLegacyWorkflowRunRoutes(
+/**
+ * Migration/audit-internal canonical-integrity pass: reconstructs the legacy
+ * step-selection projection from canonical rows and validates compatibility,
+ * import-metadata, source, and lineage coherence for the requested runs plus
+ * their lineage closure. Not a runtime read surface — operator projections
+ * read the typed canonical readers directly.
+ */
+function validateCanonicalRouteStateForRuns(
   db: MomentumDb,
   runs: ReadonlyArray<WorkflowRunRouteProjectionInput>,
 ): Map<string, Record<string, unknown>> {
@@ -410,6 +405,7 @@ export function readWorkflowRunCodingCompatibility(
   db: MomentumDb,
   runId: string,
 ): WorkflowRunCodingCompatibilityReadback | undefined {
+  if (!tableExists(db, "workflow_run_coding_compatibility")) return undefined;
   const row = db
     .prepare(
       `SELECT implementation_engine, selected_profile
@@ -437,6 +433,9 @@ export function readWorkflowRunCodingCompatibilities(
   runIds: readonly string[],
 ): Map<string, WorkflowRunCodingCompatibilityReadback> {
   const readbacks = new Map<string, WorkflowRunCodingCompatibilityReadback>();
+  if (!tableExists(db, "workflow_run_coding_compatibility")) {
+    return readbacks;
+  }
   try {
     for (const [runId, row] of loadCanonicalCompatibilityRows(
       db,
@@ -448,6 +447,102 @@ export function readWorkflowRunCodingCompatibilities(
     throw normalizeRouteStateMigrationError(error);
   }
   return readbacks;
+}
+
+export type WorkflowRunLineageReadback = {
+  parentRunId: string;
+  parentStepId: string;
+  depth: number;
+  ancestorDefinitionKeys: readonly string[];
+};
+
+/**
+ * Direct typed reader over `workflow_run_lineage` — the canonical owner of a
+ * subworkflow child run's parent, dispatching step, nesting depth, and
+ * root-first ancestry. Read-back only for operator projections; dispatch-side
+ * lineage authority stays with the subworkflow dispatch context. Returns
+ * `undefined` for root runs and fails closed on malformed persisted ancestry.
+ */
+export function readWorkflowRunLineage(
+  db: MomentumDb,
+  runId: string,
+): WorkflowRunLineageReadback | undefined {
+  return readWorkflowRunLineages(db, [runId]).get(runId);
+}
+
+/**
+ * Batched variant of {@link readWorkflowRunLineage} for listing surfaces: one
+ * chunked query per run set instead of one statement per run. Root runs
+ * without a lineage row are absent from the returned map.
+ */
+export function readWorkflowRunLineages(
+  db: MomentumDb,
+  runIds: readonly string[],
+): Map<string, WorkflowRunLineageReadback> {
+  const readbacks = new Map<string, WorkflowRunLineageReadback>();
+  if (!tableExists(db, "workflow_run_lineage")) return readbacks;
+  const ids = [...new Set(runIds)];
+  for (const runId of ids) {
+    validateCanonicalWorkflowRunLineage(db, runId);
+  }
+  for (
+    let offset = 0;
+    offset < ids.length;
+    offset += VALIDATION_QUERY_CHUNK_SIZE
+  ) {
+    const chunk = ids.slice(offset, offset + VALIDATION_QUERY_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const rows = db
+      .prepare(
+        `SELECT run_id, parent_run_id, parent_step_id, depth,
+                ancestor_definition_keys_json
+           FROM workflow_run_lineage
+          WHERE run_id IN (${placeholders})`,
+      )
+      .all(...chunk) as Array<{
+      run_id: string;
+      parent_run_id: string;
+      parent_step_id: string;
+      depth: number;
+      ancestor_definition_keys_json: string;
+    }>;
+    for (const row of rows) {
+      readbacks.set(row.run_id, {
+        parentRunId: row.parent_run_id,
+        parentStepId: row.parent_step_id,
+        depth: row.depth,
+        ancestorDefinitionKeys: parseAncestorDefinitionKeys(
+          row.run_id,
+          row.ancestor_definition_keys_json,
+        ),
+      });
+    }
+  }
+  return readbacks;
+}
+
+function parseAncestorDefinitionKeys(
+  runId: string,
+  raw: string,
+): readonly string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = undefined;
+  }
+  if (
+    !Array.isArray(parsed) ||
+    parsed.some((entry) => typeof entry !== "string")
+  ) {
+    throw new RouteStateMigrationError({
+      runId,
+      jsonPath: "$canonical.workflow_run_lineage.ancestor_definition_keys_json",
+      code: "route_state_lineage_invalid",
+      detail: "ancestor definition keys must be a JSON array of strings",
+    });
+  }
+  return parsed as string[];
 }
 
 export type WorkflowRunImportMetadataReadback =
@@ -473,6 +568,7 @@ export function readWorkflowRunImportMetadataForRuns(
   runIds: readonly string[],
 ): Map<string, WorkflowRunImportMetadataReadback> {
   const readbacks = new Map<string, WorkflowRunImportMetadataReadback>();
+  if (!tableExists(db, "workflow_run_import_metadata")) return readbacks;
   try {
     for (const [runId, row] of loadCanonicalImportMetadataRows(
       db,
@@ -494,6 +590,7 @@ export function readWorkflowRunImportMetadata(
   db: MomentumDb,
   runId: string,
 ): WorkflowRunImportMetadataReadback | undefined {
+  if (!tableExists(db, "workflow_run_import_metadata")) return undefined;
   const sourceFormatSelect = columnExists(
     db,
     "workflow_run_import_metadata",
@@ -609,6 +706,13 @@ export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
     }
     assertRouteDestinationForeignKeysEmpty(db);
     auditCanonicalRouteState(db);
+    return { runs: [], dataVersion };
+  }
+
+  // A rebuilt (or freshly created) database has no route_json column at all:
+  // there is no legacy route state to plan, and destination creation is owned
+  // by the migration pass gated on routeStateMigrationNeeded.
+  if (!columnExists(db, "workflow_runs", "route_json")) {
     return { runs: [], dataVersion };
   }
 
@@ -1164,7 +1268,8 @@ function loadLineageValidationRuns(
 ): Map<string, RunRow> {
   const rows = db
     .prepare(
-      `SELECT id, source, route_json, workflow_definition_key,
+      `SELECT id, source, ${workflowRunsRouteJsonSelect(db)},
+              workflow_definition_key,
               workflow_definition_version, created_at, updated_at
          FROM workflow_runs`,
     )
@@ -1552,13 +1657,14 @@ function assertCanonicalDestinationEquivalence(
 export function auditCanonicalRouteState(db: MomentumDb): void {
   const runs = db
     .prepare(
-      `SELECT id, source, route_json, workflow_definition_key,
+      `SELECT id, source, ${workflowRunsRouteJsonSelect(db)},
+              workflow_definition_key,
               workflow_definition_version, created_at, updated_at
          FROM workflow_runs
         ORDER BY id`,
     )
     .all() as RunRow[];
-  projectValidatedLegacyWorkflowRunRoutes(
+  validateCanonicalRouteStateForRuns(
     db,
     runs.map((run) => ({
       runId: run.id,
@@ -1567,6 +1673,31 @@ export function auditCanonicalRouteState(db: MomentumDb): void {
       definitionVersion: run.workflow_definition_version,
     })),
   );
+}
+
+/** Validate canonical route state for one runtime run before native dispatch. */
+export function validateCanonicalWorkflowRunRouteState(
+  db: MomentumDb,
+  runId: string,
+): void {
+  const run = db
+    .prepare(
+      `SELECT id, source, ${workflowRunsRouteJsonSelect(db)},
+              workflow_definition_key,
+              workflow_definition_version, created_at, updated_at
+         FROM workflow_runs
+        WHERE id = ?`,
+    )
+    .get(runId) as RunRow | undefined;
+  if (run === undefined) return;
+  validateCanonicalRouteStateForRuns(db, [
+    {
+      runId: run.id,
+      source: run.source,
+      definitionKey: run.workflow_definition_key,
+      definitionVersion: run.workflow_definition_version,
+    },
+  ]);
 }
 
 function loadCanonicalValidationRunClosure(
@@ -1595,7 +1726,7 @@ function loadCanonicalValidationRunClosure(
              JOIN route_run_closure AS closure
                ON closure.run_id = lineage.run_id
          )
-         SELECT wr.id, wr.source, wr.route_json,
+         SELECT wr.id, wr.source, ${workflowRunsRouteJsonSelect(db, "wr.")},
                 wr.workflow_definition_key,
                 wr.workflow_definition_version, wr.created_at, wr.updated_at,
                 lineage.parent_run_id
@@ -1877,6 +2008,8 @@ function clearMigratedRouteJson(
   db: MomentumDb,
   plan: WorkflowRouteStatePlan,
 ): void {
+  // Rebuilt databases carry no route_json column; there is nothing to clear.
+  if (!columnExists(db, "workflow_runs", "route_json")) return;
   const clear = db.prepare(
     "UPDATE workflow_runs SET route_json = '{}' WHERE id = ?",
   );
@@ -2015,6 +2148,7 @@ function normalizeSchemaSql(sql: string): string {
 function firstNonEmptyRoute(
   db: MomentumDb,
 ): { id: string; route_json: string | null } | undefined {
+  if (!columnExists(db, "workflow_runs", "route_json")) return undefined;
   return db
     .prepare(
       `SELECT id, route_json
@@ -2062,7 +2196,7 @@ function routeStateBaseSchemaState(db: MomentumDb): {
   const contracts = [
     {
       name: "workflow_runs",
-      columns: ["id", "source", "route_json", "created_at", "updated_at"],
+      columns: ["id", "source", "created_at", "updated_at"],
     },
     {
       name: "workflow_steps",
@@ -2126,6 +2260,17 @@ function tableExists(db: MomentumDb, name: string): boolean {
       .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
       .get(name) !== undefined
   );
+}
+
+/**
+ * `route_json` select fragment that stays valid after the table rebuild
+ * removes the column: migration/audit readers see the honest empty route for
+ * rebuilt databases.
+ */
+function workflowRunsRouteJsonSelect(db: MomentumDb, prefix = ""): string {
+  return columnExists(db, "workflow_runs", "route_json")
+    ? `${prefix}route_json`
+    : "'{}' AS route_json";
 }
 
 function columnExists(db: MomentumDb, table: string, column: string): boolean {

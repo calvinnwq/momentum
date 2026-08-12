@@ -154,7 +154,6 @@ type WorkflowRunRow = {
   repo_path: string | null;
   objective: string | null;
   issue_scope_json: string;
-  route_json: string;
   approval_boundary: string | null;
   skill_revision: string | null;
   monitor_last_seen_state: string | null;
@@ -394,7 +393,6 @@ describe("persistWorkflowRunImport", () => {
         source: "explicit",
         status: "resolved",
       });
-      expect(runRow.route_json).toBe("{}");
       expect(
         db
           .prepare(

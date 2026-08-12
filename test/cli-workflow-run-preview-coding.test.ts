@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
 import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
-import { loadCanonicalWorkflowRunRoute } from "./support/canonical-route-state.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -214,47 +213,7 @@ describe("momentum workflow run preview-coding", () => {
     );
   });
 
-  it("previews the current GNHF/CWFP implementation engine as an explicit route choice", async () => {
-    const dataDir = makeTempDir();
-    const repoDir = makeTempDir();
-    const result = await run(
-      previewCodingArgs({
-        dataDir,
-        repoDir,
-        runId: "preview-current-engine",
-        objective: "Inspect the current fallback route",
-        extra: ["--implementation-engine", "current-gnhf-cwfp"],
-      }),
-    );
-
-    expect(result.code).toBe(0);
-    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
-    expect(payload).toMatchObject({
-      ok: true,
-      command: "workflow run preview-coding",
-      runId: "preview-current-engine",
-      implementationEngine: "current-gnhf-cwfp",
-      route: {
-        implementationEngine: "current-gnhf-cwfp",
-      },
-    });
-    expect(payload["steps"]).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          stepId: "implementation",
-          executor: "delegate-supervisor",
-          config: { tool: "gnhf" },
-        }),
-        expect.objectContaining({
-          stepId: "validate",
-          executor: "delegate-supervisor",
-          config: { tool: "no-mistakes" },
-        }),
-      ]),
-    );
-  });
-
-  it("emits structural preflight evidence for invalid route steps", async () => {
+  it("emits structural preflight evidence for invalid agent-config steps", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const result = await run(
@@ -264,7 +223,7 @@ describe("momentum workflow run preview-coding", () => {
         runId: "preview-invalid-route-steps",
         objective: "Block bad route config",
         extra: [
-          "--steps-json",
+          "--agent-config-json",
           JSON.stringify({ "tracker-refresh": { model: "opus" } }),
         ],
       }),
@@ -281,20 +240,20 @@ describe("momentum workflow run preview-coding", () => {
     });
     expect(payload["preflightEvidence"]).toEqual([
       {
-        checkId: "route.steps",
+        checkId: "workflow.agent_config",
         status: "failed",
         severity: "error",
-        path: "route.steps.tracker-refresh",
+        path: "agentConfig.tracker-refresh",
         key: "tracker-refresh",
         message:
           'Coding route step "tracker-refresh" is not configurable; supported steps: implementation, postflight, validate, merge-cleanup.',
         recommendedAction:
-          "Use route.steps only for implementation, postflight, validate, or merge-cleanup, or remove the unsupported step key.",
+          "Use --agent-config-json only for implementation, postflight, validate, or merge-cleanup, or remove the unsupported step key.",
       },
     ]);
   });
 
-  it("emits structural preflight evidence for malformed route steps before durable writes", async () => {
+  it("emits structural preflight evidence for malformed agent-config JSON before durable writes", async () => {
     const commands = [
       {
         name: "preview-coding",
@@ -303,8 +262,8 @@ describe("momentum workflow run preview-coding", () => {
             dataDir,
             repoDir,
             runId: "readiness-preview-malformed-steps",
-            objective: "Block malformed preview route config",
-            extra: ["--steps-json", "{ not json"],
+            objective: "Block malformed preview agent config",
+            extra: ["--agent-config-json", "{ not json"],
           }),
       },
       {
@@ -318,11 +277,11 @@ describe("momentum workflow run preview-coding", () => {
           "--repo",
           repoDir,
           "--objective",
-          "Block malformed start route config",
+          "Block malformed start agent config",
           "--data-dir",
           dataDir,
           "--json",
-          "--steps-json",
+          "--agent-config-json",
           "{ not json",
         ],
       },
@@ -343,67 +302,20 @@ describe("momentum workflow run preview-coding", () => {
       });
       expect(payload["preflightEvidence"], command.name).toEqual([
         {
-          checkId: "route.steps",
+          checkId: "workflow.agent_config",
           status: "failed",
           severity: "error",
-          path: "route.steps",
-          key: "steps",
-          message: "Coding route steps must be valid JSON.",
+          path: "agentConfig",
+          key: "agentConfig",
+          message: "Coding per-step agent config must be valid JSON.",
           recommendedAction:
-            "Pass --steps-json as a JSON object keyed by configurable coding steps, or remove it to use the default route.",
+            "Pass --agent-config-json as a JSON object keyed by configurable coding steps, or remove it to use the definition defaults.",
         },
       ]);
       expect(
         fs.existsSync(path.join(dataDir, "momentum.db")),
         command.name,
       ).toBe(false);
-    }
-  });
-
-  it("emits structural preflight evidence for blank route profiles", async () => {
-    const dataDir = makeTempDir();
-    const repoDir = makeTempDir();
-    const result = await run(
-      previewCodingArgs({
-        dataDir,
-        repoDir,
-        runId: "preview-invalid-profile",
-        objective: "Block blank profile",
-        extra: ["--profile", "   "],
-      }),
-    );
-
-    expect(result.code).toBe(1);
-    expect(result.stdout).toBe("");
-    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
-    expect(payload).toMatchObject({
-      ok: false,
-      command: "workflow run preview-coding",
-      code: "route_config_invalid",
-      runId: "preview-invalid-profile",
-    });
-    expect(payload["preflightEvidence"]).toEqual([
-      {
-        checkId: "route.profile",
-        status: "failed",
-        severity: "error",
-        path: "route.profile",
-        key: "profile",
-        message:
-          "Coding route profile must be a non-empty string when provided.",
-        recommendedAction:
-          "Set route.profile to a non-empty runtime/profile name, or remove --profile to use the default route.",
-      },
-    ]);
-
-    const db = openDb(dataDir);
-    try {
-      const runRow = db
-        .prepare("SELECT id FROM workflow_runs WHERE id = ?")
-        .get("preview-invalid-profile");
-      expect(runRow).toBeUndefined();
-    } finally {
-      db.close();
     }
   });
 
@@ -489,7 +401,7 @@ describe("momentum workflow run preview-coding", () => {
       repoDir,
       runId: "preview-stable",
       objective: "Stable for Discord",
-      extra: ["--profile", "live-wrapper", "--issue-scope", "NGX-509"],
+      extra: ["--issue-scope", "NGX-509"],
     });
     const first = await run(args);
     const second = await run(args);
@@ -498,7 +410,7 @@ describe("momentum workflow run preview-coding", () => {
     expect(first.stdout).toBe(second.stdout);
   });
 
-  it("surfaces the selected runtime/profile and approval boundary", async () => {
+  it("surfaces the approval boundary and on-start step states", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const result = await run(
@@ -506,13 +418,8 @@ describe("momentum workflow run preview-coding", () => {
         dataDir,
         repoDir,
         runId: "preview-profile",
-        objective: "Capture profile and boundary",
-        extra: [
-          "--profile",
-          "live-wrapper",
-          "--approval-boundary",
-          "through-implementation",
-        ],
+        objective: "Capture the approval boundary",
+        extra: ["--approval-boundary", "through-implementation"],
       }),
     );
     expect(result.code).toBe(0);
@@ -521,12 +428,9 @@ describe("momentum workflow run preview-coding", () => {
       ok: true,
       state: "approved",
       approvalBoundary: "through-implementation",
-      route: {
-        profile: "live-wrapper",
-        implementationEngine: "gnhf",
-      },
-      implementationEngine: "gnhf",
     });
+    expect(payload).not.toHaveProperty("route");
+    expect(payload).not.toHaveProperty("implementationEngine");
     const steps = payload["steps"] as Array<{ stepId: string; state: string }>;
     const stateByStep = Object.fromEntries(
       steps.map((step) => [step.stepId, step.state]),
@@ -548,21 +452,20 @@ describe("momentum workflow run preview-coding", () => {
         runId: "preview-human",
         objective: "Readable plan",
         json: false,
-        extra: ["--profile", "live-wrapper"],
       }),
     );
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("preview-human");
     expect(result.stdout).toContain("coding-workflow v3");
-    expect(result.stdout).toContain("Profile: live-wrapper");
-    expect(result.stdout).toContain("Implementation engine: gnhf");
+    expect(result.stdout).not.toContain("Profile:");
+    expect(result.stdout).not.toContain("Implementation engine:");
     expect(result.stdout).toContain("implementation");
     expect(result.stdout).toContain("delegate-supervisor");
     expect(result.stdout).toContain('config={"tool":"gnhf"}');
     expect(result.stdout).toContain("external-apply");
   });
 
-  it("surfaces per-step route selections in the human preview text (NGX-510)", async () => {
+  it("surfaces per-step agent-config selections in the human preview text", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const result = await run(
@@ -570,10 +473,10 @@ describe("momentum workflow run preview-coding", () => {
         dataDir,
         repoDir,
         runId: "preview-steps-text",
-        objective: "Audit per-step route in text",
+        objective: "Audit per-step agent config in text",
         json: false,
         extra: [
-          "--steps-json",
+          "--agent-config-json",
           JSON.stringify({
             implementation: { harness: "gnhf", model: "opus" },
             "merge-cleanup": { effort: "low" },
@@ -582,9 +485,8 @@ describe("momentum workflow run preview-coding", () => {
       }),
     );
     expect(result.code).toBe(0);
-    // The run-level profile line stays, and the per-step selections are now
-    // auditable in the default (non-JSON) preview alongside it.
-    expect(result.stdout).toContain("Per-step route:");
+    // The per-step selections are auditable in the default (non-JSON) preview.
+    expect(result.stdout).toContain("Per-step agent config:");
     expect(result.stdout).toContain(
       "implementation: harness=gnhf, model=opus, effort=(default)",
     );
@@ -597,7 +499,7 @@ describe("momentum workflow run preview-coding", () => {
     );
   });
 
-  it("surfaces per-step route overrides in the preview route (NGX-510)", async () => {
+  it("surfaces per-step agent-config overrides on the preview steps", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const result = await run(
@@ -605,9 +507,9 @@ describe("momentum workflow run preview-coding", () => {
         dataDir,
         repoDir,
         runId: "preview-steps",
-        objective: "Preview reconfigured per-step route",
+        objective: "Preview reconfigured per-step agent config",
         extra: [
-          "--steps-json",
+          "--agent-config-json",
           JSON.stringify({
             "merge-cleanup": { effort: "low" },
             implementation: { harness: "gnhf", model: "opus" },
@@ -621,13 +523,8 @@ describe("momentum workflow run preview-coding", () => {
       ok: true,
       command: "workflow run preview-coding",
       preview: true,
-      route: {
-        steps: {
-          implementation: { harness: "gnhf", model: "opus" },
-          "merge-cleanup": { effort: "low" },
-        },
-      },
     });
+    expect(payload).not.toHaveProperty("route");
     const steps = payload["steps"] as Array<{
       stepId: string;
       agentConfig?: Record<string, string>;
@@ -637,6 +534,11 @@ describe("momentum workflow run preview-coding", () => {
     ).toMatchObject({
       agentConfig: { harness: "gnhf", model: "opus" },
     });
+    expect(steps.find((step) => step.stepId === "merge-cleanup")).toMatchObject(
+      {
+        agentConfig: { effort: "low" },
+      },
+    );
 
     // A preview still writes nothing durable.
     const db = openDb(dataDir);
@@ -661,7 +563,7 @@ describe("momentum workflow run preview-coding", () => {
         objective: "Preview exact model strings",
         json: false,
         extra: [
-          "--steps-json",
+          "--agent-config-json",
           JSON.stringify({
             implementation: {
               harness: "claude",
@@ -702,7 +604,7 @@ describe("momentum workflow run preview-coding", () => {
         runId: "preview-model-alias-json",
         objective: "Preview exact model strings",
         extra: [
-          "--steps-json",
+          "--agent-config-json",
           JSON.stringify({
             implementation: {
               harness: "claude",
@@ -724,29 +626,25 @@ describe("momentum workflow run preview-coding", () => {
     );
     expect(jsonResult.code).toBe(0);
     const payload = JSON.parse(jsonResult.stdout) as Record<string, unknown>;
-    expect(payload).toMatchObject({
-      route: {
-        steps: {
-          implementation: {
-            harness: "claude",
-            model: "claude-sonnet-4-6",
-            effort: "high",
-          },
-          postflight: {
-            harness: "opencode",
-            model: "opencode-go/glm-5.2",
-          },
-          validate: {
-            harness: "codex",
-            model: "gpt-5.5",
-            effort: "high",
-          },
-        },
+    const aliasSteps = payload["steps"] as Array<{
+      stepId: string;
+      agentConfig?: Record<string, string>;
+    }>;
+    const aliasByStep = Object.fromEntries(
+      aliasSteps.map((step) => [step.stepId, step.agentConfig]),
+    );
+    expect(aliasByStep).toMatchObject({
+      implementation: {
+        harness: "claude",
+        model: "claude-sonnet-4-6",
+        effort: "high",
       },
+      postflight: { harness: "opencode", model: "opencode-go/glm-5.2" },
+      validate: { harness: "codex", model: "gpt-5.5", effort: "high" },
     });
   });
 
-  it("fails closed on a misconfigured --steps-json before previewing (NGX-510)", async () => {
+  it("fails closed on a misconfigured --agent-config-json before previewing", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const result = await run(
@@ -756,7 +654,7 @@ describe("momentum workflow run preview-coding", () => {
         runId: "preview-bad-steps",
         objective: "Reject unsupported step",
         extra: [
-          "--steps-json",
+          "--agent-config-json",
           JSON.stringify({ preflight: { model: "opus" } }),
         ],
       }),
@@ -815,13 +713,11 @@ describe("momentum workflow run preview-coding", () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const sharedExtra = [
-      "--profile",
-      "live-wrapper",
       "--issue-scope",
       "NGX-509",
       "--approval-boundary",
       "through-implementation",
-      "--steps-json",
+      "--agent-config-json",
       JSON.stringify({
         implementation: {
           harness: "codex",
@@ -878,14 +774,13 @@ describe("momentum workflow run preview-coding", () => {
       const runRow = db
         .prepare(
           `SELECT workflow_definition_key, workflow_definition_version,
-                  approval_boundary, route_json
+                  approval_boundary
              FROM workflow_runs WHERE id = ?`,
         )
         .get("preview-equiv") as {
         workflow_definition_key: string;
         workflow_definition_version: number;
         approval_boundary: string | null;
-        route_json: string;
       };
       expect(runRow.workflow_definition_key).toBe(
         previewPayload["definitionKey"],
@@ -894,9 +789,6 @@ describe("momentum workflow run preview-coding", () => {
         previewPayload["definitionVersion"],
       );
       expect(runRow.approval_boundary).toBe(previewPayload["approvalBoundary"]);
-      expect(loadCanonicalWorkflowRunRoute(db, "preview-equiv")).toEqual(
-        previewPayload["route"],
-      );
 
       const persistedSteps = db
         .prepare(
@@ -955,13 +847,11 @@ describe("momentum workflow run preview-coding", () => {
       postflight: { harness: "opencode", model: "glm-5.2" },
     });
     const sharedExtra = [
-      "--profile",
-      "ngx-575-dogfood-live-wrapper",
       "--issue-scope",
       "NGX-575",
       "--approval-boundary",
       "through-implementation",
-      "--steps-json",
+      "--agent-config-json",
       stepsJson,
     ];
 
@@ -991,17 +881,18 @@ describe("momentum workflow run preview-coding", () => {
       state: "approved",
       approvalBoundary: "through-implementation",
       issueScope: { identifier: "NGX-575" },
-      route: {
-        profile: "ngx-575-dogfood-live-wrapper",
-        steps: {
-          implementation: {
-            harness: "codex",
-            model: "gpt-5.5",
-            effort: "high",
-          },
-          postflight: { harness: "opencode", model: "opencode-go/glm-5.2" },
-        },
-      },
+    });
+    const readinessAgentConfigs = Object.fromEntries(
+      (
+        previewPayload["steps"] as Array<{
+          stepId: string;
+          agentConfig?: Record<string, string>;
+        }>
+      ).map((step) => [step.stepId, step.agentConfig]),
+    );
+    expect(readinessAgentConfigs).toMatchObject({
+      implementation: { harness: "codex", model: "gpt-5.5", effort: "high" },
+      postflight: { harness: "opencode", model: "opencode-go/glm-5.2" },
     });
     expect(
       Object.fromEntries(previewSteps.map((step) => [step.stepId, step.state])),
@@ -1041,21 +932,34 @@ describe("momentum workflow run preview-coding", () => {
     try {
       const runRow = db
         .prepare(
-          `SELECT approval_boundary, issue_scope_json, route_json
+          `SELECT approval_boundary, issue_scope_json
              FROM workflow_runs WHERE id = ?`,
         )
         .get(runId) as {
         approval_boundary: string | null;
         issue_scope_json: string;
-        route_json: string;
       };
       expect(runRow.approval_boundary).toBe("through-implementation");
       expect(JSON.parse(runRow.issue_scope_json)).toEqual({
         identifier: "NGX-575",
       });
-      expect(loadCanonicalWorkflowRunRoute(db, runId)).toEqual(
-        previewPayload["route"],
-      );
+      const persistedAgentConfigs = db
+        .prepare(
+          `SELECT step_id, agent_config_json
+             FROM workflow_steps WHERE run_id = ? ORDER BY step_order`,
+        )
+        .all(runId) as Array<{ step_id: string; agent_config_json: string }>;
+      expect(
+        Object.fromEntries(
+          persistedAgentConfigs.map((step) => [
+            step.step_id,
+            JSON.parse(step.agent_config_json),
+          ]),
+        ),
+      ).toMatchObject({
+        implementation: { harness: "codex", model: "gpt-5.5", effort: "high" },
+        postflight: { harness: "opencode", model: "opencode-go/glm-5.2" },
+      });
 
       const persistedStepStates = db
         .prepare(
