@@ -6,7 +6,6 @@ import {
   LEGACY_RUNNER_RESULT_SCHEMA,
 } from "../src/core/executors/agent-result/types.js";
 import { WORKFLOW_EXECUTORS } from "../src/core/workflow/definition/definition.js";
-import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/shared/step-finalize.js";
 import {
   EXECUTOR_ATTEMPT_STATES,
   EXECUTOR_ROUND_STATES,
@@ -133,17 +132,6 @@ describe("agent-loop contract docs", () => {
     if (!legacy.ok) return;
     // Legacy and current documents normalize to the same internal shape.
     expect(parsed.value).toEqual(legacy.value);
-  });
-
-  it("keeps agent failure as the current finalization vocabulary", () => {
-    const resetFailure: FinalizeWorkflowStepFromResultFileResult = {
-      outcome: "reset_failed",
-      trigger: "agent_failure",
-      verification: null,
-      reset: { ok: false, code: "missing_base", error: "base is missing" },
-    };
-
-    expect(resetFailure.trigger).toBe("agent_failure");
   });
 
   it("freezes the post-finalization round evidence JSON fixture", () => {

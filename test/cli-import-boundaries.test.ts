@@ -37,9 +37,10 @@ type RootSrcException = {
 };
 
 // Every ARCH-02..ARCH-06 transitional root module has now been drained into its
-// owned taxonomy home; NGX-450 moved the final one (src/runner-result.ts) into
-// src/core/executors/runner/types.ts (shapes) and src/core/executors/runner/result.ts
-// (parsing). This stays declared rather than deleted so a future migration slice
+// owned taxonomy home; the final result module lives under
+// src/core/executors/agent-result/types.ts (shapes) and
+// src/core/executors/agent-result/result.ts (parsing). This stays declared
+// rather than deleted so a future migration slice
 // can re-add a named entry with owner issue, target home, and removal reason if
 // root migration debt ever becomes unavoidable again.
 const TRANSITIONAL_ROOT_SRC_EXCEPTIONS: Record<string, RootSrcException> = {};
@@ -385,13 +386,15 @@ describe("M11 CLI import boundaries", () => {
   });
 
   it("classifies core source modules as renderer runtime boundaries", () => {
-    // The runner-result shapes/parsing drained into src/core/executors (NGX-450);
+    // The agent-result shapes/parsing live under src/core/executors;
     // its owned core home classifies as a renderer runtime boundary.
     expect(
-      isPersistenceOrMutationModule("src/core/executors/runner/types.ts"),
+      isPersistenceOrMutationModule("src/core/executors/agent-result/types.ts"),
     ).toBe(true);
     expect(
-      isPersistenceOrMutationModule("src/core/executors/runner/result.ts"),
+      isPersistenceOrMutationModule(
+        "src/core/executors/agent-result/result.ts",
+      ),
     ).toBe(true);
     // Owned core/domain homes (post NGX-449/NGX-450) classify as renderer runtime boundaries.
     expect(isPersistenceOrMutationModule("src/core/daemon/status.ts")).toBe(

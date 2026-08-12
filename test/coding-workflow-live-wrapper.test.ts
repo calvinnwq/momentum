@@ -2209,6 +2209,12 @@ describe("runCodingWorkflowLiveWrapper", () => {
     const result = readResult(resultPath);
     expect(result.success).toBe(true);
     expect(result.key_changes_made).toEqual(["Verified repo path."]);
+    const rawResult = JSON.parse(fs.readFileSync(resultPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(rawResult.objective_complete).toBe(false);
+    expect(rawResult).not.toHaveProperty("goal_complete");
   });
 
   it("forwards selected route fields to the configured child command", () => {
