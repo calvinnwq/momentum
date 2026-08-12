@@ -34,7 +34,7 @@ import {
   type SingleShotRoundArtifacts,
   type SingleShotRoundSelection,
 } from "../src/core/executors/single-shot/executor.js";
-import type { RunnerResult } from "../src/core/executors/runner/types.js";
+import type { AgentResult } from "../src/core/executors/agent-result/types.js";
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);
@@ -789,7 +789,7 @@ describe("planSingleShotRoundArtifacts", () => {
   });
 
   it("projects a agent-once round's result-file document as a result_document artifact", () => {
-    // The agent-once executor produces a normalized result document (a RunnerResult
+    // The agent-once executor produces a normalized result document (a AgentResult
     // file); it is the durable result-file evidence the round captured.
     const records = planSingleShotRoundArtifacts({
       roundId: "round-0",
@@ -935,13 +935,13 @@ describe("planSingleShotRoundCheckpoints", () => {
 });
 
 describe("planSingleShotRoundPersistence", () => {
-  const oneShotResult: RunnerResult = {
+  const oneShotResult: AgentResult = {
     success: true,
     summary: "ran the agent-once review pass",
     key_changes_made: ["approved the bounded change"],
     key_learnings: [],
     remaining_work: [],
-    goal_complete: true,
+    objective_complete: true,
     commit: {
       type: "chore",
       scope: "single-shot",

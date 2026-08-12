@@ -13,7 +13,7 @@
  * Both executors share the same control shape: one {@link ExecutorAttemptRecord} with
  * exactly one {@link ExecutorRound}, no continue-loop and no round budget (a
  * retry is a fresh `attempt`, never a `continue`). They differ only in their
- * *mechanism* — `agent-once` requires a normalized {@link RunnerResult} document
+ * *mechanism* — `agent-once` requires a normalized {@link AgentResult} document
  * (an agent/review pass) while `script` is exit-code based (a deterministic local
  * command) — which the mechanism / orchestrator twins layer on top, the same way
  * `agent-loop/mechanism.ts` / `agent-loop/orchestrator.ts` layer on
@@ -75,7 +75,7 @@ import type {
 } from "../loop/reducer.js";
 import type { ExecutorRoundUpdate } from "../loop/persist.js";
 import { LIVE_STEP_WRAPPER_RECOVERY_CODES } from "../../../adapters/live-step-wrapper.js";
-import type { RunnerResult } from "../runner/types.js";
+import type { AgentResult } from "../agent-result/types.js";
 
 /**
  * The executors this adapter serves: the single-attempt executors from
@@ -666,7 +666,7 @@ export type SingleShotArtifactPointer = {
  * contract artifact class *except* `logs` — the orchestrator derives those from the
  * round-start record's frozen `logPaths`, which it already owns. The two single-shot
  * executors differ in which slots they populate but share this one shape: the
- * `agent-once` executor captures a normalized result document (a {@link RunnerResult}
+ * `agent-once` executor captures a normalized result document (a {@link AgentResult}
  * file), so it fills `resultDocument`; the `script` executor is exit-code based with
  * bounded logs and no required result file, so it typically leaves `resultDocument`
  * (and `checkpointStream`) absent and carries its evidence in `logs` and
@@ -914,7 +914,7 @@ const COMMIT_SHA_RE = /^[0-9a-f]{40}$/;
 /**
  * The inputs to {@link planSingleShotRoundPersistence}: the normalized
  * {@link SingleShotAttemptOutcome} the bounded mechanism reported, the agent-once
- * executor's captured {@link RunnerResult} (omitted for the exit-code-based `script`
+ * executor's captured {@link AgentResult} (omitted for the exit-code-based `script`
  * executor and for any non-success outcome), the captured result's content digest,
  * and the verification / commit {@link SingleShotRoundEvidence} for the terminal
  * patch.
@@ -928,7 +928,7 @@ export type PlanSingleShotRoundPersistenceInput = {
    * meaningful on a successful outcome — a result alongside a failure is ignored,
    * since a failed round records no capture.
    */
-  result?: RunnerResult | null;
+  result?: AgentResult | null;
   /**
    * The content digest of the captured result document (the round-schema
    * `result_digest` reattach fingerprint), or omitted / `null` when the round

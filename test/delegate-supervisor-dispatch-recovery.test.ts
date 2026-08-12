@@ -70,7 +70,7 @@ test ! -f "$count_file" || count=$(cat "$count_file")
 printf '%s\n' "$((count + 1))" > "$count_file"
 printf '%s\n' "$MOMENTUM_STEP_ID" > "$MOMENTUM_REPO_PATH/$MOMENTUM_STEP_ID.txt"
 cat > "$MOMENTUM_RESULT_PATH" <<JSON
-{"success":true,"summary":"$MOMENTUM_STEP_ID completed","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"complete $MOMENTUM_STEP_ID","body":"","breaking":false}}
+{"success":true,"summary":"$MOMENTUM_STEP_ID completed","key_changes_made":[],"key_learnings":[],"remaining_work":[],"objective_complete":false,"commit":{"type":"test","subject":"complete $MOMENTUM_STEP_ID","body":"","breaking":false}}
 JSON`;
   fs.writeFileSync(
     profilePath,
@@ -164,7 +164,7 @@ ${launchDelaySec > 0 ? `/bin/sleep ${launchDelaySec}` : ""}
 ${launchMutation}
 ${launchOutput}
 cat > "$MOMENTUM_RESULT_PATH" <<JSON
-{"success":true,"summary":"no-mistakes launched","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"launch no-mistakes","body":"","breaking":false}}
+{"success":true,"summary":"no-mistakes launched","key_changes_made":[],"key_learnings":[],"remaining_work":[],"objective_complete":false,"commit":{"type":"test","subject":"launch no-mistakes","body":"","breaking":false}}
 JSON`;
   const profilePath = path.join(profileDir, "profile.json");
   fs.writeFileSync(
@@ -359,7 +359,7 @@ describe(
         key_changes_made: ["updated README"],
         key_learnings: [],
         remaining_work: [],
-        goal_complete: false,
+        objective_complete: false,
         commit: {
           type: "test",
           subject: "must not commit contradictory result",
@@ -483,7 +483,7 @@ describe(
               key_changes_made: ["updated README"],
               key_learnings: [],
               remaining_work: [],
-              goal_complete: false,
+              objective_complete: false,
               commit: {
                 type: "test",
                 subject: "must not commit replacement",
@@ -552,7 +552,7 @@ describe(
         key_changes_made: ["updated README"],
         key_learnings: [],
         remaining_work: [],
-        goal_complete: false,
+        objective_complete: false,
         commit: { type: "test", subject: "complete handoff" },
       });
       fs.writeFileSync(resultJsonPath, resultContent);
@@ -865,7 +865,7 @@ describe(
               key_changes_made: [],
               key_learnings: [],
               remaining_work: [],
-              goal_complete: false,
+              objective_complete: false,
               commit: {
                 type: "test",
                 subject: "failed generic handoff",
@@ -973,7 +973,7 @@ describe(
               key_changes_made: [],
               key_learnings: [],
               remaining_work: [],
-              goal_complete: false,
+              objective_complete: false,
               commit: {
                 type: "test",
                 subject: "must not commit replacement",
@@ -1061,7 +1061,7 @@ describe(
               key_changes_made: [],
               key_learnings: [],
               remaining_work: [],
-              goal_complete: false,
+              objective_complete: false,
               commit: {
                 type: "test",
                 subject: "preserve staged-only work",
@@ -1130,7 +1130,7 @@ describe(
           key_changes_made: [],
           key_learnings: [],
           remaining_work: [],
-          goal_complete: false,
+          objective_complete: false,
           commit: {
             type: "test",
             subject: "failed interrupted handoff",
@@ -1255,7 +1255,7 @@ describe(
         key_changes_made: ["updated README"],
         key_learnings: [],
         remaining_work: [],
-        goal_complete: false,
+        objective_complete: false,
         commit: {
           type: "test",
           subject: "complete prepared handoff",
@@ -1366,7 +1366,7 @@ describe(
         key_changes_made: ["updated README"],
         key_learnings: [],
         remaining_work: [],
-        goal_complete: false,
+        objective_complete: false,
         commit: {
           type: "test",
           subject: "complete prepared no-mistakes handoff",
@@ -1485,7 +1485,7 @@ describe(
           key_changes_made: ["updated README"],
           key_learnings: [],
           remaining_work: [],
-          goal_complete: false,
+          objective_complete: false,
           commit: {
             type: "test",
             subject: `complete ${label}`,
@@ -1665,7 +1665,7 @@ printf 'run:\n  id: "${externalRunId}"\n  branch: ${branch}\n  status: running\n
         key_changes_made: ["updated README"],
         key_learnings: [],
         remaining_work: [],
-        goal_complete: false,
+        objective_complete: false,
         commit: {
           type: "test",
           subject: "recover generic result",
@@ -1902,7 +1902,7 @@ printf 'run:\n  id: "nm-run-clean"\n  branch: ${branch}\n  status: completed\n  
                 key_changes_made: [],
                 key_learnings: [],
                 remaining_work: [],
-                goal_complete: false,
+                objective_complete: false,
                 commit: {
                   type: "test",
                   subject: "launch no-mistakes",
@@ -2045,7 +2045,7 @@ printf 'run:\n  id: "nm-run-changed-verification"\n  branch: ${branch}\n  status
               key_changes_made: [],
               key_learnings: [],
               remaining_work: [],
-              goal_complete: false,
+              objective_complete: false,
               commit: {
                 type: "test",
                 subject: "complete no-change handoff",
@@ -2181,7 +2181,7 @@ printf 'run:\n  id: "${identity.externalRunId}"\n  branch: ${branch}\n  status: 
         key_changes_made: [],
         key_learnings: [],
         remaining_work: [],
-        goal_complete: false,
+        objective_complete: false,
         commit: {
           type: "test",
           subject: "retry local finalization",
@@ -2366,7 +2366,7 @@ fi
                 key_changes_made: [],
                 key_learnings: [],
                 remaining_work: [],
-                goal_complete: false,
+                objective_complete: false,
                 commit: {
                   type: "test",
                   subject: "retry no-mistakes",
@@ -2450,7 +2450,7 @@ fi
           key_changes_made: [],
           key_learnings: [],
           remaining_work: [],
-          goal_complete: false,
+          objective_complete: false,
           commit: {
             type: "test",
             subject: "complete no-mistakes",
@@ -2584,7 +2584,7 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
           key_changes_made: ["changed tracked.txt"],
           key_learnings: [],
           remaining_work: [],
-          goal_complete: false,
+          objective_complete: false,
           commit: {
             type: "test",
             subject: "complete no-mistakes",

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { parseRunnerResult } from "../src/core/executors/runner/result.js";
+import { parseAgentResult } from "../src/core/executors/agent-result/result.js";
+import {
+  AGENT_RESULT_SCHEMA,
+  LEGACY_RUNNER_RESULT_SCHEMA,
+} from "../src/core/executors/agent-result/types.js";
 import { WORKFLOW_EXECUTORS } from "../src/core/workflow/definition/definition.js";
 import {
   EXECUTOR_ATTEMPT_STATES,
@@ -60,21 +64,26 @@ describe("agent-loop contract docs", () => {
     );
   });
 
-  it("freezes the shipped runner result JSON fixture", () => {
+  it("keeps the frozen legacy goal_complete result fixture readable through the version-aware legacy reader", () => {
     const raw = readRepoFile(
       "test/fixtures/native-goal-loop-runner-result.json",
     );
-    const parsed = parseRunnerResult(raw);
+    // The fixture is immutable history: it must keep its raw `goal_complete`
+    // field on disk and still normalize through the explicit legacy reader.
+    expect(raw).toContain('"goal_complete": false');
+    expect(raw).not.toContain("objective_complete");
+    const parsed = parseAgentResult(raw);
 
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
+    expect(parsed.schema).toBe(LEGACY_RUNNER_RESULT_SCHEMA);
     expect(parsed.value).toMatchObject({
       success: true,
       key_changes_made: [
         "Added the native agent-loop runner result fixture.",
         "Recorded durable evidence pointers for the round.",
       ],
-      goal_complete: false,
+      objective_complete: false,
       commit: {
         type: "feat",
         scope: "agent-loop",
@@ -85,7 +94,7 @@ describe("agent-loop contract docs", () => {
     const withoutOptionalArrays = JSON.parse(raw) as Record<string, unknown>;
     delete withoutOptionalArrays.key_learnings;
     delete withoutOptionalArrays.remaining_work;
-    const parsedWithoutOptionalArrays = parseRunnerResult(
+    const parsedWithoutOptionalArrays = parseAgentResult(
       JSON.stringify(withoutOptionalArrays),
     );
 
@@ -94,11 +103,44 @@ describe("agent-loop contract docs", () => {
     expect(parsedWithoutOptionalArrays.value.key_learnings).toEqual([]);
     expect(parsedWithoutOptionalArrays.value.remaining_work).toEqual([]);
     expect(spec).toContain(
-      "The runner-authored result document consumed by the shipped agent-loop mechanism remains the normalized `RunnerResult` schema",
+      "The agent-authored result document consumed by the shipped agent-loop mechanism uses the normalized `AgentResult` schema (`momentum.agent-result.v1`)",
     );
     expect(spec).toContain(
-      "`key_learnings` and `remaining_work` are optional runner-authored arrays that default to empty arrays when omitted.",
+      "`key_learnings` and `remaining_work` are optional agent-authored arrays that default to empty arrays when omitted.",
     );
+  });
+
+  it("fails closed when a result document carries both completion fields", () => {
+    const raw = readRepoFile(
+      "test/fixtures/native-goal-loop-runner-result.json",
+    );
+    const mixed = JSON.parse(raw) as Record<string, unknown>;
+    mixed.objective_complete = mixed.goal_complete;
+    const parsed = parseAgentResult(JSON.stringify(mixed));
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.error).toMatch(/ambiguous/i);
+    expect(spec).toContain(
+      "A raw result document carrying both `goal_complete` and `objective_complete` fails closed as ambiguous",
+    );
+  });
+
+  it("parses current agent result documents under the named current schema", () => {
+    const raw = readRepoFile(
+      "test/fixtures/native-goal-loop-runner-result.json",
+    );
+    const current = JSON.parse(raw) as Record<string, unknown>;
+    current.objective_complete = current.goal_complete;
+    delete current.goal_complete;
+    const parsed = parseAgentResult(JSON.stringify(current));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.schema).toBe(AGENT_RESULT_SCHEMA);
+    const legacy = parseAgentResult(raw);
+    expect(legacy.ok).toBe(true);
+    if (!legacy.ok) return;
+    // Legacy and current documents normalize to the same internal shape.
+    expect(parsed.value).toEqual(legacy.value);
   });
 
   it("freezes the post-finalization round evidence JSON fixture", () => {

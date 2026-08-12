@@ -96,7 +96,7 @@ import {
   type PlanGoalLoopRoundStartInput,
 } from "./executor.js";
 import type { FinalizeWorkflowStepFromResultFileResult } from "../shared/step-finalize.js";
-import type { RunnerResult } from "../runner/types.js";
+import type { AgentResult } from "../agent-result/types.js";
 
 /**
  * The output of one bounded mechanism run: the normalized runner result (or
@@ -105,7 +105,7 @@ import type { RunnerResult } from "../runner/types.js";
  * consumes, so the mechanism stays decoupled from the durable schema.
  */
 export type GoalLoopRoundMechanismResult = {
-  result: RunnerResult | null;
+  result: AgentResult | null;
   finalize: FinalizeWorkflowStepFromResultFileResult;
   /**
    * The content digest of the captured result document (the round-schema

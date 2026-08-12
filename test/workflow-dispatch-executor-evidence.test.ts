@@ -157,7 +157,7 @@ function failedResult(): WorkflowStepExecutorDispatchResult {
       artifacts: [{ kind: "executor-log", path: EXECUTOR_LOG }],
       resultDigest: null,
       errorCode: "command_failed",
-      errorMessage: "live step runner reported success=false",
+      errorMessage: "live step agent reported success=false",
       retryHint: null,
       recoveryHint: null,
     },

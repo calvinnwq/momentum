@@ -87,7 +87,7 @@ function initGitRepo(repoPath: string): void {
 function writeLegacyRouteProfile(profileDir: string): string {
   const profilePath = path.join(profileDir, "legacy-route-profile.json");
   const script = `cat > "$MOMENTUM_RESULT_PATH" <<JSON
-{"success":true,"summary":"$MOMENTUM_AGENT_PROVIDER|$MOMENTUM_MODEL|$MOMENTUM_EFFORT","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"legacy route selection","body":"","breaking":false}}
+{"success":true,"summary":"$MOMENTUM_AGENT_PROVIDER|$MOMENTUM_MODEL|$MOMENTUM_EFFORT","key_changes_made":[],"key_learnings":[],"remaining_work":[],"objective_complete":false,"commit":{"type":"test","subject":"legacy route selection","body":"","breaking":false}}
 JSON`;
   fs.writeFileSync(
     profilePath,

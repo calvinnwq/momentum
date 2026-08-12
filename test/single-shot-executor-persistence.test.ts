@@ -11,7 +11,7 @@ import {
   updateExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import type { ExecutorAttemptRecord } from "../src/core/executors/loop/reducer.js";
-import type { RunnerResult } from "../src/core/executors/runner/types.js";
+import type { AgentResult } from "../src/core/executors/agent-result/types.js";
 import {
   planSingleShotRoundPersistence,
   planSingleShotRoundStart,
@@ -112,13 +112,13 @@ function startRound(
   insertExecutorRound(db, record, { now: 1_000 });
 }
 
-const ONE_SHOT_RESULT: RunnerResult = {
+const ONE_SHOT_RESULT: AgentResult = {
   success: true,
   summary: "ran the agent-once review pass",
   key_changes_made: ["approved the bounded change"],
   key_learnings: [],
   remaining_work: [],
-  goal_complete: true,
+  objective_complete: true,
   commit: {
     type: "chore",
     scope: "single-shot",

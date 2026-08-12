@@ -260,7 +260,7 @@ executors have no default iteration cap: requirements are the stop condition;
 only an explicitly configured cap may raise the durable `quota_exhausted` gate.
 The single-shot lifecycle runtime-normalizes the complete runner-adapter return before artifact writes, result observations, or completion checkpoints.
 Malformed JavaScript or casted returns are rejected with only the atomically materialized attempt, running round, and dispatch-binding checkpoint left for recovery.
-Successful `agent-once` turns require a successful normalized `RunnerResult`, while `script` turns are exit-code based and cannot return result-document evidence.
+Successful `agent-once` turns require a successful normalized `AgentResult`, while `script` turns are exit-code based and cannot return result-document evidence.
 
 If the anchor cannot confirm termination, the ownership-checked POSIX fallback
 receives its own bounded cleanup budget. The fallback budget starts only
@@ -284,11 +284,11 @@ Detected escaped descendants, lost ownership visibility, or any other inability
 to prove cleanup fails closed with `SUPERVISOR_FAILED` and preserves the durable
 in-flight state for recovery.
 
-The dependency-free `RunnerResult` shapes in
-`src/core/executors/runner/types.ts` and parser/normalizers in
-`src/core/executors/runner/result.ts` are official SDK contract surface. Runner
-and process adapters may import them at runtime without acquiring persistence or
-daemon ownership.
+The dependency-free `AgentResult` shapes in
+`src/core/executors/agent-result/types.ts` and parser/normalizers in
+`src/core/executors/agent-result/result.ts` are official SDK contract surface.
+Runner and process adapters may import them at runtime without acquiring
+persistence or daemon ownership.
 
 ## Agent-Loop Contract
 
@@ -305,18 +305,21 @@ Round states are `pending`, `running`, `capturing_result`, `finalizing`, `mirror
 `manual_recovery_required` carries stale, recovered, invalid, and unsafe-resume cases through recovery codes and durable evidence instead of adding non-repo state names.
 Stale in-flight work is detected from Momentum-owned leases and heartbeat/checkpoint age, then converted to durable recovery evidence before any continuation starts.
 
-The runner-authored result document consumed by the shipped agent-loop mechanism remains the normalized `RunnerResult` schema.
-Before a native round hands control to a runner, Momentum renders a deterministic per-round prompt from the workflow objective, issue scope/source context, round identity, repo/base HEAD context, verification and acceptance requirements, prior round evidence, and the configured result path.
+The agent-authored result document consumed by the shipped agent-loop mechanism uses the normalized `AgentResult` schema (`momentum.agent-result.v1`).
+Raw result documents carry no `schema` field: the prompt contract names only the completion field, so the document version is discriminated by which completion field is present.
+Historical immutable `momentum.runner-result.v1` documents whose completion field is `goal_complete` remain readable through the explicit version-aware legacy reader, are never rewritten, and normalize to the same internal completion recommendation as current documents.
+A raw result document carrying both `goal_complete` and `objective_complete` fails closed as ambiguous, even when the values agree; the daemon remains the final classifier.
+Before a native round hands control to an agent, Momentum renders a deterministic per-round prompt from the workflow objective, issue scope/source context, round identity, repo/base HEAD context, verification and acceptance requirements, prior round evidence, and the configured result path.
 Source context and prior-round evidence are rendered as quoted untrusted JSON context, not executable instructions.
-The prompted result-file mechanism clears any stale result file, writes that prompt as a runner input artifact, lets the runner author the configured result document, then reuses the existing result-file finalization bridge for parsing, verification, commit/reset, and recovery classification.
-Runner-authored results are parsed before finalization and classification, and their required fields are `success`, `summary`, `key_changes_made`, `goal_complete`, and `commit`.
-`key_learnings` and `remaining_work` are optional runner-authored arrays that default to empty arrays when omitted.
+The prompted result-file mechanism clears any stale result file, writes that prompt as an agent input artifact, lets the agent author the configured result document, then reuses the existing result-file finalization bridge for parsing, verification, commit/reset, and recovery classification.
+Agent-authored results are parsed before finalization and classification, and their required fields are `success`, `summary`, `key_changes_made`, `objective_complete`, and `commit`.
+`key_learnings` and `remaining_work` are optional agent-authored arrays that default to empty arrays when omitted.
 The `commit` object supplies the commit intent that Momentum uses only after repository safety and verification have passed.
 Inside `commit`, `type` and `subject` are required; `scope`, `body`, and `breaking` are optional intent fields.
 
-After finalization, Momentum projects the captured runner result plus durable round evidence into the native round evidence view consumed by `workflow run logs`.
+After finalization, Momentum projects the captured agent result plus durable round evidence into the native round evidence view consumed by `workflow run logs`.
 Future status, handoff, monitor, and GUI surfaces must use the same projection once they are wired to executor round evidence instead of scraping terminal text or runner-owned directories.
-The canonical `momentum.native-agent-loop.round-result.v1` fixture is a post-finalization evidence projection, not a runner-authored input document.
+The canonical `momentum.native-agent-loop.round-result.v1` fixture is a post-finalization evidence projection, not an agent-authored input document.
 The retained `momentum.native-goal-loop.round-result.v1` fixture remains readable only for frozen legacy artifacts and is not emitted for current canonical rounds.
 Its required JSON fields are `schema`, `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `daemonClassification`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`.
 `completionRecommendation` is the executor's recommendation only: `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
@@ -357,7 +360,7 @@ Every dispatched step must produce normalized result evidence or mirrored
 external state before final classification. Process handles, hook events,
 sockets, and file watchers are fast-path hints, not authoritative state.
 For ordinary live-wrapper-owned dispatched steps, successful wrapper evidence is
-not terminal by itself: Momentum reads the runner result, verifies, commits or
+not terminal by itself: Momentum reads the agent result, verifies, commits or
 resets against the captured base HEAD, and only then records terminal executor
 evidence for reconciliation.
 For binding-backed delegate-supervisor steps, that same finalization produces

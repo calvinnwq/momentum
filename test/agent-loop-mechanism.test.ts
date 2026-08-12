@@ -24,8 +24,8 @@ import {
 import { runGoalLoopRound } from "../src/core/executors/agent-loop/orchestrator.js";
 import type {
   CommitIntent,
-  RunnerResult,
-} from "../src/core/executors/runner/types.js";
+  AgentResult,
+} from "../src/core/executors/agent-result/types.js";
 
 // Proves the agent-loop round *mechanism* bridge reuses the shared goal /
 // iteration safety (the `finalizeWorkflowStepFromResultFile` verify -> commit /
@@ -95,14 +95,14 @@ function baseIntent(overrides: Partial<CommitIntent> = {}): CommitIntent {
   };
 }
 
-function baseRunnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
+function baseAgentResult(overrides: Partial<AgentResult> = {}): AgentResult {
   return {
     success: true,
     summary: "round finished",
     key_changes_made: ["wrote round-edit.txt"],
     key_learnings: [],
     remaining_work: [],
-    goal_complete: false,
+    objective_complete: false,
     commit: baseIntent(),
     ...overrides,
   };
@@ -158,7 +158,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
   it("commits and returns the normalized result + result/verification artifacts on a verified success", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true })),
+      JSON.stringify(baseAgentResult({ objective_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -173,7 +173,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
 
     expect(mechanism.finalize.outcome).toBe("committed");
     expect(mechanism.result).not.toBeNull();
-    expect(mechanism.result?.goal_complete).toBe(true);
+    expect(mechanism.result?.objective_complete).toBe(true);
     expect(mechanism.result?.summary).toBe("round finished");
     // The bridge reports the result document + verification log pointers it owns.
     expect(mechanism.artifacts?.resultDocument?.path).toBe(resultFilePath);
@@ -187,7 +187,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
   it("reports the committed change set on a verified success", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true })),
+      JSON.stringify(baseAgentResult({ objective_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -208,7 +208,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
   it("writes commit/reset evidence with stable commit metadata for a verified success", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true })),
+      JSON.stringify(baseAgentResult({ objective_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -243,7 +243,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
   it("records reset failure details when commit cleanup reset fails", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     installCommitFailingHook(repoPath);
-    const resultFilePath = writeResultFile(JSON.stringify(baseRunnerResult()));
+    const resultFilePath = writeResultFile(JSON.stringify(baseAgentResult()));
     const verificationLogPath = makeVerificationLogPath();
 
     const mechanism = goalLoopRoundMechanismFromResultFile({
@@ -272,7 +272,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
   it("reports an empty change set when the round resets without committing", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ success: false })),
+      JSON.stringify(baseAgentResult({ success: false })),
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -292,7 +292,9 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
 
   it("reports a content digest of the captured result document", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
-    const content = JSON.stringify(baseRunnerResult({ goal_complete: true }));
+    const content = JSON.stringify(
+      baseAgentResult({ objective_complete: true }),
+    );
     const resultFilePath = writeResultFile(content);
     const verificationLogPath = makeVerificationLogPath();
 
@@ -355,7 +357,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
 
   it("skips commit/reset evidence when the verification log path is blank", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
-    const resultFilePath = writeResultFile(JSON.stringify(baseRunnerResult()));
+    const resultFilePath = writeResultFile(JSON.stringify(baseAgentResult()));
     const cwd = makeTempDir("momentum-agent-loop-mechanism-cwd-");
     const cwdEvidencePath = path.join(cwd, ".finalization.json");
     const previousCwd = process.cwd();
@@ -383,7 +385,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
   it("resets without verification and keeps the result document pointer when the round reported failure", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ success: false })),
+      JSON.stringify(baseAgentResult({ success: false })),
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -407,7 +409,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
 
   it("resets and records a verification artifact when verification fails", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
-    const resultFilePath = writeResultFile(JSON.stringify(baseRunnerResult()));
+    const resultFilePath = writeResultFile(JSON.stringify(baseAgentResult()));
     const verificationLogPath = makeVerificationLogPath();
 
     const mechanism = goalLoopRoundMechanismFromResultFile({
@@ -429,7 +431,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
 
   it("fingerprints the verification log on the verification_output artifact pointer", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
-    const resultFilePath = writeResultFile(JSON.stringify(baseRunnerResult()));
+    const resultFilePath = writeResultFile(JSON.stringify(baseAgentResult()));
     const verificationLogPath = makeVerificationLogPath();
 
     const mechanism = goalLoopRoundMechanismFromResultFile({
@@ -453,7 +455,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
 
   it("fingerprints the verification log of a failed-verification reset", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
-    const resultFilePath = writeResultFile(JSON.stringify(baseRunnerResult()));
+    const resultFilePath = writeResultFile(JSON.stringify(baseAgentResult()));
     const verificationLogPath = makeVerificationLogPath();
 
     const mechanism = goalLoopRoundMechanismFromResultFile({
@@ -519,13 +521,11 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
 
   it("returns a null result when the document is valid JSON but exceeds the size ceiling", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
-    // A well-formed RunnerResult that is too large to trust: the finalize seam
+    // A well-formed AgentResult that is too large to trust: the finalize seam
     // judges it `result_invalid`, so the bridge must NOT capture the parsed
-    // result even though `parseRunnerResult` alone would accept it.
+    // result even though `parseAgentResult` alone would accept it.
     const resultFilePath = writeResultFile(
-      JSON.stringify(
-        baseRunnerResult({ summary: "x".repeat(1024 * 1024 + 1) }),
-      ),
+      JSON.stringify(baseAgentResult({ summary: "x".repeat(1024 * 1024 + 1) })),
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -551,7 +551,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
     runGit(repoPath, ["add", "rogue.txt"]);
     runGit(repoPath, ["commit", "-m", "rogue round commit", "--quiet"]);
     const movedHead = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
-    const resultFilePath = writeResultFile(JSON.stringify(baseRunnerResult()));
+    const resultFilePath = writeResultFile(JSON.stringify(baseAgentResult()));
     const verificationLogPath = makeVerificationLogPath();
 
     const mechanism = goalLoopRoundMechanismFromResultFile({
@@ -572,7 +572,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
   it("does not duplicate a committed round when finalization is re-entered from the original base", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true })),
+      JSON.stringify(baseAgentResult({ objective_complete: true })),
     );
     const firstVerificationLogPath = makeVerificationLogPath();
 
@@ -675,7 +675,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
             success: true,
             summary: "round finished",
             key_changes_made: ["wrote round-edit.txt"],
-            goal_complete: true,
+            objective_complete: true,
             commit: baseIntent(),
           }),
           "utf-8",
@@ -723,7 +723,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
       runPromptedRound: (runnerInput) => {
         fs.writeFileSync(
           runnerInput.resultFilePath,
-          JSON.stringify(baseRunnerResult({ goal_complete: true })),
+          JSON.stringify(baseAgentResult({ objective_complete: true })),
           "utf-8",
         );
         throw new Error("runner crashed after writing result");
@@ -741,7 +741,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
       makePromptedArtifactPaths("runner-result.json");
     fs.writeFileSync(
       resultFilePath,
-      JSON.stringify(baseRunnerResult({ goal_complete: true })),
+      JSON.stringify(baseAgentResult({ objective_complete: true })),
     );
 
     const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
@@ -897,7 +897,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         fs.symlinkSync(escapedRoot, artifactRoot, "dir");
         fs.writeFileSync(
           runnerInput.resultFilePath,
-          JSON.stringify(baseRunnerResult({ goal_complete: true })),
+          JSON.stringify(baseAgentResult({ objective_complete: true })),
           "utf-8",
         );
       },
@@ -981,7 +981,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
             success: true,
             summary: "claimed completion without the required commit intent",
             key_changes_made: ["wrote round-edit.txt"],
-            goal_complete: true,
+            objective_complete: true,
           }),
           "utf-8",
         );
@@ -1180,7 +1180,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         fs.symlinkSync(attackerRoot, roundRoot, "dir");
         fs.writeFileSync(
           path.join(attackerRoot, path.basename(resultFilePath)),
-          JSON.stringify(baseRunnerResult({ goal_complete: true })),
+          JSON.stringify(baseAgentResult({ objective_complete: true })),
           "utf-8",
         );
       },
@@ -1224,7 +1224,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
       runPromptedRound: () =>
         fs.writeFileSync(
           resultFilePath,
-          JSON.stringify(baseRunnerResult({ goal_complete: true })),
+          JSON.stringify(baseAgentResult({ objective_complete: true })),
           "utf-8",
         ),
     });
@@ -1284,7 +1284,7 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
   it("drives a verified, goal-complete round to a durable succeeded round with the commit SHA", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true })),
+      JSON.stringify(baseAgentResult({ objective_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
     const db = openRoundDb();
@@ -1317,7 +1317,9 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
 
   it("persists the captured result document digest onto the durable round", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
-    const content = JSON.stringify(baseRunnerResult({ goal_complete: true }));
+    const content = JSON.stringify(
+      baseAgentResult({ objective_complete: true }),
+    );
     const resultFilePath = writeResultFile(content);
     const verificationLogPath = makeVerificationLogPath();
     const db = openRoundDb();
@@ -1346,7 +1348,7 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
   it("persists the real committed change set onto the durable round", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true })),
+      JSON.stringify(baseAgentResult({ objective_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
     const db = openRoundDb();
@@ -1377,7 +1379,7 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
   it("persists the verification log digest onto the durable verification_output artifact row", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true })),
+      JSON.stringify(baseAgentResult({ objective_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
     const db = openRoundDb();
@@ -1411,7 +1413,7 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
   it("persists per-command verification results onto the durable round", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true })),
+      JSON.stringify(baseAgentResult({ objective_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
     const db = openRoundDb();
@@ -1480,7 +1482,7 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
     const repoPath = initRepo();
     const baseHead = commitInitial(repoPath);
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true })),
+      JSON.stringify(baseAgentResult({ objective_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
     const db = openRoundDb();

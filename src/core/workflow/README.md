@@ -153,7 +153,7 @@ child state.
 `bindings/coding-workflow.host-bindings.json`: the daemon host-binding file
 still owns process supervision and result-file placement, while this
 helper loads `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the configured
-command for `MOMENTUM_STEP_KIND`, and writes normalized `RunnerResult` evidence
+command for `MOMENTUM_STEP_KIND`, and writes normalized `AgentResult` evidence
 so command failures become durable `success: false` results rather than stranded
 manual recovery. It is not a default-route switch and does not change CWFP
 compatibility.
@@ -195,7 +195,7 @@ The start and preview doors use it to validate built-in definition lookup, requi
 It emits compact `preflightEvidence` objects with stable fields (`checkId`, `status`, `severity`, `path`, `key`, `message`, `recommendedAction`) so CLI clients can fix setup without parsing prose.
 It also exposes wrapper config validation for canonical snake_case keys, env allowlists, timeouts, safe or expected result files, no-mistakes runner-profile shape, no-mistakes runner required-env allowlist coverage, and the merge-cleanup target shape, while GitHub, Linear, no-mistakes external config, and other side-effect checks stay inside the step that owns the side effect.
 Native `agent-loop` round evidence is currently consumed by `workflow run logs` from executor attempt / round rows and child evidence.
-Status, handoff, monitor, and GUI readers remain future consumers until they are wired to the same executor-round projection instead of runner-authored JSON, terminal scrollback, or runner-local directories.
+Status, handoff, monitor, and GUI readers remain future consumers until they are wired to the same executor-round projection instead of agent-authored JSON, terminal scrollback, or runner-local directories.
 
 The GUI-safe supervisor contract sits behind `workflow run watch --once`.
 The command builds on the monitor projection, optionally performs one bounded non-tail target-run dispatcher tick, then emits a compact top-level envelope with `emit`, `reason`, `recommendedAction`, `recommendedActionPolicy`, quiet-duration fields, stuck-risk advisory fields, `nextAction.actionClass`, `nextAction.recoveryDetail`, and optional `humanAction`.

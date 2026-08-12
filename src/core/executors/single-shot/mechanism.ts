@@ -2,7 +2,7 @@
  * Runtime mechanisms for the single-shot executors.
  *
  * `agent-once` delegates to the live-step wrapper and therefore requires a
- * normalized `RunnerResult` document on success. `script` runs an absolute
+ * normalized `AgentResult` document on success. `script` runs an absolute
  * deterministic command with explicit argv/env/cwd, bounded stdout/stderr, and
  * succeeds from exit code plus log evidence without writing a result document.
  * Abort-aware runs preserve output captured through cancellation and decode
@@ -44,7 +44,7 @@ import {
 import type { HostBindingConfig } from "../../../adapters/host-bindings-registry.js";
 import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../../../shared/process-limits.js";
 import type { ExecutorRoundRecord } from "../loop/reducer.js";
-import type { CommitIntent } from "../runner/types.js";
+import type { CommitIntent } from "../agent-result/types.js";
 import type {
   SingleShotArtifactPointer,
   SingleShotRoundArtifacts,
@@ -155,7 +155,7 @@ const SHA40_RE = /^[0-9a-f]{40}$/;
  *
  * The returned runner accepts only `agent-once` rounds with an artifact root and
  * absolute log path. Success requires the wrapped process to emit a valid
- * `RunnerResult`; failures and unsafe repo-finalization outcomes are converted
+ * `AgentResult`; failures and unsafe repo-finalization outcomes are converted
  * into stable single-shot recovery codes for the orchestrator.
  */
 export function createOneShotLiveWrapperRoundRunner(

@@ -165,7 +165,7 @@ export function mapLiveStepWrapperResult(
       errorCode: runnerSucceeded ? null : "command_failed",
       errorMessage: runnerSucceeded
         ? null
-        : `live step runner reported success=false: ${result.result.summary}`,
+        : `live step agent reported success=false: ${result.result.summary}`,
       retryHint: null,
       recoveryHint: null,
     };
@@ -184,7 +184,7 @@ export function mapLiveStepWrapperResult(
         durationMs: result.diagnostics.durationMs,
         probed: result.diagnostics.probed,
         runnerSuccess: result.result.success,
-        goalComplete: result.result.goal_complete,
+        objectiveComplete: result.result.objective_complete,
       },
     };
   }

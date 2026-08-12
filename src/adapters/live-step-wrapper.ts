@@ -9,7 +9,7 @@
  *
  * `runLiveStepWrapper` is the live execution core for the `implementation`
  * step (and any later step kind whose engine emits the normalized
- * `RunnerResult` document). Given a resolved `HostBindingConfig` plus the
+ * `AgentResult` document). Given a resolved `HostBindingConfig` plus the
  * step's execution context, it:
  *
  *   - refuses native Windows execution with `unsupported_platform` before any
@@ -25,7 +25,7 @@
  *     cap breach to `output_overflow`;
  *   - maps a timeout to `command_timed_out` and a non-zero exit to
  *     `command_failed`;
- *   - requires a normalized `RunnerResult` result file for success, mapping a
+ *   - requires a normalized `AgentResult` result file for success, mapping a
  *     missing file to `result_missing` and an unreadable/invalid document to
  *     `result_invalid`.
  *
@@ -54,8 +54,8 @@ import type {
   HostBindingConfig,
   HostBindingProbeConfig,
 } from "./host-bindings-registry.js";
-import { parseRunnerResult } from "../core/executors/runner/result.js";
-import type { RunnerResult } from "../core/executors/runner/types.js";
+import { parseAgentResult } from "../core/executors/agent-result/result.js";
+import type { AgentResult } from "../core/executors/agent-result/types.js";
 import type { WorkflowStepKind } from "../core/workflow/run/reducer.js";
 import {
   MAX_BUILT_IN_PROCESS_TIMEOUT_MS,
@@ -166,7 +166,7 @@ export type LiveStepWrapperDiagnostics = {
 
 export type LiveStepWrapperSuccess = {
   ok: true;
-  result: RunnerResult;
+  result: AgentResult;
   resultJsonPath: string;
   executorLogPath: string;
   diagnostics: LiveStepWrapperDiagnostics;
@@ -680,7 +680,7 @@ function finishLiveStepWrapperProcess(input: {
         executorLogPath,
         resultJsonPath,
         "runtime_unavailable",
-        `live step wrapper bootstrap failed before runner evidence was produced: ${config.command}`,
+        `live step wrapper bootstrap failed before agent evidence was produced: ${config.command}`,
       );
     }
     if (
@@ -694,7 +694,7 @@ function finishLiveStepWrapperProcess(input: {
         executorLogPath,
         resultJsonPath,
         "runtime_unavailable",
-        `live step wrapper reported a retryable setup failure before runner evidence was produced: ${config.command}`,
+        `live step wrapper reported a retryable setup failure before agent evidence was produced: ${config.command}`,
       );
     }
     return wrapperError(
@@ -713,7 +713,7 @@ function finishLiveStepWrapperProcess(input: {
   if (!read.ok) {
     return wrapperError(executorLogPath, resultJsonPath, read.code, read.error);
   }
-  const parsed = parseRunnerResult(read.raw);
+  const parsed = parseAgentResult(read.raw);
   if (!parsed.ok) {
     writeLine(logHandle, `[live-step] result_invalid: ${parsed.error}`);
     writeLine(logHandle, "[live-step] summary: result JSON invalid");
@@ -725,10 +725,10 @@ function finishLiveStepWrapperProcess(input: {
     );
   }
 
-  writeLine(logHandle, `[live-step] runner_success: ${parsed.value.success}`);
+  writeLine(logHandle, `[live-step] agent_success: ${parsed.value.success}`);
   writeLine(
     logHandle,
-    `[live-step] goal_complete: ${parsed.value.goal_complete}`,
+    `[live-step] objective_complete: ${parsed.value.objective_complete}`,
   );
   writeLine(logHandle, "[live-step] done");
   return {

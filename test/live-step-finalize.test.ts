@@ -10,8 +10,8 @@ import {
 } from "../src/core/executors/shared/step-finalize.js";
 import type {
   CommitIntent,
-  RunnerResult,
-} from "../src/core/executors/runner/types.js";
+  AgentResult,
+} from "../src/core/executors/agent-result/types.js";
 
 // Git-heavy integration coverage for the shared verify -> commit / reset
 // finalization seam (`shared/step-finalize.ts`). These cases were originally
@@ -92,14 +92,14 @@ function baseIntent(overrides: Partial<CommitIntent> = {}): CommitIntent {
   };
 }
 
-function baseRunnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
+function baseAgentResult(overrides: Partial<AgentResult> = {}): AgentResult {
   return {
     success: true,
     summary: "live step finished",
     key_changes_made: ["wrote step-edit.txt"],
     key_learnings: [],
     remaining_work: [],
-    goal_complete: false,
+    objective_complete: false,
     commit: baseIntent(),
     ...overrides,
   };
@@ -112,8 +112,8 @@ function writeResultFile(content: string): string {
   return resultPath;
 }
 
-function writeRunnerResultFile(overrides: Partial<RunnerResult> = {}): string {
-  return writeResultFile(JSON.stringify(baseRunnerResult(overrides)));
+function writeAgentResultFile(overrides: Partial<AgentResult> = {}): string {
+  return writeResultFile(JSON.stringify(baseAgentResult(overrides)));
 }
 
 describe("finalizeWorkflowStep", () => {
@@ -310,7 +310,7 @@ describe("finalizeWorkflowStep", () => {
 describe("finalizeWorkflowStepFromResultFile", () => {
   it("commits using the result file's commit intent when it reports success", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
-    const resultFilePath = writeRunnerResultFile({
+    const resultFilePath = writeAgentResultFile({
       commit: baseIntent({ type: "fix", scope: "wf", subject: "live wire-up" }),
     });
 
@@ -335,7 +335,7 @@ describe("finalizeWorkflowStepFromResultFile", () => {
 
   it("resets the worktree when the result file reports success=false", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
-    const resultFilePath = writeRunnerResultFile({ success: false });
+    const resultFilePath = writeAgentResultFile({ success: false });
 
     const result = finalizeWorkflowStepFromResultFile({
       repoPath,
@@ -406,7 +406,7 @@ describe("finalizeWorkflowStepFromResultFile", () => {
     expect(fs.existsSync(path.join(repoPath, "step-edit.txt"))).toBe(true);
   });
 
-  it("returns result_invalid when the result document is a well-formed JSON but not a RunnerResult", () => {
+  it("returns result_invalid when the result document is a well-formed JSON but not a AgentResult", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
     const resultFilePath = writeResultFile(JSON.stringify({ hello: "world" }));
 
@@ -442,7 +442,7 @@ describe("finalizeWorkflowStepFromResultFile", () => {
 
   it("returns result_invalid when the result path is a symlink rather than a regular file", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
-    const target = writeRunnerResultFile();
+    const target = writeAgentResultFile();
     const linkDir = makeTempDir("momentum-live-finalize-link-");
     const linkPath = path.join(linkDir, "runner-result.json");
     fs.symlinkSync(target, linkPath);
@@ -467,7 +467,7 @@ describe("finalizeWorkflowStepFromResultFile", () => {
     runGit(repoPath, ["commit", "-m", "rogue live-step commit", "--quiet"]);
     const movedHead = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
 
-    const resultFilePath = writeRunnerResultFile();
+    const resultFilePath = writeAgentResultFile();
     const result = finalizeWorkflowStepFromResultFile({
       repoPath,
       baseHead,

@@ -30,7 +30,7 @@ import {
   runGoalLoopStep,
 } from "../src/core/executors/agent-loop/orchestrator.js";
 import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/shared/step-finalize.js";
-import type { RunnerResult } from "../src/core/executors/runner/types.js";
+import type { AgentResult } from "../src/core/executors/agent-result/types.js";
 
 // Drives the single-round agent-loop executor step through the *real*
 // executor-loop persistence layer and round transition graph around an injected
@@ -126,14 +126,14 @@ function verifyCmd(succeeded: boolean) {
   };
 }
 
-function runnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
+function runnerResult(overrides: Partial<AgentResult> = {}): AgentResult {
   return {
     success: true,
     summary: "implemented the bounded round",
     key_changes_made: ["added the round driver"],
     key_learnings: [],
     remaining_work: ["wire the loop"],
-    goal_complete: false,
+    objective_complete: false,
     commit: {
       type: "feat",
       scope: "agent-loop",
@@ -185,7 +185,7 @@ describe("runGoalLoopRound — committed completion", () => {
       runRound: (round) => {
         observed = round;
         return {
-          result: runnerResult({ goal_complete: true }),
+          result: runnerResult({ objective_complete: true }),
           finalize: COMMITTED,
         };
       },
@@ -242,7 +242,7 @@ describe("runGoalLoopRound — committed completion", () => {
       runRound: () => {
         stateDuringMechanism = loadExecutorRound(db, "round-1")?.state;
         return {
-          result: runnerResult({ goal_complete: true }),
+          result: runnerResult({ objective_complete: true }),
           finalize: COMMITTED,
         };
       },
@@ -257,7 +257,7 @@ describe("runGoalLoopRound — committed completion", () => {
       start: buildStart(),
       finishedAt: 3_000,
       runRound: () => ({
-        result: runnerResult({ goal_complete: true }),
+        result: runnerResult({ objective_complete: true }),
         resultDigest: "sha256:round-digest",
         finalize: COMMITTED,
       }),
@@ -276,7 +276,7 @@ describe("runGoalLoopRound — committed completion", () => {
       start: buildStart(),
       finishedAt: 3_000,
       runRound: () => ({
-        result: runnerResult({ goal_complete: true }),
+        result: runnerResult({ objective_complete: true }),
         finalize: COMMITTED,
       }),
     });
@@ -292,7 +292,7 @@ describe("runGoalLoopRound — committed completion", () => {
       start: buildStart(),
       finishedAt: 3_000,
       runRound: () => ({
-        result: runnerResult({ goal_complete: true }),
+        result: runnerResult({ objective_complete: true }),
         finalize: COMMITTED,
         changedFiles: ["src/x.ts", "src/y.ts"],
       }),
@@ -312,7 +312,7 @@ describe("runGoalLoopRound — committed completion", () => {
       start: buildStart(),
       finishedAt: 3_000,
       runRound: () => ({
-        result: runnerResult({ goal_complete: true }),
+        result: runnerResult({ objective_complete: true }),
         finalize: COMMITTED,
       }),
     });
@@ -330,7 +330,7 @@ describe("runGoalLoopRound — continue and quota", () => {
       start: buildStart({ roundIndex: 1, maxRounds: 5 }),
       finishedAt: 3_000,
       runRound: () => ({
-        result: runnerResult({ goal_complete: false }),
+        result: runnerResult({ objective_complete: false }),
         finalize: COMMITTED,
       }),
     });
@@ -347,7 +347,7 @@ describe("runGoalLoopRound — continue and quota", () => {
       start: buildStart({ roundIndex: 4, maxRounds: 5 }),
       finishedAt: 3_000,
       runRound: () => ({
-        result: runnerResult({ goal_complete: false }),
+        result: runnerResult({ objective_complete: false }),
         finalize: COMMITTED,
       }),
     });
@@ -366,7 +366,7 @@ describe("runGoalLoopRound — verification authority", () => {
       finishedAt: 3_000,
       runRound: () => ({
         // The runner recommended completion, but verification reset the work.
-        result: runnerResult({ goal_complete: true }),
+        result: runnerResult({ objective_complete: true }),
         finalize: RESET_VERIFICATION_FAILURE,
       }),
     });
@@ -416,7 +416,7 @@ describe("runGoalLoopRound — artifact evidence", () => {
       start: buildStart(),
       finishedAt: 3_000,
       runRound: () => ({
-        result: runnerResult({ goal_complete: true }),
+        result: runnerResult({ objective_complete: true }),
         finalize: COMMITTED,
         artifacts: {
           resultDocument: {
@@ -479,7 +479,7 @@ describe("runGoalLoopRound — artifact evidence", () => {
       start: buildStart(),
       finishedAt: 3_000,
       runRound: () => ({
-        result: runnerResult({ goal_complete: true }),
+        result: runnerResult({ objective_complete: true }),
         finalize: COMMITTED,
       }),
     });
@@ -501,7 +501,7 @@ describe("runGoalLoopRound — artifact evidence", () => {
           "round-1",
         ).length;
         return {
-          result: runnerResult({ goal_complete: true }),
+          result: runnerResult({ objective_complete: true }),
           finalize: COMMITTED,
           artifacts: {
             resultDocument: { path: "/artifacts/round-1/result.json" },
@@ -524,7 +524,7 @@ describe("runGoalLoopRound — checkpoint stream", () => {
       start: buildStart(),
       finishedAt: 3_000,
       runRound: () => ({
-        result: runnerResult({ goal_complete: true }),
+        result: runnerResult({ objective_complete: true }),
         finalize: COMMITTED,
       }),
     });
@@ -579,7 +579,7 @@ describe("runGoalLoopRound — checkpoint stream", () => {
           "round-1",
         ).length;
         return {
-          result: runnerResult({ goal_complete: true }),
+          result: runnerResult({ objective_complete: true }),
           finalize: COMMITTED,
         };
       },
@@ -676,11 +676,11 @@ describe("runGoalLoopAttempt — multi-round completion", () => {
       runRound: (round) =>
         round.roundIndex < 2
           ? {
-              result: runnerResult({ goal_complete: false }),
+              result: runnerResult({ objective_complete: false }),
               finalize: COMMITTED,
             }
           : {
-              result: runnerResult({ goal_complete: true }),
+              result: runnerResult({ objective_complete: true }),
               finalize: COMMITTED,
             },
     });
@@ -714,7 +714,7 @@ describe("runGoalLoopAttempt — multi-round completion", () => {
       planRound: (roundIndex) => planRoundFor(roundIndex, 2),
       runRound: (round) => ({
         result: runnerResult({
-          goal_complete: round.roundIndex === 1,
+          objective_complete: round.roundIndex === 1,
           key_learnings: [`round ${round.roundIndex} learning`],
         }),
         finalize: COMMITTED,
@@ -743,7 +743,7 @@ describe("runGoalLoopAttempt — multi-round completion", () => {
           stateDuringFirstRound = loadExecutorAttempt(db, "inv-1")?.state;
         }
         return {
-          result: runnerResult({ goal_complete: true }),
+          result: runnerResult({ objective_complete: true }),
           finalize: COMMITTED,
         };
       },
@@ -761,7 +761,7 @@ describe("runGoalLoopAttempt — quota pause", () => {
       planRound: (roundIndex) => planRoundFor(roundIndex, 2),
       // Every round commits progress but never recommends completion.
       runRound: () => ({
-        result: runnerResult({ goal_complete: false }),
+        result: runnerResult({ objective_complete: false }),
         finalize: COMMITTED,
       }),
     });
@@ -814,11 +814,11 @@ describe("runGoalLoopAttempt — repo-safety boundaries", () => {
       runRound: (round) =>
         round.roundIndex === 0
           ? {
-              result: runnerResult({ goal_complete: true }),
+              result: runnerResult({ objective_complete: true }),
               finalize: RESET_VERIFICATION_FAILURE,
             }
           : {
-              result: runnerResult({ goal_complete: true }),
+              result: runnerResult({ objective_complete: true }),
               finalize: COMMITTED,
             },
     });
@@ -846,7 +846,7 @@ describe("runGoalLoopAttempt — planner contract", () => {
         // would disagree with the start's roundIndex (0).
         planRound: () => planRoundFor(0, 3),
         runRound: () => ({
-          result: runnerResult({ goal_complete: false }),
+          result: runnerResult({ objective_complete: false }),
           finalize: COMMITTED,
         }),
       }),
@@ -905,11 +905,11 @@ describe("runGoalLoopStep — attempt/round materialization", () => {
       runRound: (round) =>
         round.roundIndex < 2
           ? {
-              result: runnerResult({ goal_complete: false }),
+              result: runnerResult({ objective_complete: false }),
               finalize: COMMITTED,
             }
           : {
-              result: runnerResult({ goal_complete: true }),
+              result: runnerResult({ objective_complete: true }),
               finalize: COMMITTED,
             },
     });
@@ -952,7 +952,7 @@ describe("runGoalLoopStep — attempt/round materialization", () => {
       resolveRoundInputs: roundInputsFor,
       now: monotonicClock(),
       runRound: () => ({
-        result: runnerResult({ goal_complete: true }),
+        result: runnerResult({ objective_complete: true }),
         finalize: COMMITTED,
       }),
     });
@@ -1001,7 +1001,7 @@ describe("runGoalLoopStep — attempt/round materialization", () => {
       now: monotonicClock(),
       runRound: (round) => ({
         result: runnerResult({
-          goal_complete: round.roundIndex === 1,
+          objective_complete: round.roundIndex === 1,
           key_learnings: [`learning-${round.roundIndex}`],
         }),
         finalize: COMMITTED,
@@ -1035,7 +1035,7 @@ describe("runGoalLoopStep — attempt/round materialization", () => {
           stateDuringFirstRound = loadExecutorAttempt(db, attemptId)?.state;
         }
         return {
-          result: runnerResult({ goal_complete: true }),
+          result: runnerResult({ objective_complete: true }),
           finalize: COMMITTED,
         };
       },
@@ -1088,7 +1088,7 @@ describe("runGoalLoopStep — single-owner enforcement", () => {
       resolveRoundInputs: roundInputsFor,
       now: monotonicClock(),
       runRound: () => ({
-        result: runnerResult({ goal_complete: true }),
+        result: runnerResult({ objective_complete: true }),
         finalize: COMMITTED,
       }),
     });

@@ -52,6 +52,6 @@ Relative `repo` values were resolved to absolute paths before being persisted, s
 
 ## See also
 
-- [`docs/runners.md`](runners.md) — stored runner-profile blocks, the normalized `RunnerResult` schema (still consumed by workflow executors), and the `MOMENTUM.md` repo-policy loader.
+- [`docs/runners.md`](runners.md) — stored runner-profile blocks, the normalized `AgentResult` schema (still consumed by workflow executors), and the `MOMENTUM.md` repo-policy loader.
 - [`docs/failure-reset.md`](failure-reset.md) — the retired lane's per-iteration transaction model and the failure codes preserved in stored artifacts.
 - [`docs/recovery.md`](recovery.md) — manual recovery artifacts, the durable `needs_manual_recovery` flag, and `recovery clear <goal-id>`.

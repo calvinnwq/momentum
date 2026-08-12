@@ -64,7 +64,7 @@ const NOW = 1_700_000_000_000;
 const tempDirs: string[] = [];
 const NATIVE_ONE_SHOT_SCRIPT = `printf 'native dispatch\\n' > "$MOMENTUM_REPO_PATH/native-dispatch.txt"
 cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
-{"success":true,"summary":"native agent-once completed","key_changes_made":["native-dispatch.txt"],"key_learnings":[],"remaining_work":[],"goal_complete":true,"commit":{"type":"test","subject":"complete native agent-once","body":"","breaking":false}}
+{"success":true,"summary":"native agent-once completed","key_changes_made":["native-dispatch.txt"],"key_learnings":[],"remaining_work":[],"objective_complete":true,"commit":{"type":"test","subject":"complete native agent-once","body":"","breaking":false}}
 JSON`;
 const NATIVE_SCRIPT_COMMAND = `test "$MOMENTUM_RUN_ID" = "native-script-run" || exit 8
 test "$MOMENTUM_STEP_ID" = "preflight" || exit 9
@@ -86,10 +86,10 @@ test ! -f "$count_file" || count=$(cat "$count_file")
 count=$((count + 1))
 printf '%s\\n' "$count" > "$count_file"
 printf 'round %s\\n' "$count" > "$MOMENTUM_REPO_PATH/goal-round-$count.txt"
-goal_complete=false
-test "$count" -lt 2 || goal_complete=true
+objective_complete=false
+test "$count" -lt 2 || objective_complete=true
 cat > "$MOMENTUM_RESULT_PATH" <<JSON
-{"success":true,"summary":"agent-loop round $count","key_changes_made":["goal-round-$count.txt"],"key_learnings":["round $count"],"remaining_work":[],"goal_complete":$goal_complete,"commit":{"type":"test","subject":"complete agent-loop round $count","body":"","breaking":false}}
+{"success":true,"summary":"agent-loop round $count","key_changes_made":["goal-round-$count.txt"],"key_learnings":["round $count"],"remaining_work":[],"objective_complete":$objective_complete,"commit":{"type":"test","subject":"complete agent-loop round $count","body":"","breaking":false}}
 JSON`;
 
 afterEach(() => {
@@ -2096,7 +2096,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
           key_changes_made: ["reattached.txt"],
           key_learnings: [],
           remaining_work: [],
-          goal_complete: true,
+          objective_complete: true,
           commit: {
             type: "test",
             subject: "checkpoint native agent-loop work",
@@ -2374,7 +2374,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
               key_changes_made: ["native-lock-recovery.txt"],
               key_learnings: [],
               remaining_work: [],
-              goal_complete: true,
+              objective_complete: true,
               commit: {
                 type: "test",
                 subject: "checkpoint native lock recovery",

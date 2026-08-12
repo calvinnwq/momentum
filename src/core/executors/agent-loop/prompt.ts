@@ -1,4 +1,4 @@
-import { COMMIT_TYPES } from "../runner/types.js";
+import { COMMIT_TYPES } from "../agent-result/types.js";
 
 export const DEFAULT_GOAL_LOOP_SOURCE_CONTEXT_MAX_CHARS = 2000;
 export const DEFAULT_GOAL_LOOP_PRIOR_ROUND_EVIDENCE_MAX_CHARS = 2000;
@@ -55,7 +55,7 @@ export type GoalLoopRoundPromptPriorRound = {
  * Complete input for the deterministic native agent-loop round prompt.
  *
  * `resultPath` is the exact file path the runner must populate with the
- * normalized `RunnerResult` JSON consumed by finalization.
+ * normalized `AgentResult` JSON consumed by finalization.
  */
 export type GoalLoopRoundPromptInput = {
   objective: string;
@@ -264,7 +264,7 @@ function renderOutputContract(lines: string[]): void {
   lines.push('  "key_changes_made": string[],');
   lines.push('  "key_learnings": string[],');
   lines.push('  "remaining_work": string[],');
-  lines.push('  "goal_complete": boolean,');
+  lines.push('  "objective_complete": boolean,');
   lines.push('  "commit": {');
   lines.push(
     `    "type": ${COMMIT_TYPES.map((type) => `"${type}"`).join(" | ")},`,
@@ -277,7 +277,7 @@ function renderOutputContract(lines: string[]): void {
   lines.push("}");
   lines.push("```");
   lines.push(
-    "`success`, `summary`, `key_changes_made`, `goal_complete`, `commit`, `commit.type`, and `commit.subject` are required.",
+    "`success`, `summary`, `key_changes_made`, `objective_complete`, `commit`, `commit.type`, and `commit.subject` are required.",
   );
   lines.push(
     "`key_learnings` and `remaining_work` are optional and default to `[]`.",

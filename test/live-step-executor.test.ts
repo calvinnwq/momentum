@@ -23,7 +23,7 @@ import {
   parseHostBindings,
   type HostBindingConfig,
 } from "../src/adapters/host-bindings-registry.js";
-import type { RunnerResult } from "../src/core/executors/runner/types.js";
+import type { AgentResult } from "../src/core/executors/agent-result/types.js";
 
 const tempRoots: string[] = [];
 
@@ -42,13 +42,13 @@ function makeTempDir(prefix = "momentum-live-exec-"): string {
   return fs.realpathSync(dir);
 }
 
-const RUNNER_RESULT: RunnerResult = {
+const RUNNER_RESULT: AgentResult = {
   success: true,
   summary: "live implementation step succeeded",
   key_changes_made: ["did the thing"],
   key_learnings: [],
   remaining_work: [],
-  goal_complete: false,
+  objective_complete: false,
   commit: {
     type: "chore",
     scope: undefined,
@@ -130,7 +130,7 @@ const VALID_RESULT_JSON = JSON.stringify({
   key_changes_made: ["did the thing"],
   key_learnings: [],
   remaining_work: [],
-  goal_complete: false,
+  objective_complete: false,
   commit: { type: "chore", subject: "do the thing", body: "", breaking: false },
 });
 const WRITE_VALID_RESULT = `printf '%s' '${VALID_RESULT_JSON}' > "$MOMENTUM_RESULT_PATH"`;
@@ -159,7 +159,7 @@ describe("mapLiveStepWrapperResult — success", () => {
     expect(out.diagnostics?.executor).toBe("live");
     expect(out.diagnostics?.command).toBe("/bin/sh");
     expect(out.diagnostics?.runnerSuccess).toBe(true);
-    expect(out.diagnostics?.goalComplete).toBe(false);
+    expect(out.diagnostics?.objectiveComplete).toBe(false);
   });
 
   it("maps a parsed runner result with success=false to a failed executor result", () => {

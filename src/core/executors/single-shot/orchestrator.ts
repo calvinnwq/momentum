@@ -38,7 +38,7 @@
  * document), the real script mechanism (a deterministic local command, exit-code
  * based), a no-op, or a deterministic fake can all drive the round through the
  * identical durable lifecycle. The two executors differ only in what the mechanism
- * returns — `agent-once` captures a {@link RunnerResult} document, `script` is
+ * returns — `agent-once` captures a {@link AgentResult} document, `script` is
  * exit-code based with no result document — and the driver stays executor-agnostic:
  * it routes the normalized {@link SingleShotAttemptOutcome} through the pure
  * decision so the verification-authority and repo-safety boundaries hold end to

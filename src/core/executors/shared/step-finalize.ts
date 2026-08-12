@@ -47,7 +47,7 @@
  * {@link finalizeWorkflowStep} takes the already-parsed `success` flag and
  * `commit` intent. Because a step orchestrator's dispatch result and the
  * executor boundary only carry the runner-result *path* (not the parsed
- * `RunnerResult`), {@link finalizeWorkflowStepFromResultFile} is the companion
+ * `AgentResult`), {@link finalizeWorkflowStepFromResultFile} is the companion
  * seam the run-level composition actually calls: it re-reads the durable result
  * document, extracts `success` + `commit`, and then runs the transaction —
  * surfacing `result_missing` / `result_invalid` without touching git when that
@@ -74,8 +74,8 @@ import {
   type FinalizeResetTrigger,
 } from "../../repo/iteration-finalize.js";
 import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "../../../adapters/live-step-wrapper.js";
-import { parseRunnerResult } from "../runner/result.js";
-import type { CommitIntent, RunnerResult } from "../runner/types.js";
+import { parseAgentResult } from "../agent-result/result.js";
+import type { CommitIntent, AgentResult } from "../agent-result/types.js";
 import type {
   VerificationFailure,
   VerificationSuccess,
@@ -331,7 +331,7 @@ export function finalizeWorkflowStep(
  *
  * A step orchestrator is git-agnostic and
  * its dispatch result carries the runner-result file *path* rather than the
- * parsed `RunnerResult`; the executor boundary deliberately drops the
+ * parsed `AgentResult`; the executor boundary deliberately drops the
  * domain-shaped commit intent. This seam is therefore where the run-level
  * composition re-reads the durable result to obtain the `success` flag and the
  * explicit, normalized `commit` intent the "Git And Verification Transaction"
@@ -373,7 +373,7 @@ export function finalizeWorkflowStepFromResultFile(
 
 export function finalizeWorkflowStepFromValidatedResult(
   input: FinalizeWorkflowStepFromResultFileInput,
-  result: RunnerResult,
+  result: AgentResult,
 ): FinalizeWorkflowStepFromResultFileResult {
   return finalizeWorkflowStep({
     repoPath: input.repoPath,
@@ -396,7 +396,7 @@ export function finalizeWorkflowStepFromValidatedResult(
 }
 
 export type ReadNormalizedResultFile =
-  | { ok: true; result: RunnerResult; raw: string }
+  | { ok: true; result: AgentResult; raw: string }
   | { ok: false; code: "result_missing" | "result_invalid"; error: string };
 
 /**
@@ -489,7 +489,7 @@ export function readNormalizedResultFile(
       };
     }
     const raw = buffer.subarray(0, offset).toString("utf-8");
-    const parsed = parseRunnerResult(raw);
+    const parsed = parseAgentResult(raw);
     if (!parsed.ok) {
       return {
         ok: false,

@@ -31,15 +31,15 @@ function makeTempDir(prefix = "momentum-live-step-"): string {
   return fs.realpathSync(dir);
 }
 
-// A full, valid RunnerResult document. parseRunnerResult requires success,
-// summary, key_changes_made, goal_complete, and a valid commit intent.
+// A full, valid AgentResult document. parseAgentResult requires success,
+// summary, key_changes_made, objective_complete, and a valid commit intent.
 const VALID_RESULT_JSON = JSON.stringify({
   success: true,
   summary: "live implementation step succeeded",
   key_changes_made: ["implemented the thing"],
   key_learnings: [],
   remaining_work: [],
-  goal_complete: false,
+  objective_complete: false,
   commit: { type: "chore", subject: "do the thing", body: "", breaking: false },
 });
 

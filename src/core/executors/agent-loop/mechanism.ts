@@ -36,7 +36,7 @@
  *
  *   - The normalized `result` is `null` exactly when the finalize seam judged the
  *     result document unusable (`result_missing` / `result_invalid`); for every
- *     other outcome the same document is re-read into the `RunnerResult` the round
+ *     other outcome the same document is re-read into the `AgentResult` the round
  *     captures, so a captured result can never disagree with the finalize verdict
  *     on the document. The `resultDigest` (the round-schema `result_digest`
  *     reattach fingerprint) is computed from those same bytes, so it is non-null

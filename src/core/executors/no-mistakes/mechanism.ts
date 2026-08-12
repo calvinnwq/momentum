@@ -35,7 +35,7 @@
  *
  * Both entrypoints return the same {@link NoMistakesExternalStateRead} discriminated
  * union — `{ ok: true; value; digest }` or `{ ok: false; error }` — mirroring
- * `parseRunnerResult`'s convention. The `digest` is a `sha256:` content digest of
+ * `parseAgentResult`'s convention. The `digest` is a `sha256:` content digest of
  * the raw bytes the snapshot was parsed from (the round-schema `input_digest`
  * reattach fingerprint), so the durable round can fingerprint the exact external
  * evidence it mirrored. The reader is *total*: it never throws on untrusted
@@ -72,7 +72,7 @@ export type NoMistakesExternalStateReadError = {
 
 /**
  * The result of reading the external no-mistakes state store. Mirrors
- * `parseRunnerResult`'s `{ ok: true; value } | { ok: false; error }` convention,
+ * `parseAgentResult`'s `{ ok: true; value } | { ok: false; error }` convention,
  * adding the raw-bytes content `digest` on success. Total: never thrown, always
  * one of these two shapes.
  */

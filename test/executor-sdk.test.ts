@@ -25,7 +25,7 @@ import type {
   ExecutorAttemptRecord,
   ExecutorRoundRecord,
 } from "../src/core/executors/loop/reducer.js";
-import type { RunnerResult } from "../src/core/executors/runner/types.js";
+import type { AgentResult } from "../src/core/executors/agent-result/types.js";
 import { createDurableExecutorEnvelope } from "../src/core/executors/sdk/envelope.js";
 import { driveExecutorTicks } from "../src/core/executors/sdk/driver.js";
 import type {
@@ -1139,13 +1139,13 @@ describe("single-shot built-in SDK proof", () => {
       attemptId: attempt.attemptId,
       now: () => 30,
     });
-    const result: RunnerResult = {
+    const result: AgentResult = {
       success: true,
       summary: "bounded agent turn completed",
       key_changes_made: ["proved the SDK path"],
       key_learnings: [],
       remaining_work: [],
-      goal_complete: true,
+      objective_complete: true,
       commit: {
         type: "test",
         scope: "sdk",
@@ -1228,7 +1228,7 @@ describe("single-shot built-in SDK proof", () => {
     const roundId = `${attempt.attemptId}::round::0`;
     const executor = new SingleShotExecutor("agent-once", () => ({
       outcome: { ok: true },
-      result: { success: true } as RunnerResult,
+      result: { success: true } as AgentResult,
       resultDigest: "sha256:malformed",
       artifacts: {
         resultDocument: { path: "/artifacts/round-0/result.json" },
@@ -1258,7 +1258,7 @@ describe("single-shot built-in SDK proof", () => {
         signal: new AbortController().signal,
       }),
     ).rejects.toThrow(
-      "Invalid agent-once mechanism output: Runner result `summary` must be a non-empty string.",
+      "Invalid agent-once mechanism output: Agent result `summary` must be a non-empty string.",
     );
 
     expect(loadExecutorRound(db, roundId)?.state).toBe("running");
@@ -1290,7 +1290,7 @@ describe("single-shot built-in SDK proof", () => {
         outcome: { ok: false, recoveryCode: "command_failed" },
         result: { success: false },
       },
-      "Runner result `summary` must be a non-empty string",
+      "Agent result `summary` must be a non-empty string",
     ],
     [
       "malformed artifact pointers",
@@ -1441,7 +1441,7 @@ describe("single-shot built-in SDK proof", () => {
           key_changes_made: [],
           key_learnings: [],
           remaining_work: [],
-          goal_complete: true,
+          objective_complete: true,
           commit: {
             type: "test",
             scope: "sdk",
@@ -1508,7 +1508,7 @@ describe("single-shot built-in SDK proof", () => {
         key_changes_made: [],
         key_learnings: [],
         remaining_work: [],
-        goal_complete: true,
+        objective_complete: true,
         commit: {
           type: "test",
           scope: "sdk",
@@ -1633,7 +1633,7 @@ describe("single-shot built-in SDK proof", () => {
         key_changes_made: [],
         key_learnings: [],
         remaining_work: [],
-        goal_complete: true,
+        objective_complete: true,
         commit: {
           type: "test",
           scope: "sdk",
@@ -1722,7 +1722,7 @@ describe("agent-loop iteration budget contract", () => {
     expect(resolveGoalLoopRoundSelection({}).maxRounds).toBeNull();
 
     const unbounded = decideGoalLoopRound({
-      recommendation: { success: true, goalComplete: false },
+      recommendation: { success: true, objectiveComplete: false },
       finalizeOutcome: "committed",
       roundIndex: 10_000,
       maxRounds: null,
@@ -1732,7 +1732,7 @@ describe("agent-loop iteration budget contract", () => {
     expect(unbounded.humanGate).toBeNull();
 
     const capped = decideGoalLoopRound({
-      recommendation: { success: true, goalComplete: false },
+      recommendation: { success: true, objectiveComplete: false },
       finalizeOutcome: "committed",
       roundIndex: 0,
       maxRounds: 1,

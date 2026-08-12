@@ -8,7 +8,7 @@ import {
   type ResetFailure,
   type ResetSuccess,
 } from "../../adapters/git-transaction.js";
-import type { CommitIntent } from "../executors/runner/types.js";
+import type { CommitIntent } from "../executors/agent-result/types.js";
 import {
   openVerificationLogFile,
   runVerification,

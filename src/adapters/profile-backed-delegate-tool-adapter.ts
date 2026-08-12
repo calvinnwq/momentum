@@ -25,7 +25,7 @@ import {
   isProvenClean,
   type LiveStepSdkHostBindings,
 } from "../core/executors/live-step/sdk-executor.js";
-import { parseRunnerResult } from "../core/executors/runner/result.js";
+import { parseAgentResult } from "../core/executors/agent-result/result.js";
 import type { WorkflowStepExecutorDispatchResult } from "../core/workflow/step/executor.js";
 
 export function resolveDelegateBranch(repoPath: string): string {
@@ -551,11 +551,11 @@ function recoverLiveWrapperDelegateHandoff(
     return persistRecoveredLiveWrapperHandoff(input, receipt, externalState);
   }
   if (receipt.phase === "finalizing") {
-    const runnerResult = readRecoveredRunnerResult(receipt.resultJsonPath);
+    const agentResult = readRecoveredAgentResult(receipt.resultJsonPath);
     const commit = commitVerifiedChanges({
       repoPath: input.repoPath,
       baseHead: receipt.baseHead,
-      commit: runnerResult.commit,
+      commit: agentResult.commit,
       beforeCommit: (evidence) => {
         if (
           !resultDigestMatches(receipt.resultDigest, receipt.resultJsonPath)
@@ -897,7 +897,7 @@ function readRecoveredLiveWrapperResult(
       resultJsonPath: receipt.resultJsonPath,
     };
   }
-  const parsed = parseRunnerResult(raw);
+  const parsed = parseAgentResult(raw);
   if (!parsed.ok) {
     return {
       ok: false,
@@ -921,7 +921,7 @@ function readRecoveredLiveWrapperResult(
       errorCode: parsed.value.success ? null : "command_failed",
       errorMessage: parsed.value.success
         ? null
-        : `live step runner reported success=false: ${parsed.value.summary}`,
+        : `live step agent reported success=false: ${parsed.value.summary}`,
       retryHint: null,
       recoveryHint: null,
     },
@@ -930,9 +930,9 @@ function readRecoveredLiveWrapperResult(
   };
 }
 
-function readRecoveredRunnerResult(resultJsonPath: string) {
+function readRecoveredAgentResult(resultJsonPath: string) {
   const raw = readBoundedResultFile(resultJsonPath).toString("utf8");
-  const parsed = parseRunnerResult(raw);
+  const parsed = parseAgentResult(raw);
   if (!parsed.ok) {
     throw new Error(
       `delegated live-wrapper result is invalid: ${parsed.error}`,
@@ -2111,11 +2111,11 @@ function recoverPreparedNoMistakesCommit(
     assertNoMistakesResultMatchesReceipt(receipt);
     const ownership = verifyDelegateCommitOwnership(input);
     if (!ownership.ok) throw new Error(ownership.error);
-    const runnerResult = readRecoveredRunnerResult(receipt.resultJsonPath);
+    const agentResult = readRecoveredAgentResult(receipt.resultJsonPath);
     const commit = commitVerifiedChanges({
       repoPath: input.repoPath,
       baseHead: receipt.headSha,
-      commit: runnerResult.commit,
+      commit: agentResult.commit,
       beforeCommit: (evidence) => {
         if (
           !resultDigestMatches(receipt.resultDigest, receipt.resultJsonPath)

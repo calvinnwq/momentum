@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { parseHostBindings } from "../src/adapters/host-bindings-registry.js";
-import { parseRunnerResult } from "../src/core/executors/runner/result.js";
+import { parseAgentResult } from "../src/core/executors/agent-result/result.js";
 import {
   CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR,
   defaultCodingWorkflowWrapperDeps,
@@ -103,7 +103,7 @@ function makeNoMistakesHome(
 }
 
 function readResult(resultPath: string) {
-  const parsed = parseRunnerResult(fs.readFileSync(resultPath, "utf8"));
+  const parsed = parseAgentResult(fs.readFileSync(resultPath, "utf8"));
   expect(parsed.ok).toBe(true);
   if (!parsed.ok) throw new Error(parsed.error);
   return parsed.value;
@@ -2168,7 +2168,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
     expect(readResult(resultPath).success).toBe(true);
   });
 
-  it("runs the configured command and writes a successful RunnerResult", () => {
+  it("runs the configured command and writes a successful AgentResult", () => {
     const dir = makeTempDir();
     const repo = path.join(dir, "repo");
     const iteration = path.join(dir, "run");

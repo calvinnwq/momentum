@@ -15,7 +15,7 @@ import {
   loadExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import type { ExecutorAttemptRecord } from "../src/core/executors/loop/reducer.js";
-import type { RunnerResult } from "../src/core/executors/runner/types.js";
+import type { AgentResult } from "../src/core/executors/agent-result/types.js";
 import {
   resolveSingleShotRoundSelection,
   singleShotAttemptId,
@@ -133,14 +133,14 @@ function buildStart(
   };
 }
 
-function runnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
+function runnerResult(overrides: Partial<AgentResult> = {}): AgentResult {
   return {
     success: true,
     summary: "ran the single shot",
     key_changes_made: ["added the single-shot driver"],
     key_learnings: [],
     remaining_work: [],
-    goal_complete: true,
+    objective_complete: true,
     commit: {
       type: "feat",
       scope: "single-shot",
@@ -1434,7 +1434,7 @@ describe("runSingleShotStep — single-owner enforcement", () => {
     async (executor) => {
       const db = openStepDb();
       const dispatchStep = (
-        runRound: () => { outcome: { ok: true }; result?: RunnerResult },
+        runRound: () => { outcome: { ok: true }; result?: AgentResult },
       ) => {
         const base = {
           db,

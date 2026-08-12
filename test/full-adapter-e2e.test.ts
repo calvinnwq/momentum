@@ -56,7 +56,7 @@ import {
 import { runNoMistakesMirrorStep } from "../src/adapters/no-mistakes-orchestrator.js";
 import type { WorkflowApprovalBoundary } from "../src/core/workflow/run/reducer.js";
 import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/shared/step-finalize.js";
-import type { RunnerResult } from "../src/core/executors/runner/types.js";
+import type { AgentResult } from "../src/core/executors/agent-result/types.js";
 
 /**
  * NGX-372 full adapter E2E proof (Adapter Test Coverage milestone).
@@ -226,14 +226,14 @@ function countRows(db: MomentumDb, table: string): number {
   return row.n;
 }
 
-function runnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
+function runnerResult(overrides: Partial<AgentResult> = {}): AgentResult {
   return {
     success: true,
     summary: "postflight review pass clean",
     key_changes_made: ["ran the bounded postflight review"],
     key_learnings: [],
     remaining_work: [],
-    goal_complete: true,
+    objective_complete: true,
     commit: {
       type: "test",
       scope: "adapter",
@@ -659,7 +659,7 @@ describe("NGX-372 full adapter E2E proof", () => {
             ? {
                 result: runnerResult({
                   summary: "implementation round: progress committed",
-                  goal_complete: false,
+                  objective_complete: false,
                   remaining_work: ["finish the implementation"],
                 }),
                 finalize: GOAL_LOOP_COMMITTED,
@@ -668,7 +668,7 @@ describe("NGX-372 full adapter E2E proof", () => {
             : {
                 result: runnerResult({
                   summary: "implementation round: goal complete",
-                  goal_complete: true,
+                  objective_complete: true,
                 }),
                 finalize: GOAL_LOOP_COMMITTED,
                 changedFiles: ["src/feature.ts", "test/feature.test.ts"],

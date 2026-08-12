@@ -34,7 +34,7 @@ describe("renderGoalLoopRoundPrompt", () => {
         "pnpm typecheck",
       ],
       acceptanceRequirements: [
-        "Prompt includes the exact RunnerResult output schema.",
+        "Prompt includes the exact AgentResult output schema.",
         "Invalid or missing result JSON routes to recovery evidence.",
       ],
       stopRequirements: ["Stop when focused tests and repo gates pass."],
@@ -71,7 +71,7 @@ describe("renderGoalLoopRoundPrompt", () => {
       "Do not create commits, push, fetch, or stage changes",
     );
     expect(prompt).toContain(
-      "`success`, `summary`, `key_changes_made`, `goal_complete`, `commit`, `commit.type`, and `commit.subject` are required.",
+      "`success`, `summary`, `key_changes_made`, `objective_complete`, `commit`, `commit.type`, and `commit.subject` are required.",
     );
     expect(prompt).toContain(
       "`key_learnings` and `remaining_work` are optional and default to `[]`.",
@@ -125,7 +125,7 @@ describe("renderGoalLoopRoundPrompt", () => {
 
       ## Acceptance and verification requirements
       Acceptance requirements:
-      - Prompt includes the exact RunnerResult output schema.
+      - Prompt includes the exact AgentResult output schema.
       - Invalid or missing result JSON routes to recovery evidence.
 
       Verification commands:
@@ -178,7 +178,7 @@ describe("renderGoalLoopRoundPrompt", () => {
         "key_changes_made": string[],
         "key_learnings": string[],
         "remaining_work": string[],
-        "goal_complete": boolean,
+        "objective_complete": boolean,
         "commit": {
           "type": "build" | "ci" | "docs" | "feat" | "fix" | "perf" | "refactor" | "test" | "chore",
           "scope": string,
@@ -188,7 +188,7 @@ describe("renderGoalLoopRoundPrompt", () => {
         }
       }
       \`\`\`
-      \`success\`, \`summary\`, \`key_changes_made\`, \`goal_complete\`, \`commit\`, \`commit.type\`, and \`commit.subject\` are required.
+      \`success\`, \`summary\`, \`key_changes_made\`, \`objective_complete\`, \`commit\`, \`commit.type\`, and \`commit.subject\` are required.
       \`key_learnings\` and \`remaining_work\` are optional and default to \`[]\`.
       \`commit.scope\`, \`commit.body\`, and \`commit.breaking\` are optional and default to no scope, an empty body, and \`false\`.
       "
