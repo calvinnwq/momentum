@@ -40,7 +40,7 @@ Momentum never modifies the data directory outside the resolved path. Each store
           prompt.md            # Rendered iteration prompt
           runner.log           # Runner metadata and captured stdout/stderr
           verification.log     # Tagged verification command output, capped buffer
-          result.json          # Default runner result envelope; trusted-shell / acp may report another in-dir result file
+          result.json          # Legacy runner-result envelope; trusted-shell / acp may report another in-dir result file
 ```
 
 ## SQLite tables under `momentum.db`
@@ -206,7 +206,7 @@ Files at `<data-dir>/goals/<goal-id>/iterations/<n>/`, written per executed iter
 - `prompt.md` — rendered iteration prompt; empty in iterations that were never executed.
 - `runner.log` — runner metadata and captured stdout / stderr.
 - `verification.log` — tagged verification command output with a capped capture buffer (see `docs/failure-reset.md`).
-- `result.json` — default runner result envelope. Stored `trusted-shell` and `acp` runner profiles may report a different result file in the same iteration directory via `trusted_shell.result_file` / `acp.result_file`; the path is recorded on the iteration row.
+- `result.json` — legacy runner-result envelope for the retired goal lane. Stored `trusted-shell` and `acp` runner profiles may report a different result file in the same iteration directory via `trusted_shell.result_file` / `acp.result_file`; the path is recorded on the iteration row. See [`docs/runners.md`](runners.md) for the current `AgentResult` schema and its explicit read-only legacy reader.
 
 ## How the retired lane initialized these files
 

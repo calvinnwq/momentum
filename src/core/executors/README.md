@@ -178,8 +178,9 @@ adapter interfaces, never executor persistence.
   (`COMMIT_TYPES`, `CommitType`, `CommitIntent`, `AgentResult`, and the
   `AgentResult{Error,Success,Parse}` envelopes), with their parser
   (`parseAgentResult` / `normalizeAgentResult` / `normalizeCommitIntent`) in
-  `src/core/executors/agent-result/result.ts`. Both were drained from the former root
-  `src/runner-result.ts` under the type-placement slice.
+  `src/core/executors/agent-result/result.ts`. Both were moved from the former
+  `src/core/executors/runner/{result,types}.ts` modules under the vocabulary
+  rename.
   `COMMIT_TYPES` is a runtime const, but it backs the `CommitType` union and has
   no behavior, so it is colocated with the type it defines.
 - No executor barrel/seam consolidation and no finalizer/reconciliation redesign.
