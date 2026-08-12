@@ -25,7 +25,7 @@
  * Schema" result/verification/commit/recovery evidence requirement. The
  * projection is two-phase to honour both the contract's Round Lifecycle and the
  * round transition graph: a `capturing_result` patch carries the normalized
- * runner result (summary / key changes / remaining work), then a terminal patch
+ * agent result (summary / key changes / remaining work), then a terminal patch
  * carries the verification status, commit SHA, classification, preserved recovery
  * code, and human gate. {@link planGoalLoopRoundPersistence} ties the decision
  * and both patches to one finalize result so they can never drift, and the
@@ -203,7 +203,7 @@ export type GoalLoopRoundPersistencePlan = {
   decision: GoalLoopRoundDecision;
   evidence: GoalLoopFinalizeEvidence;
   /**
-   * The `capturing_result` patch carrying the normalized runner result, or
+   * The `capturing_result` patch carrying the normalized agent result, or
    * `null` when the round produced no result to capture (it then transitions
    * straight from `running` to the terminal patch's manual-recovery state).
    */
@@ -454,7 +454,7 @@ const UNSAFE_FINALIZE_OUTCOMES: ReadonlySet<GoalLoopFinalizeOutcome> = new Set([
 ]);
 
 /**
- * Project a normalized runner result into the agent-loop recommendation. The
+ * Project a normalized agent result into the agent-loop recommendation. The
  * bounded round writes a {@link AgentResult}; the daemon only needs its
  * `success` flag and `objective_complete` completion recommendation to classify.
  */

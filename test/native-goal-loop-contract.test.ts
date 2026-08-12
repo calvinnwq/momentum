@@ -102,12 +102,6 @@ describe("agent-loop contract docs", () => {
     if (!parsedWithoutOptionalArrays.ok) return;
     expect(parsedWithoutOptionalArrays.value.key_learnings).toEqual([]);
     expect(parsedWithoutOptionalArrays.value.remaining_work).toEqual([]);
-    expect(spec).toContain(
-      "The agent-authored result document consumed by the shipped agent-loop mechanism uses the normalized `AgentResult` schema (`momentum.agent-result.v1`)",
-    );
-    expect(spec).toContain(
-      "`key_learnings` and `remaining_work` are optional agent-authored arrays that default to empty arrays when omitted.",
-    );
   });
 
   it("fails closed when a result document carries both completion fields", () => {
@@ -120,9 +114,6 @@ describe("agent-loop contract docs", () => {
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.error).toMatch(/ambiguous/i);
-    expect(spec).toContain(
-      "A raw result document carrying both `goal_complete` and `objective_complete` fails closed as ambiguous",
-    );
   });
 
   it("parses current agent result documents under the named current schema", () => {

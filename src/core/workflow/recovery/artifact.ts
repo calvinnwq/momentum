@@ -169,7 +169,7 @@ const SAFE_NEXT_STEPS: Record<
     "Re-dispatch the step or cancel the run once the missing result is understood.",
   ],
   result_invalid: [
-    "Inspect the malformed live step result document; it is not a valid normalized runner result.",
+    "Inspect the malformed live step result document; it is not a valid normalized agent result.",
     "Confirm the step's true outcome from its executor log before retrying — the result cannot be trusted, so Momentum did not commit or reset.",
     "Re-dispatch the step or cancel the run once the invalid result is understood.",
   ],

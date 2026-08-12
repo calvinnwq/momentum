@@ -86,7 +86,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
@@ -119,7 +119,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 30,
@@ -137,7 +137,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: false,
+      agentSuccess: false,
       commitIntent: baseIntent(),
       verificationCommands: ["echo should-not-run"],
       verificationTimeoutSec: 30,
@@ -166,7 +166,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: false,
+      agentSuccess: false,
       commitIntent: baseIntent(),
       verificationCommands: ["echo should-not-run"],
       verificationTimeoutSec: 30,
@@ -185,7 +185,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: ["echo ok", "false"],
       verificationTimeoutSec: 30,
@@ -213,7 +213,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: ["echo nothing-to-commit"],
       verificationTimeoutSec: 30,
@@ -236,7 +236,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
@@ -262,7 +262,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
@@ -293,7 +293,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
@@ -322,7 +322,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead: ZERO_SHA,
-      runnerSuccess: false,
+      agentSuccess: false,
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 30,
@@ -345,7 +345,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead: ZERO_SHA,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: ["false"],
       verificationTimeoutSec: 30,
@@ -364,7 +364,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath: "",
       baseHead: ZERO_SHA,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 30,
@@ -380,7 +380,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath: "/tmp",
       baseHead: "not-a-sha",
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 30,
@@ -396,7 +396,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath: "/tmp",
       baseHead: "a".repeat(40),
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 0,

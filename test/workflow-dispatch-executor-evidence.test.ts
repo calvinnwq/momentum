@@ -134,7 +134,7 @@ function successResult(
       checkpoints: [],
       artifacts: [
         { kind: "executor-log", path: EXECUTOR_LOG },
-        { kind: "runner-result", path: RESULT_JSON },
+        { kind: "agent-result", path: RESULT_JSON },
       ],
       resultDigest: "sha256:abc123",
       errorCode: null,
@@ -206,7 +206,7 @@ describe("planDispatchedExecutorTerminalization — pure mapping", () => {
     });
   });
 
-  it("maps a failed (runner success=false) executor result to a clean failed terminal", () => {
+  it("maps a failed (agent success=false) executor result to a clean failed terminal", () => {
     expect(planDispatchedExecutorTerminalization(failedResult())).toEqual({
       outcome: "clean_terminal",
       attemptState: "failed",

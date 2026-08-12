@@ -309,7 +309,7 @@ function createLiveWrapperDelegateToolAdapter(
       const correlated = readRecoveredLiveWrapperResult(completed);
       // The dispatch contract intentionally exposes only terminal state and
       // summary. The normalized result file is authoritative for commit intent
-      // and all other runner fields, and resultDigest binds that complete file
+      // and all other agent-result fields, and resultDigest binds that complete file
       // through finalization and recovery.
       if (
         completed.dispatchOutcome === undefined ||
@@ -915,7 +915,7 @@ function readRecoveredLiveWrapperResult(
       checkpoints: [],
       artifacts: [
         { kind: "executor-log", path: receipt.executorLogPath },
-        { kind: "runner-result", path: receipt.resultJsonPath },
+        { kind: "agent-result", path: receipt.resultJsonPath },
       ],
       resultDigest: null,
       errorCode: parsed.value.success ? null : "command_failed",

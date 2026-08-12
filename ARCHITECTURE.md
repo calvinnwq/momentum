@@ -83,7 +83,7 @@ placeholder-free pending homes, and import guards; ARCH-03 populated
 `src/core/<domain>/` (goal, source, intent, daemon, repo, evidence) plus
 `src/config/`. ARCH-06 drained the final root type modules into
 `src/shared/events.ts`, `src/core/goal/{spec,types}.ts`, and
-`src/core/executors/runner/{result,types}.ts`; transitional root exceptions are
+`src/core/executors/agent-result/{result,types}.ts`; transitional root exceptions are
 now empty. High-density workflow and executor modules are grouped under local
 folders documented by each domain `README.md`. Detailed current rules live in
 this file and [SPEC.md](SPEC.md); long-form architecture migration rationale
@@ -143,7 +143,7 @@ The enforced import boundaries are:
   commands, adapters, persistence, mutation modules, or state-mutating shared helpers stay forbidden.
 - External adapters stay behind domain or command boundaries with explicit
   policy checks.
-- Adapters may import the dependency-free executor SDK contract and official runner-result types, parsers, and normalizers.
+- Adapters may import the dependency-free executor SDK contract and official agent-result types, parsers, and normalizers.
   Any adapter dependency on executor persistence or lifecycle internals requires an explicit disposition in `src/core/executors/README.md` and the executor SDK import-boundary guard.
 - Test fixtures may read source files for structural guards, but production code
   must not depend on filesystem source scanning.

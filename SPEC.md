@@ -318,7 +318,7 @@ The `commit` object supplies the commit intent that Momentum uses only after rep
 Inside `commit`, `type` and `subject` are required; `scope`, `body`, and `breaking` are optional intent fields.
 
 After finalization, Momentum projects the captured agent result plus durable round evidence into the native round evidence view consumed by `workflow run logs`.
-Future status, handoff, monitor, and GUI surfaces must use the same projection once they are wired to executor round evidence instead of scraping terminal text or runner-owned directories.
+Future status, handoff, monitor, and GUI surfaces must use the same projection once they are wired to executor round evidence instead of scraping terminal text or local workflow-run directories.
 The canonical `momentum.native-agent-loop.round-result.v1` fixture is a post-finalization evidence projection, not an agent-authored input document.
 The retained `momentum.native-goal-loop.round-result.v1` fixture remains readable only for frozen legacy artifacts and is not emitted for current canonical rounds.
 Its required JSON fields are `schema`, `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `daemonClassification`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`.
@@ -337,7 +337,7 @@ They still preserve their result document when present, verification or reset ev
 A reset belongs to the round finalization path that detected unsafe or incomplete work; it must never manufacture a commit to make progress look cleaner.
 
 Momentum resumes from durable executor_attempts, executor_rounds, leases, checkpoints, artifacts, commits, recovery codes, and accumulated learnings.
-Resume never depends on terminal scrollback, chat transcript memory, process handles, or a runner-owned run directory.
+Resume never depends on terminal scrollback, chat transcript memory, process handles, or a local workflow-run directory.
 On resume, terminal rounds remain immutable, in-flight rounds are rechecked against their lease and checkpoint evidence, stale rounds move to manual recovery or a recovered evidence state through repo-native recovery codes, and the next runnable round receives the accumulated notes/learnings from prior rounds.
 The loop must preserve no duplicate completed rounds and no duplicate commits by deriving the next round index and commit ownership from durable Momentum rows.
 If a round already recorded a commit SHA, resume treats that commit as owned by that round and never commits it again.

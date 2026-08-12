@@ -86,7 +86,7 @@ For native agent-loop rounds, Momentum renders a deterministic per-round prompt 
 Source context and prior-round evidence are quoted as untrusted JSON context, not as agent instructions.
 Momentum clears any stale file at that result path before the executor starts, so the executor must write a fresh result for the current round.
 The executor writes only the normalized `AgentResult` JSON at that configured result path, and Momentum routes missing, malformed, or schema-invalid result files through explicit recovery evidence instead of treating them as progress.
-After finalization, `workflow run logs` reads the native round evidence projected from `executor_attempts`, `executor_rounds`, and child evidence rows instead of treating the agent-authored JSON, terminal scrollback, `.gnhf/runs`, or a runner-local directory as authoritative state.
+After finalization, `workflow run logs` reads the native round evidence projected from `executor_attempts`, `executor_rounds`, and child evidence rows instead of treating the agent-authored JSON, terminal scrollback, `.gnhf/runs`, or a local workflow-run directory as authoritative state.
 Native agent-loop finalization writes a digested `commit_or_reset_evidence` sidecar next to the verification log when the verification log path is usable, so operators can inspect commit/reset outcome metadata without relying on terminal output.
 Future workflow status, handoff, monitor, and GUI surfaces must use that same projection once they are wired to executor round evidence.
 

@@ -21,7 +21,7 @@ const SHA40_RE = /^[0-9a-f]{40}$/;
 export type FinalizeIterationInput = {
   repoPath: string;
   baseHead: string;
-  runnerSuccess: boolean;
+  agentSuccess: boolean;
   commitIntent: CommitIntent;
   verificationCommands: string[];
   verificationTimeoutSec: number;
@@ -100,14 +100,14 @@ export function finalizeIteration(
   const {
     repoPath,
     baseHead,
-    runnerSuccess,
+    agentSuccess,
     commitIntent,
     verificationCommands,
     verificationTimeoutSec,
     verificationLogPath,
   } = input;
 
-  if (!runnerSuccess) {
+  if (!agentSuccess) {
     writeVerificationSkipNote(verificationLogPath, "runner reported failure");
     const permit = acquireMutationPermit(input, "reset");
     if (!permit.ok) return { outcome: "ownership_lost", error: permit.error };
@@ -227,10 +227,10 @@ function validateInput(
       error: "baseHead must be a 40-character hex SHA.",
     };
   }
-  if (typeof input.runnerSuccess !== "boolean") {
+  if (typeof input.agentSuccess !== "boolean") {
     return {
       outcome: "invalid_input",
-      error: "runnerSuccess must be a boolean.",
+      error: "agentSuccess must be a boolean.",
     };
   }
   if (input.commitIntent === null || typeof input.commitIntent !== "object") {

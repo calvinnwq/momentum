@@ -42,7 +42,7 @@ function makeTempDir(prefix = "momentum-live-exec-"): string {
   return fs.realpathSync(dir);
 }
 
-const RUNNER_RESULT: AgentResult = {
+const AGENT_RESULT: AgentResult = {
   success: true,
   summary: "live implementation step succeeded",
   key_changes_made: ["did the thing"],
@@ -63,7 +63,7 @@ function makeWrapperSuccess(
 ): LiveStepWrapperSuccess {
   return {
     ok: true,
-    result: RUNNER_RESULT,
+    result: AGENT_RESULT,
     resultJsonPath: "/iter/result.json",
     executorLogPath: "/run/executor.log",
     diagnostics: {
@@ -148,27 +148,28 @@ describe("mapLiveStepWrapperResult — success", () => {
     expect(out.resultJsonPath).toBe("/iter/result.json");
   });
 
-  it("records the executor log and runner result as artifacts and marks the executor live", () => {
+  it("records the executor log and agent result as artifacts and marks the executor live", () => {
     const out = mapLiveStepWrapperResult(makeWrapperSuccess());
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.result.artifacts).toEqual([
       { kind: "executor-log", path: "/run/executor.log" },
-      { kind: "runner-result", path: "/iter/result.json" },
+      { kind: "agent-result", path: "/iter/result.json" },
     ]);
     expect(out.diagnostics?.executor).toBe("live");
     expect(out.diagnostics?.command).toBe("/bin/sh");
-    expect(out.diagnostics?.runnerSuccess).toBe(true);
+    expect(out.diagnostics?.agentSuccess).toBe(true);
+    expect(out.diagnostics).not.toHaveProperty("runnerSuccess");
     expect(out.diagnostics?.objectiveComplete).toBe(false);
   });
 
-  it("maps a parsed runner result with success=false to a failed executor result", () => {
+  it("maps a parsed agent result with success=false to a failed executor result", () => {
     const out = mapLiveStepWrapperResult(
       makeWrapperSuccess({
         result: {
-          ...RUNNER_RESULT,
+          ...AGENT_RESULT,
           success: false,
-          summary: "runner could not complete implementation",
+          summary: "agent could not complete implementation",
         },
       }),
     );
@@ -177,7 +178,7 @@ describe("mapLiveStepWrapperResult — success", () => {
     expect(out.result.state).toBe("failed");
     expect(out.result.errorCode).toBe("command_failed");
     expect(out.result.errorMessage).toContain("success=false");
-    expect(out.diagnostics?.runnerSuccess).toBe(false);
+    expect(out.diagnostics?.agentSuccess).toBe(false);
   });
 });
 

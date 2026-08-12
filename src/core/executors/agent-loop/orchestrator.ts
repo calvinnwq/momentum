@@ -99,7 +99,7 @@ import type { FinalizeWorkflowStepFromResultFileResult } from "../shared/step-fi
 import type { AgentResult } from "../agent-result/types.js";
 
 /**
- * The output of one bounded mechanism run: the normalized runner result (or
+ * The output of one bounded mechanism run: the normalized agent result (or
  * `null` when the round produced no valid result document) plus the repo-safety
  * finalize outcome. This is exactly what {@link planGoalLoopRoundPersistence}
  * consumes, so the mechanism stays decoupled from the durable schema.
