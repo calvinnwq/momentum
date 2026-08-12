@@ -397,7 +397,7 @@ const RESET_FAILED_WITH_VERIFY: FinalizeWorkflowStepFromResultFileResult = {
 
 const RESET_FAILED_NO_VERIFY: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "reset_failed",
-  trigger: "runner_failure",
+  trigger: "agent_failure",
   verification: null,
   reset: { ok: false, code: "git_failed", error: "git reset failed" },
 };

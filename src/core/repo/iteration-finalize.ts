@@ -48,7 +48,7 @@ export type FinalizeIterationInput = {
   }) => { ok: true } | { ok: false; error: string };
 };
 
-export type FinalizeResetTrigger = "runner_failure" | "verification_failure";
+export type FinalizeResetTrigger = "agent_failure" | "verification_failure";
 
 export type FinalizeIterationResult =
   | {
@@ -57,7 +57,7 @@ export type FinalizeIterationResult =
       commit: CommitSuccess;
     }
   | {
-      outcome: "reset_runner_failure";
+      outcome: "reset_agent_failure";
       reset: ResetSuccess;
     }
   | {
@@ -108,7 +108,7 @@ export function finalizeIteration(
   } = input;
 
   if (!agentSuccess) {
-    writeVerificationSkipNote(verificationLogPath, "runner reported failure");
+    writeVerificationSkipNote(verificationLogPath, "agent reported failure");
     const permit = acquireMutationPermit(input, "reset");
     if (!permit.ok) return { outcome: "ownership_lost", error: permit.error };
     let reset: ResetSuccess | ResetFailure;
@@ -120,12 +120,12 @@ export function finalizeIteration(
     if (!reset.ok) {
       return {
         outcome: "reset_failed",
-        trigger: "runner_failure",
+        trigger: "agent_failure",
         verification: null,
         reset,
       };
     }
-    return { outcome: "reset_runner_failure", reset };
+    return { outcome: "reset_agent_failure", reset };
   }
 
   const verification = runVerification({

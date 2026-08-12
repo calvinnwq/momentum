@@ -164,7 +164,7 @@ const SAFE_NEXT_STEPS: Record<
     "Decide manually whether to keep, amend, or roll back the unexpected commit before clearing recovery.",
   ],
   result_missing: [
-    "Inspect the live step's normalized result file path; the runner exited without writing it.",
+    "Inspect the live step's normalized result file path; the agent exited without writing it.",
     "Confirm the step's true outcome from its executor log before retrying — the result is unknown, so Momentum did not commit or reset.",
     "Re-dispatch the step or cancel the run once the missing result is understood.",
   ],

@@ -285,7 +285,7 @@ export function finalizeWorkflowStep(
         commit: finalize.commit,
         head: finalize.commit.commitSha,
       };
-    case "reset_runner_failure":
+    case "reset_agent_failure":
       return { outcome: "reset_step_failure", reset: finalize.reset };
     case "reset_verification_failure":
       return {
