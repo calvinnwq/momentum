@@ -5,7 +5,7 @@ This page remains for three reasons:
 
 - **Stored compatibility data.** Existing goal rows and `goals/<goal-id>/goal.md` copies still name runner profiles, and goal-scoped `recovery.md` artifacts render the stored runner / command / args / cwd / timeout / result-file metadata.
 - **The frozen `doctor` envelope.** `doctor --json` still reports the built-in runner-profile kinds in its `runners` block (see [`docs/doctor.md`](doctor.md)); that envelope is wire-stable even though nothing executes the profiles anymore.
-- **Still-live contracts.** The normalized `RunnerResult` schema below is consumed by the workflow runtime's live wrappers and native agent-loop rounds, and the `MOMENTUM.md` repo-policy loader is used by `doctor --repo`, the `workflow run start` / `start-coding` / `preview-coding` doors, and live-wrapper dispatch finalization.
+- **Still-live contracts.** The normalized `AgentResult` schema below is consumed by the workflow runtime's live wrappers and native agent-loop rounds, and the `MOMENTUM.md` repo-policy loader is used by `doctor --repo`, the `workflow run start` / `start-coding` / `preview-coding` doors, and live-wrapper dispatch finalization.
 
 Built-in runner profile names: `fake`, `trusted-shell`, and `acp`.
 The `runner` field on a stored goal spec is one of these.
@@ -44,10 +44,14 @@ Stored goal specs that named `runner: acp` carry an `acp` frontmatter block with
 
 Stored iteration artifacts and job error rows from either profile may carry the retired lane's stable diagnostic codes — `invalid_input`, `runner_threw`, `spawn_failed`, `command_failed`, `command_timed_out`, `result_missing`, `result_invalid`, `output_overflow`, `runtime_unavailable`, `startup_failed`, `runner_changed_head`, and `head_mismatch` — which recovery artifacts and stored events preserve verbatim as durable evidence (see [`docs/failure-reset.md`](failure-reset.md)).
 
-## Normalized `RunnerResult` schema
+## Normalized `AgentResult` schema
 
-This schema is still live: workflow live wrappers (see [`docs/daemon.md`](daemon.md)) and native workflow `agent-loop` executors write and consume the same normalized result document, and stored iteration `result.json` files from the retired lane use it too.
-The dependency-free `RunnerResult` types plus their parser and normalizers under `src/core/executors/runner/` are official [executor SDK](executor-sdk.md) contract surface; runner and process adapters may import them at runtime without acquiring persistence or daemon ownership.
+This schema is still live: workflow live wrappers (see [`docs/daemon.md`](daemon.md)) and native workflow `agent-loop` executors write and consume the same normalized result document, and stored iteration `result.json` files from the retired lane use its legacy form too.
+The current raw document schema is `momentum.agent-result.v1` and its completion field is `objective_complete`.
+Raw documents carry no `schema` field; the version is discriminated by which completion field is present.
+Historical immutable `momentum.runner-result.v1` documents whose completion field is `goal_complete` remain readable through an explicit version-aware legacy reader, are never rewritten, and normalize to the same internal completion recommendation.
+A document carrying both `goal_complete` and `objective_complete` is rejected as ambiguous, even when the values agree.
+The dependency-free `AgentResult` types plus their parser and normalizers under `src/core/executors/agent-result/` are official [executor SDK](executor-sdk.md) contract surface; runner and process adapters may import them at runtime without acquiring persistence or daemon ownership.
 For ordinary live-wrapper-owned dispatched steps, the document is not terminal evidence by itself: after a successful wrapper process, Momentum parses the result, runs repo-safety finalization, verifies, commits or resets, and only then terminalizes the executor round for reconciliation.
 For binding-backed delegate-supervisor steps, the same document is input to safe handoff finalization, not terminal delegate authority.
 Its finalized result becomes durable handoff and candidate evidence, and a later external-state read must receive a daemon-accepted terminal classification before the attempt and step reconcile.
@@ -61,7 +65,7 @@ The result JSON is written at `$MOMENTUM_RESULT_PATH`:
   "key_changes_made": ["implemented the requested change"],
   "key_learnings": [],
   "remaining_work": [],
-  "goal_complete": false,
+  "objective_complete": false,
   "commit": {
     "type": "feat",
     "scope": "optional-scope",
@@ -72,17 +76,17 @@ The result JSON is written at `$MOMENTUM_RESULT_PATH`:
 }
 ```
 
-`success`, `summary`, `key_changes_made`, `goal_complete`, `commit`, `commit.type`, and `commit.subject` are required.
+`success`, `summary`, `key_changes_made`, `objective_complete`, `commit`, `commit.type`, and `commit.subject` are required.
 `key_learnings` and `remaining_work` default to empty arrays when omitted.
 The `commit.type` must be one of `build`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `test`, or `chore`; `commit.scope`, `commit.body`, and `commit.breaking` are optional and default to no scope, an empty body, and `false`.
 Momentum formats the verified git commit message from this commit intent as `type(scope)!: subject` plus the optional body.
 
-Native workflow `agent-loop` executors consume the runner-authored `RunnerResult` document before finalization and classification.
+Native workflow `agent-loop` executors consume the agent-authored `AgentResult` document before finalization and classification.
 For native agent-loop rounds, Momentum renders a deterministic per-round prompt that includes the workflow objective, source context, round identity, repo/base-head context, verification and acceptance requirements, prior round summaries/learnings/remaining work, and the exact result path.
-Source context and prior-round evidence are quoted as untrusted JSON context, not as runner instructions.
+Source context and prior-round evidence are quoted as untrusted JSON context, not as agent instructions.
 Momentum clears any stale file at that result path before the executor starts, so the executor must write a fresh result for the current round.
-The executor writes only the normalized `RunnerResult` JSON at that configured result path, and Momentum routes missing, malformed, or schema-invalid result files through explicit recovery evidence instead of treating them as progress.
-After finalization, `workflow run logs` reads the native round evidence projected from `executor_attempts`, `executor_rounds`, and child evidence rows instead of treating the runner-authored JSON, terminal scrollback, `.gnhf/runs`, or a runner-local directory as authoritative state.
+The executor writes only the normalized `AgentResult` JSON at that configured result path, and Momentum routes missing, malformed, or schema-invalid result files through explicit recovery evidence instead of treating them as progress.
+After finalization, `workflow run logs` reads the native round evidence projected from `executor_attempts`, `executor_rounds`, and child evidence rows instead of treating the agent-authored JSON, terminal scrollback, `.gnhf/runs`, or a local workflow-run directory as authoritative state.
 Native agent-loop finalization writes a digested `commit_or_reset_evidence` sidecar next to the verification log when the verification log path is usable, so operators can inspect commit/reset outcome metadata without relying on terminal output.
 Future workflow status, handoff, monitor, and GUI surfaces must use that same projection once they are wired to executor round evidence.
 

@@ -142,7 +142,7 @@ export function buildLiveStepWrapperInput(
 /**
  * Translate a `LiveStepWrapperResult` into the normalized dispatch result.
  * A successful wrapper process always becomes an `ok: true` executor result: a
- * runner document with `success: true` maps to `succeeded`, while `success:
+ * agent document with `success: true` maps to `succeeded`, while `success:
  * false` maps to a normalized `failed` step with `command_failed` so finalization
  * can reset the worktree. Only process-level wrapper failures become `ok: false`
  * dispatch errors carrying the mapped code plus the precise
@@ -152,20 +152,20 @@ export function mapLiveStepWrapperResult(
   result: LiveStepWrapperResult,
 ): LiveStepExecutorDispatchResult {
   if (result.ok) {
-    const runnerSucceeded = result.result.success;
+    const agentSucceeded = result.result.success;
     const executorResult: WorkflowStepExecutorResult = {
-      state: runnerSucceeded ? "succeeded" : "failed",
+      state: agentSucceeded ? "succeeded" : "failed",
       summary: result.result.summary,
       checkpoints: [],
       artifacts: [
         { kind: "executor-log", path: result.executorLogPath },
-        { kind: "runner-result", path: result.resultJsonPath },
+        { kind: "agent-result", path: result.resultJsonPath },
       ],
       resultDigest: null,
-      errorCode: runnerSucceeded ? null : "command_failed",
-      errorMessage: runnerSucceeded
+      errorCode: agentSucceeded ? null : "command_failed",
+      errorMessage: agentSucceeded
         ? null
-        : `live step runner reported success=false: ${result.result.summary}`,
+        : `live step agent reported success=false: ${result.result.summary}`,
       retryHint: null,
       recoveryHint: null,
     };
@@ -183,8 +183,8 @@ export function mapLiveStepWrapperResult(
         signal: result.diagnostics.signal,
         durationMs: result.diagnostics.durationMs,
         probed: result.diagnostics.probed,
-        runnerSuccess: result.result.success,
-        goalComplete: result.result.goal_complete,
+        agentSuccess: result.result.success,
+        objectiveComplete: result.result.objective_complete,
       },
     };
   }

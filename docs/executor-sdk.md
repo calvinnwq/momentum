@@ -407,7 +407,7 @@ The agent-once and script built-ins publish strict schemas with `additionalPrope
 
 The lifecycle runtime-normalizes the complete runner-adapter return before writing artifacts, result observations, or completion checkpoints.
 Malformed JavaScript or casted returns are rejected at that boundary, leaving only the already-materialized attempt, running round, and dispatch-binding checkpoint for recovery.
-A successful `agent-once` turn requires a successful normalized `RunnerResult`; a `script` turn is exit-code based and must not return a result document or result-document artifact.
+A successful `agent-once` turn requires a successful normalized `AgentResult`; a `script` turn is exit-code based and must not return a result document or result-document artifact.
 A result digest is valid only when its result document is present.
 Successful turns pass through `capturing_result`, but only a captured document produces `result_captured`; failures do not invent a capture checkpoint.
 
@@ -424,6 +424,7 @@ The shipped delegate-supervisor has a narrower tool-adapter interface inside the
 Agent-loop has no default iteration cap: requirements are the stop condition, and an explicit `maxRounds` value may stop continuation with a durable `quota_exhausted` gate.
 A looping executor must never add an implicit cap in its own adapter.
 
-## RunnerResult SDK surface
+## AgentResult SDK surface
 
-`RunnerResult`, `CommitIntent`, their related types, and the parser/normalizers under `src/core/executors/runner/` are official SDK contract surface. Runner and process adapters may import them at runtime. They are dependency-free result-contract modules, not persistence or daemon hooks.
+`AgentResult`, `CommitIntent`, their related types, and the parser/normalizers under `src/core/executors/agent-result/` are official SDK contract surface. Runner and process adapters may import them at runtime. They are dependency-free result-contract modules, not persistence or daemon hooks.
+The current raw document schema is `momentum.agent-result.v1` (`objective_complete`); historical immutable `momentum.runner-result.v1` documents (`goal_complete`) remain readable through the explicit version-aware legacy reader, and a document carrying both completion fields fails closed as ambiguous.

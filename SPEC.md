@@ -260,7 +260,7 @@ executors have no default iteration cap: requirements are the stop condition;
 only an explicitly configured cap may raise the durable `quota_exhausted` gate.
 The single-shot lifecycle runtime-normalizes the complete runner-adapter return before artifact writes, result observations, or completion checkpoints.
 Malformed JavaScript or casted returns are rejected with only the atomically materialized attempt, running round, and dispatch-binding checkpoint left for recovery.
-Successful `agent-once` turns require a successful normalized `RunnerResult`, while `script` turns are exit-code based and cannot return result-document evidence.
+Successful `agent-once` turns require a successful normalized `AgentResult`, while `script` turns are exit-code based and cannot return result-document evidence.
 
 If the anchor cannot confirm termination, the ownership-checked POSIX fallback
 receives its own bounded cleanup budget. The fallback budget starts only
@@ -284,11 +284,11 @@ Detected escaped descendants, lost ownership visibility, or any other inability
 to prove cleanup fails closed with `SUPERVISOR_FAILED` and preserves the durable
 in-flight state for recovery.
 
-The dependency-free `RunnerResult` shapes in
-`src/core/executors/runner/types.ts` and parser/normalizers in
-`src/core/executors/runner/result.ts` are official SDK contract surface. Runner
-and process adapters may import them at runtime without acquiring persistence or
-daemon ownership.
+The dependency-free `AgentResult` shapes in
+`src/core/executors/agent-result/types.ts` and parser/normalizers in
+`src/core/executors/agent-result/result.ts` are official SDK contract surface.
+Runner and process adapters may import them at runtime without acquiring
+persistence or daemon ownership.
 
 ## Agent-Loop Contract
 
@@ -305,18 +305,21 @@ Round states are `pending`, `running`, `capturing_result`, `finalizing`, `mirror
 `manual_recovery_required` carries stale, recovered, invalid, and unsafe-resume cases through recovery codes and durable evidence instead of adding non-repo state names.
 Stale in-flight work is detected from Momentum-owned leases and heartbeat/checkpoint age, then converted to durable recovery evidence before any continuation starts.
 
-The runner-authored result document consumed by the shipped agent-loop mechanism remains the normalized `RunnerResult` schema.
-Before a native round hands control to a runner, Momentum renders a deterministic per-round prompt from the workflow objective, issue scope/source context, round identity, repo/base HEAD context, verification and acceptance requirements, prior round evidence, and the configured result path.
+The agent-authored result document consumed by the shipped agent-loop mechanism uses the normalized `AgentResult` schema (`momentum.agent-result.v1`).
+Raw result documents carry no `schema` field: the prompt contract names only the completion field, so the document version is discriminated by which completion field is present.
+Historical immutable `momentum.runner-result.v1` documents whose completion field is `goal_complete` remain readable through the explicit version-aware legacy reader, are never rewritten, and normalize to the same internal completion recommendation as current documents.
+A raw result document carrying both `goal_complete` and `objective_complete` fails closed as ambiguous, even when the values agree; the daemon remains the final classifier.
+Before a native round hands control to an agent, Momentum renders a deterministic per-round prompt from the workflow objective, issue scope/source context, round identity, repo/base HEAD context, verification and acceptance requirements, prior round evidence, and the configured result path.
 Source context and prior-round evidence are rendered as quoted untrusted JSON context, not executable instructions.
-The prompted result-file mechanism clears any stale result file, writes that prompt as a runner input artifact, lets the runner author the configured result document, then reuses the existing result-file finalization bridge for parsing, verification, commit/reset, and recovery classification.
-Runner-authored results are parsed before finalization and classification, and their required fields are `success`, `summary`, `key_changes_made`, `goal_complete`, and `commit`.
-`key_learnings` and `remaining_work` are optional runner-authored arrays that default to empty arrays when omitted.
+The prompted result-file mechanism clears any stale result file, writes that prompt as an agent input artifact, lets the agent author the configured result document, then reuses the existing result-file finalization bridge for parsing, verification, commit/reset, and recovery classification.
+Agent-authored results are parsed before finalization and classification, and their required fields are `success`, `summary`, `key_changes_made`, `objective_complete`, and `commit`.
+`key_learnings` and `remaining_work` are optional agent-authored arrays that default to empty arrays when omitted.
 The `commit` object supplies the commit intent that Momentum uses only after repository safety and verification have passed.
 Inside `commit`, `type` and `subject` are required; `scope`, `body`, and `breaking` are optional intent fields.
 
-After finalization, Momentum projects the captured runner result plus durable round evidence into the native round evidence view consumed by `workflow run logs`.
-Future status, handoff, monitor, and GUI surfaces must use the same projection once they are wired to executor round evidence instead of scraping terminal text or runner-owned directories.
-The canonical `momentum.native-agent-loop.round-result.v1` fixture is a post-finalization evidence projection, not a runner-authored input document.
+After finalization, Momentum projects the captured agent result plus durable round evidence into the native round evidence view consumed by `workflow run logs`.
+Future status, handoff, monitor, and GUI surfaces must use the same projection once they are wired to executor round evidence instead of scraping terminal text or local workflow-run directories.
+The canonical `momentum.native-agent-loop.round-result.v1` fixture is a post-finalization evidence projection, not an agent-authored input document.
 The retained `momentum.native-goal-loop.round-result.v1` fixture remains readable only for frozen legacy artifacts and is not emitted for current canonical rounds.
 Its required JSON fields are `schema`, `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `daemonClassification`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`.
 `completionRecommendation` is the executor's recommendation only: `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
@@ -334,14 +337,14 @@ They still preserve their result document when present, verification or reset ev
 A reset belongs to the round finalization path that detected unsafe or incomplete work; it must never manufacture a commit to make progress look cleaner.
 
 Momentum resumes from durable executor_attempts, executor_rounds, leases, checkpoints, artifacts, commits, recovery codes, and accumulated learnings.
-Resume never depends on terminal scrollback, chat transcript memory, process handles, or a runner-owned run directory.
+Resume never depends on terminal scrollback, chat transcript memory, process handles, or a local workflow-run directory.
 On resume, terminal rounds remain immutable, in-flight rounds are rechecked against their lease and checkpoint evidence, stale rounds move to manual recovery or a recovered evidence state through repo-native recovery codes, and the next runnable round receives the accumulated notes/learnings from prior rounds.
 The loop must preserve no duplicate completed rounds and no duplicate commits by deriving the next round index and commit ownership from durable Momentum rows.
 If a round already recorded a commit SHA, resume treats that commit as owned by that round and never commits it again.
 If a round never reached a safe commit boundary, resume may start a later round only after preserving the recovery reason and reset/checkpoint evidence for the stale or failed round.
 
 GNHF is source material, a compatibility reference, or an optional runner below the legacy `goal-loop` spelling for retained definitions when that raw identity is unclaimed; the current coding workflow instead selects it as portable tool config on the `delegate-supervisor` implementation step.
-GNHF's per-iteration prompt, notes, JSON result, stop condition, and commit-per-successful-iteration behavior may also inform the native agent-loop runner mechanism.
+GNHF's per-iteration prompt, notes, JSON result, stop condition, and commit-per-successful-iteration behavior may also inform the native agent-loop mechanism.
 `.gnhf/runs` is not Momentum's durable source of truth.
 Momentum's durable source of truth is the workflow run, step, executor attempt, executor round, child evidence, lease, checkpoint, commit, and recovery rows under `<data-dir>/momentum.db` plus their artifact pointers.
 `gnhf` must not become a first-class executor merely to reuse behavior.
@@ -357,7 +360,7 @@ Every dispatched step must produce normalized result evidence or mirrored
 external state before final classification. Process handles, hook events,
 sockets, and file watchers are fast-path hints, not authoritative state.
 For ordinary live-wrapper-owned dispatched steps, successful wrapper evidence is
-not terminal by itself: Momentum reads the runner result, verifies, commits or
+not terminal by itself: Momentum reads the agent result, verifies, commits or
 resets against the captured base HEAD, and only then records terminal executor
 evidence for reconciliation.
 For binding-backed delegate-supervisor steps, that same finalization produces
@@ -525,9 +528,9 @@ Native tail recovery is hardened without changing the default route.
 Failed required `merge-cleanup` and `tracker-refresh` steps classify as `failed_external_side_effect_step` so operators verify the canonical external state - pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `tracker-refresh` - then reconcile through `workflow run clear-recovery --evidence-pointer <ref>` instead of blindly re-running side-effecting tail work.
 Status, handoff, monitor, and watch expose that lane as `nextAction.actionClass: "reconcile_external_tail"` with `recoveryDetail.kind: "external_tail_reconcile"`.
 The checked-in coding-workflow host-binding file executes the wrapper from source through the TypeScript source loader so cleanup of generated `dist/` artifacts does not break `merge-cleanup` or `tracker-refresh` tail work.
-The wrapper validates `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG` before spawning a child command: the top level is limited to `steps`, per-step keys must use the canonical snake_case schema, malformed `env_allow` and unsafe or mismatched `result_file` values fail closed as setup recovery, and rejected configs write no runner evidence.
+The wrapper validates `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG` before spawning a child command: the top level is limited to `steps`, per-step keys must use the canonical snake_case schema, malformed `env_allow` and unsafe or mismatched `result_file` values fail closed as setup recovery, and rejected configs write no agent-result evidence.
 For the `validate` step, the wrapper config must include a `runner_profile` block that selects the `axi` interface, declares `stdin: "closed"`, records the selected no-mistakes agent (`claude`, `codex`, `opencode`, or `rovodev`), records that agent's required harness environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), and names the configured absolute executable agent path.
-The wrapper checks the filtered child environment, executable agent path, no-mistakes `HOME/.no-mistakes/config.yaml` top-level `agent`, and no-mistakes top-level `agent_path_override.<agent>` config against that profile before spawning no-mistakes, so missing runner env, `agent=auto`, malformed YAML, duplicate config keys, nested-only overrides, a missing/non-executable agent path, a mismatched no-mistakes agent override, or an unsafe stdin policy fails closed as setup recovery instead of relying on ambient daemon state.
+The wrapper checks the filtered child environment, executable agent path, no-mistakes `HOME/.no-mistakes/config.yaml` top-level `agent`, and no-mistakes top-level `agent_path_override.<agent>` config against that profile before spawning no-mistakes, so missing agent environment, `agent=auto`, malformed YAML, duplicate config keys, nested-only overrides, a missing/non-executable agent path, a mismatched no-mistakes agent override, or an unsafe stdin policy fails closed as setup recovery instead of relying on ambient daemon state.
 The `merge-cleanup` wrapper owns its side-effecting tail lifecycle: preflight proves explicit GitHub auth (`GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR`), durable target identity (`merge_cleanup.pull_request_id`, `expected_head_sha`, and `cleanup_branch`), and live PR state/head/mergeability in the same worker before apply can spawn the merge command; already-merged or already-deleted cleanup state routes to reconcile instead of another mutation. This remains tail-local and is not promoted into workflow-level structural preflight.
 The `tracker-refresh` daemon tail owns the same preflight -> apply -> reconcile shape around the existing external-apply path: missing auth, missing source item, ambiguous source evidence, duplicate/stale intent, invalid payload, policy denial, or mismatched audit evidence fails closed before the Linear client is called; a missing intent can be deterministically seeded to `Done` only from the workflow issue scope plus a unique matching Linear source item, and already-applied succeeded audit evidence maps to terminal executor evidence instead of generic update-step repair.
 For the `validate` step, the no-mistakes tool adapter hands off the external run and normalizes its state for `delegate-supervisor`. A reported `checks-passed` outcome, or an otherwise-still-monitoring run with current clean pull request evidence and green or explicitly absent checks, is terminal Momentum success only when no current blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state is present.

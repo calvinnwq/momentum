@@ -78,7 +78,7 @@ const VALID_RESULT_JSON = JSON.stringify({
   key_changes_made: ["did the thing"],
   key_learnings: [],
   remaining_work: [],
-  goal_complete: false,
+  objective_complete: false,
   commit: { type: "chore", subject: "do the thing", body: "", breaking: false },
 });
 const WRITE_VALID_RESULT = `printf '%s' '${VALID_RESULT_JSON}' > "$MOMENTUM_RESULT_PATH"`;

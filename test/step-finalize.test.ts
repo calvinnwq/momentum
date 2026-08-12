@@ -7,8 +7,9 @@ import { fileURLToPath } from "node:url";
 import {
   finalizeWorkflowStep,
   finalizeWorkflowStepFromResultFile,
+  readNormalizedResultFile,
 } from "../src/core/executors/shared/step-finalize.js";
-import type { CommitIntent } from "../src/core/executors/runner/types.js";
+import type { CommitIntent } from "../src/core/executors/agent-result/types.js";
 
 // Covers the NGX-494 shared finalization seam (`step-finalize.ts`), the
 // workflow/runtime-owned home of the verify -> commit / reset transaction that
@@ -133,6 +134,58 @@ describe("finalizeWorkflowStepFromResultFile (shared seam, no-git decision paths
     if (result.outcome === "result_invalid") {
       expect(result.error).toMatch(/^live step result JSON is invalid:/);
       expect(result.resultFilePath).toBe(resultFilePath);
+    }
+  });
+
+  it("reads a historical legacy goal_complete document through the production result-file seam", () => {
+    const dir = makeTempDir();
+    const resultFilePath = path.join(dir, "legacy-result.json");
+    fs.writeFileSync(
+      resultFilePath,
+      JSON.stringify({
+        success: true,
+        summary: "historical round",
+        key_changes_made: ["kept legacy evidence readable"],
+        goal_complete: true,
+        commit: baseIntent(),
+      }),
+      "utf-8",
+    );
+    const read = readNormalizedResultFile(resultFilePath);
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    // The legacy document normalizes to the same internal completion
+    // recommendation shape new documents produce.
+    expect(read.result.objective_complete).toBe(true);
+    expect(read.result.success).toBe(true);
+  });
+
+  it("fails closed through the production result-file seam when both completion fields are present", () => {
+    const dir = makeTempDir();
+    const resultFilePath = path.join(dir, "mixed-result.json");
+    fs.writeFileSync(
+      resultFilePath,
+      JSON.stringify({
+        success: true,
+        summary: "ambiguous round",
+        key_changes_made: [],
+        goal_complete: true,
+        objective_complete: true,
+        commit: baseIntent(),
+      }),
+      "utf-8",
+    );
+    const result = finalizeWorkflowStepFromResultFile({
+      repoPath: "/does/not/matter",
+      baseHead: VALID_SHA,
+      resultFilePath,
+      verificationCommands: [],
+      verificationTimeoutSec: 5,
+      verificationLogPath: path.join(dir, "verify.log"),
+    });
+    expect(result.outcome).toBe("result_invalid");
+    if (result.outcome === "result_invalid") {
+      expect(result.error).toMatch(/ambiguous/i);
     }
   });
 });

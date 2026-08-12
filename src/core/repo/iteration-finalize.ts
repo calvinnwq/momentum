@@ -8,7 +8,7 @@ import {
   type ResetFailure,
   type ResetSuccess,
 } from "../../adapters/git-transaction.js";
-import type { CommitIntent } from "../executors/runner/types.js";
+import type { CommitIntent } from "../executors/agent-result/types.js";
 import {
   openVerificationLogFile,
   runVerification,
@@ -21,7 +21,7 @@ const SHA40_RE = /^[0-9a-f]{40}$/;
 export type FinalizeIterationInput = {
   repoPath: string;
   baseHead: string;
-  runnerSuccess: boolean;
+  agentSuccess: boolean;
   commitIntent: CommitIntent;
   verificationCommands: string[];
   verificationTimeoutSec: number;
@@ -48,7 +48,7 @@ export type FinalizeIterationInput = {
   }) => { ok: true } | { ok: false; error: string };
 };
 
-export type FinalizeResetTrigger = "runner_failure" | "verification_failure";
+export type FinalizeResetTrigger = "agent_failure" | "verification_failure";
 
 export type FinalizeIterationResult =
   | {
@@ -57,7 +57,7 @@ export type FinalizeIterationResult =
       commit: CommitSuccess;
     }
   | {
-      outcome: "reset_runner_failure";
+      outcome: "reset_agent_failure";
       reset: ResetSuccess;
     }
   | {
@@ -100,15 +100,15 @@ export function finalizeIteration(
   const {
     repoPath,
     baseHead,
-    runnerSuccess,
+    agentSuccess,
     commitIntent,
     verificationCommands,
     verificationTimeoutSec,
     verificationLogPath,
   } = input;
 
-  if (!runnerSuccess) {
-    writeVerificationSkipNote(verificationLogPath, "runner reported failure");
+  if (!agentSuccess) {
+    writeVerificationSkipNote(verificationLogPath, "agent reported failure");
     const permit = acquireMutationPermit(input, "reset");
     if (!permit.ok) return { outcome: "ownership_lost", error: permit.error };
     let reset: ResetSuccess | ResetFailure;
@@ -120,12 +120,12 @@ export function finalizeIteration(
     if (!reset.ok) {
       return {
         outcome: "reset_failed",
-        trigger: "runner_failure",
+        trigger: "agent_failure",
         verification: null,
         reset,
       };
     }
-    return { outcome: "reset_runner_failure", reset };
+    return { outcome: "reset_agent_failure", reset };
   }
 
   const verification = runVerification({
@@ -227,10 +227,10 @@ function validateInput(
       error: "baseHead must be a 40-character hex SHA.",
     };
   }
-  if (typeof input.runnerSuccess !== "boolean") {
+  if (typeof input.agentSuccess !== "boolean") {
     return {
       outcome: "invalid_input",
-      error: "runnerSuccess must be a boolean.",
+      error: "agentSuccess must be a boolean.",
     };
   }
   if (input.commitIntent === null || typeof input.commitIntent !== "object") {

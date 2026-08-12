@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { finalizeIteration } from "../src/core/repo/iteration-finalize.js";
-import type { CommitIntent } from "../src/core/executors/runner/types.js";
+import type { CommitIntent } from "../src/core/executors/agent-result/types.js";
 
 const ZERO_SHA = "0".repeat(40);
 const tempRoots: string[] = [];
@@ -53,7 +53,7 @@ function makeLogPath(): string {
   return path.join(dir, "verification.log");
 }
 
-function setupRepoWithRunnerEdits(): {
+function setupRepoWithAgentEdits(): {
   repoPath: string;
   baseHead: string;
   logPath: string;
@@ -61,8 +61,8 @@ function setupRepoWithRunnerEdits(): {
   const repoPath = initRepo();
   const baseHead = commitInitial(repoPath);
   fs.writeFileSync(
-    path.join(repoPath, "runner-edit.txt"),
-    "from-runner\n",
+    path.join(repoPath, "agent-edit.txt"),
+    "from-agent\n",
     "utf-8",
   );
   return { repoPath, baseHead, logPath: makeLogPath() };
@@ -80,13 +80,13 @@ function baseIntent(overrides: Partial<CommitIntent> = {}): CommitIntent {
 }
 
 describe("finalizeIteration", () => {
-  it("commits the runner diff when runner ok and verification passes", () => {
-    const { repoPath, baseHead, logPath } = setupRepoWithRunnerEdits();
+  it("commits the agent diff when agent succeeds and verification passes", () => {
+    const { repoPath, baseHead, logPath } = setupRepoWithAgentEdits();
 
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
@@ -114,12 +114,12 @@ describe("finalizeIteration", () => {
   });
 
   it("commits when verification commands are empty (vacuous success)", () => {
-    const { repoPath, baseHead, logPath } = setupRepoWithRunnerEdits();
+    const { repoPath, baseHead, logPath } = setupRepoWithAgentEdits();
 
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 30,
@@ -131,34 +131,34 @@ describe("finalizeIteration", () => {
     expect(log).toContain("no verification commands configured");
   });
 
-  it("resets uncommitted changes and skips verification when runner failed", () => {
-    const { repoPath, baseHead, logPath } = setupRepoWithRunnerEdits();
+  it("resets uncommitted changes and skips verification when agent failed", () => {
+    const { repoPath, baseHead, logPath } = setupRepoWithAgentEdits();
 
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: false,
+      agentSuccess: false,
       commitIntent: baseIntent(),
       verificationCommands: ["echo should-not-run"],
       verificationTimeoutSec: 30,
       verificationLogPath: logPath,
     });
 
-    expect(result.outcome).toBe("reset_runner_failure");
-    if (result.outcome !== "reset_runner_failure") return;
+    expect(result.outcome).toBe("reset_agent_failure");
+    if (result.outcome !== "reset_agent_failure") return;
     expect(result.reset.head).toBe(baseHead);
 
     const head = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
     expect(head).toBe(baseHead);
-    expect(fs.existsSync(path.join(repoPath, "runner-edit.txt"))).toBe(false);
+    expect(fs.existsSync(path.join(repoPath, "agent-edit.txt"))).toBe(false);
 
     const log = fs.readFileSync(logPath, "utf-8");
-    expect(log).toContain("[verify] skipped: runner reported failure");
+    expect(log).toContain("[verify] skipped: agent reported failure");
     expect(log).not.toContain("should-not-run");
   });
 
   it("does not truncate a hard-linked skipped-verification log", () => {
-    const { repoPath, baseHead, logPath } = setupRepoWithRunnerEdits();
+    const { repoPath, baseHead, logPath } = setupRepoWithAgentEdits();
     const sentinelPath = path.join(path.dirname(logPath), "sentinel.txt");
     fs.writeFileSync(sentinelPath, "sentinel remains private\n", "utf-8");
     fs.linkSync(sentinelPath, logPath);
@@ -166,26 +166,26 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: false,
+      agentSuccess: false,
       commitIntent: baseIntent(),
       verificationCommands: ["echo should-not-run"],
       verificationTimeoutSec: 30,
       verificationLogPath: logPath,
     });
 
-    expect(result.outcome).toBe("reset_runner_failure");
+    expect(result.outcome).toBe("reset_agent_failure");
     expect(fs.readFileSync(sentinelPath, "utf-8")).toBe(
       "sentinel remains private\n",
     );
   });
 
   it("resets uncommitted changes when verification fails", () => {
-    const { repoPath, baseHead, logPath } = setupRepoWithRunnerEdits();
+    const { repoPath, baseHead, logPath } = setupRepoWithAgentEdits();
 
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: ["echo ok", "false"],
       verificationTimeoutSec: 30,
@@ -199,7 +199,7 @@ describe("finalizeIteration", () => {
 
     const head = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
     expect(head).toBe(baseHead);
-    expect(fs.existsSync(path.join(repoPath, "runner-edit.txt"))).toBe(false);
+    expect(fs.existsSync(path.join(repoPath, "agent-edit.txt"))).toBe(false);
 
     const log = fs.readFileSync(logPath, "utf-8");
     expect(log).toContain("[verify] summary: verification failed on command 2");
@@ -213,7 +213,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: ["echo nothing-to-commit"],
       verificationTimeoutSec: 30,
@@ -231,12 +231,12 @@ describe("finalizeIteration", () => {
   });
 
   it("preserves verified changes when the pre-commit hook rejects", () => {
-    const { repoPath, baseHead, logPath } = setupRepoWithRunnerEdits();
+    const { repoPath, baseHead, logPath } = setupRepoWithAgentEdits();
 
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
@@ -250,19 +250,19 @@ describe("finalizeIteration", () => {
     expect(result.reset).toBeUndefined();
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
     expect(
-      fs.readFileSync(path.join(repoPath, "runner-edit.txt"), "utf-8"),
-    ).toBe("from-runner\n");
+      fs.readFileSync(path.join(repoPath, "agent-edit.txt"), "utf-8"),
+    ).toBe("from-agent\n");
   });
 
   it("holds the mutation fence across staging, receipt persistence, and commit", () => {
-    const { repoPath, baseHead, logPath } = setupRepoWithRunnerEdits();
+    const { repoPath, baseHead, logPath } = setupRepoWithAgentEdits();
     let held = false;
     let observedDuringCommit = false;
 
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
@@ -282,8 +282,8 @@ describe("finalizeIteration", () => {
     expect(held).toBe(false);
   });
 
-  it("resets staged runner edits when git commit itself fails", () => {
-    const { repoPath, baseHead, logPath } = setupRepoWithRunnerEdits();
+  it("resets staged agent edits when git commit itself fails", () => {
+    const { repoPath, baseHead, logPath } = setupRepoWithAgentEdits();
     const hooksDir = path.join(repoPath, ".git", "hooks");
     fs.mkdirSync(hooksDir, { recursive: true });
     const preCommit = path.join(hooksDir, "pre-commit");
@@ -293,7 +293,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
@@ -308,13 +308,13 @@ describe("finalizeIteration", () => {
 
     const head = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
     expect(head).toBe(baseHead);
-    expect(fs.existsSync(path.join(repoPath, "runner-edit.txt"))).toBe(false);
+    expect(fs.existsSync(path.join(repoPath, "agent-edit.txt"))).toBe(false);
 
     const status = runGit(repoPath, ["status", "--porcelain"]).trim();
     expect(status).toBe("");
   });
 
-  it("returns reset_failed when baseHead does not exist and runner failed", () => {
+  it("returns reset_failed when baseHead does not exist and agent failed", () => {
     const repoPath = initRepo();
     commitInitial(repoPath);
     const logPath = makeLogPath();
@@ -322,7 +322,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead: ZERO_SHA,
-      runnerSuccess: false,
+      agentSuccess: false,
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 30,
@@ -331,7 +331,7 @@ describe("finalizeIteration", () => {
 
     expect(result.outcome).toBe("reset_failed");
     if (result.outcome !== "reset_failed") return;
-    expect(result.trigger).toBe("runner_failure");
+    expect(result.trigger).toBe("agent_failure");
     expect(result.reset.code).toBe("missing_base");
     expect(result.verification).toBeNull();
   });
@@ -345,7 +345,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath,
       baseHead: ZERO_SHA,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: ["false"],
       verificationTimeoutSec: 30,
@@ -364,7 +364,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath: "",
       baseHead: ZERO_SHA,
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 30,
@@ -380,7 +380,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath: "/tmp",
       baseHead: "not-a-sha",
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 30,
@@ -396,7 +396,7 @@ describe("finalizeIteration", () => {
     const result = finalizeIteration({
       repoPath: "/tmp",
       baseHead: "a".repeat(40),
-      runnerSuccess: true,
+      agentSuccess: true,
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 0,

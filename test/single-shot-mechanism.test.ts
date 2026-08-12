@@ -8,7 +8,7 @@ import path from "node:path";
 import { waitMs } from "./helpers/process-kill-harness.js";
 import type { ExecutorRoundRecord } from "../src/core/executors/loop/reducer.js";
 import type { HostBindingConfig } from "../src/adapters/host-bindings-registry.js";
-import type { RunnerResult } from "../src/core/executors/runner/types.js";
+import type { AgentResult } from "../src/core/executors/agent-result/types.js";
 import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../src/shared/process-limits.js";
 import {
   createOneShotLiveWrapperRoundRunner,
@@ -159,14 +159,14 @@ function round(
   };
 }
 
-function runnerResult(): RunnerResult {
+function runnerResult(): AgentResult {
   return {
     success: true,
     summary: "single shot completed",
     key_changes_made: ["wrote result"],
     key_learnings: [],
     remaining_work: [],
-    goal_complete: true,
+    objective_complete: true,
     commit: {
       type: "chore",
       scope: "single-shot",
@@ -177,7 +177,7 @@ function runnerResult(): RunnerResult {
   };
 }
 
-function resultJson(value: RunnerResult): string {
+function resultJson(value: AgentResult): string {
   return `${JSON.stringify(value)}\n`;
 }
 

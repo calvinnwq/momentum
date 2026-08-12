@@ -51,7 +51,7 @@ describe("finalizeLiveStepResult", () => {
         key_changes_made: [],
         key_learnings: [],
         remaining_work: [],
-        goal_complete: false,
+        objective_complete: false,
         commit: {
           type: "test",
           subject: "failed live step",

@@ -140,7 +140,7 @@ function writeSucceedingPreflightProfile(dir: string, timeoutSec = 5): string {
   const profilePath = path.join(dir, "live-wrapper-profile.json");
   const script = `printf 'preflight from daemon\\n' > "$MOMENTUM_REPO_PATH/daemon-preflight.txt"
 cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
-{"success":true,"summary":"daemon live wrapper preflight succeeded","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"daemon live wrapper preflight","body":"","breaking":false}}
+{"success":true,"summary":"daemon live wrapper preflight succeeded","key_changes_made":[],"key_learnings":[],"remaining_work":[],"objective_complete":false,"commit":{"type":"test","subject":"daemon live wrapper preflight","body":"","breaking":false}}
 JSON`;
   fs.writeFileSync(
     profilePath,
@@ -165,7 +165,7 @@ function writeLeaseLossPreflightProfile(dir: string, runId: string): string {
   const profilePath = path.join(dir, "lease-loss-profile.json");
   const script = `printf 'unowned edit\\n' > "$MOMENTUM_REPO_PATH/lease-loss-edit.txt"
 cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
-{"success":true,"summary":"runner completed after lease loss","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"must not commit after lease loss","body":"","breaking":false}}
+{"success":true,"summary":"runner completed after lease loss","key_changes_made":[],"key_learnings":[],"remaining_work":[],"objective_complete":false,"commit":{"type":"test","subject":"must not commit after lease loss","body":"","breaking":false}}
 JSON
 sqlite3 "$MOMENTUM_TEST_DB" "UPDATE workflow_leases SET released_at = 1700000000001, updated_at = 1700000000001 WHERE run_id = '${runId}' AND lease_kind = 'dispatch' AND released_at IS NULL"`;
   fs.writeFileSync(
@@ -192,7 +192,7 @@ function writeEnvForwardingPreflightProfile(dir: string): string {
   const script = `test "$MOMENTUM_TEST_TOKEN" = "from-cli-io" || exit 7
 printf 'env from daemon\\n' > "$MOMENTUM_REPO_PATH/daemon-env.txt"
 cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
-{"success":true,"summary":"daemon live wrapper env forwarded","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"daemon live wrapper env","body":"","breaking":false}}
+{"success":true,"summary":"daemon live wrapper env forwarded","key_changes_made":[],"key_learnings":[],"remaining_work":[],"objective_complete":false,"commit":{"type":"test","subject":"daemon live wrapper env","body":"","breaking":false}}
 JSON`;
   fs.writeFileSync(
     profilePath,

@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 
-import type { CommitIntent } from "../core/executors/runner/types.js";
+import type { CommitIntent } from "../core/executors/agent-result/types.js";
 
 const SHA40_RE = /^[0-9a-f]{40}$/;
 
@@ -57,7 +57,7 @@ export function commitVerifiedChanges(input: CommitInput): CommitResult {
     return {
       ok: false,
       code: "head_mismatch",
-      error: `HEAD ${currentHead} does not match expected base ${baseHead}; runner must not commit.`,
+      error: `HEAD ${currentHead} does not match expected base ${baseHead}; agent must not commit.`,
     };
   }
 
@@ -77,7 +77,7 @@ export function commitVerifiedChanges(input: CommitInput): CommitResult {
     return {
       ok: false,
       code: "nothing_to_commit",
-      error: "No staged changes after runner; nothing to commit.",
+      error: "No staged changes after agent work; nothing to commit.",
     };
   }
 

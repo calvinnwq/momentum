@@ -40,7 +40,7 @@ Momentum never modifies the data directory outside the resolved path. Each store
           prompt.md            # Rendered iteration prompt
           runner.log           # Runner metadata and captured stdout/stderr
           verification.log     # Tagged verification command output, capped buffer
-          result.json          # Default runner result envelope; trusted-shell / acp may report another in-dir result file
+          result.json          # Legacy runner-result envelope; trusted-shell / acp may report another in-dir result file
 ```
 
 ## SQLite tables under `momentum.db`
@@ -153,7 +153,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
   If the crash occurs before classification after a delegate has persisted a mirrored gate checkpoint, gate-eligible decision, and `waiting_operator` observation, the unclassified round is resumed under the same attempt so classification and gate parking can finish.
   Delegate-supervisor approval uses a reserved synthetic decision identity; only the latest resolved `approve` allows a later completed external state to settle.
   `workflow run logs` reads attempts run-wide in deterministic step / attempt-number / attempt-id order and rounds in deterministic step / attempt-number / attempt-id / round order.
-  For native agent-loop, `executor_attempts` own the autonomous attempt and `executor_rounds` own each durable iteration; `.gnhf/runs`, terminal scrollback, and runner-local directories may be mirrored as artifacts but are not authoritative state.
+  For native agent-loop, `executor_attempts` own the autonomous attempt and `executor_rounds` own each durable iteration; `.gnhf/runs`, terminal scrollback, and local workflow-run directories may be mirrored as artifacts but are not authoritative state.
   Successful agent-loop rounds record exactly one commit SHA after verification, while failed, stale, unsafe, canceled, invalid, and no-op rounds preserve recovery evidence without creating misleading commits.
   When a native agent-loop round receives a usable absolute verification log path, its `executor_artifacts` can include `commit_or_reset_evidence` pointing at `<verification-log>.finalization.json` with a digest of the finalization sidecar.
 - `executor_artifacts`, `executor_checkpoints`, `executor_findings`, `executor_decisions` — append-only evidence rows below executor rounds for artifacts, checkpoint events, review findings, and durable decisions. Findings and decisions may carry mirrored external references for external review / gate identity. Each table references `executor_rounds` and keeps enough structured payload to reattach after process, daemon, or chat loss.
@@ -206,7 +206,7 @@ Files at `<data-dir>/goals/<goal-id>/iterations/<n>/`, written per executed iter
 - `prompt.md` — rendered iteration prompt; empty in iterations that were never executed.
 - `runner.log` — runner metadata and captured stdout / stderr.
 - `verification.log` — tagged verification command output with a capped capture buffer (see `docs/failure-reset.md`).
-- `result.json` — default runner result envelope. Stored `trusted-shell` and `acp` runner profiles may report a different result file in the same iteration directory via `trusted_shell.result_file` / `acp.result_file`; the path is recorded on the iteration row.
+- `result.json` — legacy runner-result envelope for the retired goal lane. Stored `trusted-shell` and `acp` runner profiles may report a different result file in the same iteration directory via `trusted_shell.result_file` / `acp.result_file`; the path is recorded on the iteration row. See [`docs/runners.md`](runners.md) for the current `AgentResult` schema and its explicit read-only legacy reader.
 
 ## How the retired lane initialized these files
 

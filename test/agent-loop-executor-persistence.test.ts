@@ -17,7 +17,7 @@ import {
   resolveGoalLoopRoundSelection,
 } from "../src/core/executors/agent-loop/executor.js";
 import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/shared/step-finalize.js";
-import type { RunnerResult } from "../src/core/executors/runner/types.js";
+import type { AgentResult } from "../src/core/executors/agent-result/types.js";
 
 // This is the integration twin of the pure projections in
 // agent-loop-executor.test.ts: it drives a agent-loop round's start record and the
@@ -99,14 +99,14 @@ function startRound(db: MomentumDb): void {
   insertExecutorRound(db, record, { now: 1_000 });
 }
 
-function runnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
+function runnerResult(overrides: Partial<AgentResult> = {}): AgentResult {
   return {
     success: true,
     summary: "implemented the bounded round",
     key_changes_made: ["added the round-start projection"],
     key_learnings: [],
     remaining_work: [],
-    goal_complete: true,
+    objective_complete: true,
     commit: {
       type: "feat",
       scope: "agent-loop",

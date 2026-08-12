@@ -26,8 +26,8 @@
  * {@link runGoalLoopStep} materializes the attempt/round identity and leaves
  * the real daemon wiring to thread each round's result into the next round's
  * input through its runtime input resolver. The prompted-result helper in
- * `agent-loop/mechanism.ts` is the concrete runner-input variant: it renders the
- * per-round prompt, invokes a runner with that prompt and result path, then
+ * `agent-loop/mechanism.ts` is the concrete agent-input variant: it renders the
+ * per-round prompt, invokes an agent with that prompt and result path, then
  * returns the same mechanism result shape this driver persists.
  *
  * The bounded mechanism is injected as a {@link GoalLoopRoundRunner} so the real
@@ -96,16 +96,16 @@ import {
   type PlanGoalLoopRoundStartInput,
 } from "./executor.js";
 import type { FinalizeWorkflowStepFromResultFileResult } from "../shared/step-finalize.js";
-import type { RunnerResult } from "../runner/types.js";
+import type { AgentResult } from "../agent-result/types.js";
 
 /**
- * The output of one bounded mechanism run: the normalized runner result (or
+ * The output of one bounded mechanism run: the normalized agent result (or
  * `null` when the round produced no valid result document) plus the repo-safety
  * finalize outcome. This is exactly what {@link planGoalLoopRoundPersistence}
  * consumes, so the mechanism stays decoupled from the durable schema.
  */
 export type GoalLoopRoundMechanismResult = {
-  result: RunnerResult | null;
+  result: AgentResult | null;
   finalize: FinalizeWorkflowStepFromResultFileResult;
   /**
    * The content digest of the captured result document (the round-schema
@@ -140,7 +140,7 @@ export type GoalLoopRoundMechanismResult = {
  * encode failures as finalize outcomes rather than throwing — mirroring
  * `finalizeWorkflowStepFromResultFile`. `agent-loop/mechanism.ts` provides the
  * concrete result-file mechanism and the prompted-result wrapper that renders a
- * native round prompt before asking a runner to produce that result document.
+ * native round prompt before asking an agent to produce that result document.
  * Tests inject a deterministic fake.
  */
 export type GoalLoopRoundRunner = (
@@ -286,7 +286,7 @@ export type GoalLoopAttemptRoundPlan = {
  * The loop builds this from already persisted prior rounds so a resumed or
  * continuing attempt can derive its next input from durable summaries,
  * learnings, recovery evidence, commits, and artifacts instead of terminal
- * scrollback or runner-local notes.
+ * scrollback or local workflow-run notes.
  */
 export type GoalLoopAttemptRoundContext = {
   priorRounds: readonly ExecutorRoundRecord[];
@@ -312,7 +312,7 @@ export type RunGoalLoopAttemptInput = {
   attempt: ExecutorAttemptRecord;
   /** Materializes each round's start projection + finish clock, by round index. */
   planRound: GoalLoopAttemptRoundPlanner;
-  /** The bounded mechanism each round runs (the same injected runner across rounds). */
+  /** The bounded mechanism each round runs (the same injected mechanism across rounds). */
   runRound: GoalLoopRoundRunner;
 };
 

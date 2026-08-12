@@ -6,7 +6,7 @@
  * checked-in host-binding file runs: it reads
  * `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the current
  * `MOMENTUM_STEP_KIND`, validates the run-local config before spawning,
- * executes the configured child command, and writes a normalized `RunnerResult`
+ * executes the configured child command, and writes a normalized `AgentResult`
  * to `MOMENTUM_RESULT_PATH`. The validate step additionally requires an
  * explicit selected-agent runner profile and validates the filtered environment,
  * executable path, and `HOME/.no-mistakes/config.yaml` YAML config before spawn.
@@ -22,13 +22,13 @@ import { isMap, isScalar, parseDocument, type YAMLMap } from "yaml";
 
 import { runProcessGroupSync } from "../../../adapters/live-step-wrapper.js";
 import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../../../shared/process-limits.js";
-import { normalizeRunnerResult } from "../../executors/runner/result.js";
+import { normalizeAgentResult } from "../../executors/agent-result/result.js";
 import { classifyDelegateSupervisorState } from "../../executors/delegate-supervisor/classifier.js";
 import type {
   CommitIntent,
   CommitType,
-  RunnerResult,
-} from "../../executors/runner/types.js";
+  AgentResult,
+} from "../../executors/agent-result/types.js";
 import {
   preflightGitHubMergeCleanup,
   preflightGitHubMergeCleanupSetup,
@@ -306,13 +306,13 @@ export function runCodingWorkflowLiveWrapper(
         preflight.status === "already_merged" ||
         preflight.status === "branch_already_deleted"
       ) {
-        return writeRunnerResult(deps, resultPath, {
+        return writeAgentResult(deps, resultPath, {
           success: false,
           summary,
           key_changes_made: [],
           key_learnings: stepConfig.keyLearnings,
           remaining_work: [preflight.action],
-          goal_complete: false,
+          objective_complete: false,
           commit: stepConfig.commit,
         });
       }
@@ -342,18 +342,18 @@ export function runCodingWorkflowLiveWrapper(
     result,
   );
   if (!success && terminalNoMistakesSuccess !== null) {
-    return writeRunnerResult(deps, resultPath, {
+    return writeAgentResult(deps, resultPath, {
       success: true,
       summary: terminalNoMistakesSuccess,
       key_changes_made: stepConfig.keyChangesMade,
       key_learnings: stepConfig.keyLearnings,
       remaining_work: stepConfig.remainingWork,
-      goal_complete: false,
+      objective_complete: false,
       commit: stepConfig.commit,
     });
   }
   const summary = summarizeCommandResult(stepKind, stepConfig, result, success);
-  return writeRunnerResult(deps, resultPath, {
+  return writeAgentResult(deps, resultPath, {
     success,
     summary,
     key_changes_made: success ? stepConfig.keyChangesMade : [],
@@ -361,7 +361,7 @@ export function runCodingWorkflowLiveWrapper(
     remaining_work: success
       ? stepConfig.remainingWork
       : commandFailureRemainingWork(stepKind),
-    goal_complete: false,
+    objective_complete: false,
     commit: stepConfig.commit,
   });
 }
@@ -2674,23 +2674,23 @@ function writeFailureResult(
   kind: WorkflowStepKind = "preflight",
   config?: CodingWorkflowWrapperStepConfig,
 ): CodingWorkflowWrapperOutcome {
-  return writeRunnerResult(deps, resultPath, {
+  return writeAgentResult(deps, resultPath, {
     success: false,
     summary,
     key_changes_made: [],
     key_learnings: [],
     remaining_work: [summary],
-    goal_complete: false,
+    objective_complete: false,
     commit: config?.commit ?? defaultCommit(kind),
   });
 }
 
-function writeRunnerResult(
+function writeAgentResult(
   deps: Pick<CodingWorkflowWrapperDeps, "mkdir" | "writeFile">,
   resultPath: string,
-  result: RunnerResult,
+  result: AgentResult,
 ): CodingWorkflowWrapperOutcome {
-  const normalized = normalizeRunnerResult(result);
+  const normalized = normalizeAgentResult(result);
   if (!normalized.ok) {
     return {
       exitCode: 1,
@@ -3303,13 +3303,13 @@ function readCommit(value: unknown, kind: WorkflowStepKind): CommitParse {
     breaking:
       typeof value["breaking"] === "boolean" ? value["breaking"] : false,
   };
-  const normalized = normalizeRunnerResult({
+  const normalized = normalizeAgentResult({
     success: true,
     summary: "commit validation",
     key_changes_made: [],
     key_learnings: [],
     remaining_work: [],
-    goal_complete: false,
+    objective_complete: false,
     commit,
   });
   if (!normalized.ok) return { ok: false, error: normalized.error };

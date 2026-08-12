@@ -125,7 +125,7 @@ For ordinary live-wrapper executors, it records terminal executor evidence on
 the dispatch scaffold and lets the reconciliation seam finalize the step or park
 it for manual recovery.
 For successful ordinary wrapper results, the daemon first captures the current
-repo HEAD as the step base, parses the normalized runner result, runs the
+repo HEAD as the step base, parses the normalized agent result, runs the
 configured verification commands, commits verified changes, resets failed or
 unverifiable changes when safe, and records `verification.log` as round evidence
 before the dispatch scaffold is terminalized.
@@ -274,7 +274,7 @@ refused as invalid. Each binding requires:
 - `env_allow` — environment variable names copied from the daemon process;
   include `PATH` explicitly if the wrapper or its child processes need it.
 - `result_file` — relative path inside the workflow run directory where the
-  wrapper writes the normalized runner result JSON.
+  wrapper writes the normalized agent result JSON.
 - `probe` — optional pre-flight check with an absolute `command`, optional
   string/number `args`, and optional `timeout_sec`; its timeout defaults to 30
   seconds and uses the same 2,147,453-second maximum.
@@ -322,7 +322,7 @@ omitted.
 Provider-aware aliases from the merged native selection are normalized before persistence, so a step supplied as `harness=claude` with `model=sonnet` injects `MOMENTUM_MODEL=claude-sonnet-4-6`; a `codex` step supplied as `model=openai/gpt-5.5` injects `MOMENTUM_MODEL=gpt-5.5`; and an `opencode` step supplied as `model=glm-5.2` injects `MOMENTUM_MODEL=opencode-go/glm-5.2`.
 Unknown or non-agent harness/model values still pass through unchanged after structural validation.
 The wrapper must write the same
-normalized runner result JSON documented in [`runners.md`](runners.md) at
+normalized agent result JSON documented in [`runners.md`](runners.md) at
 `$MOMENTUM_RESULT_PATH`. A valid host-binding file may configure only the
 live-wrapper-owned step kinds it can run; a new dispatch for a live-wrapper-owned
 kind missing from the bindings is refused before claim or process launch rather
@@ -347,7 +347,7 @@ workflow wrapper for `preflight`, `implementation`, `postflight`,
 `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG` to point at the run-local command
 configuration. If the host bindings are present but that run-local config is missing,
 unreadable, invalid, or lacks the current step, the wrapper exits as an operator
-setup failure without writing normalized runner evidence; the daemon then parks
+setup failure without writing normalized agent-result evidence; the daemon then parks
 the dispatched step for recovery instead of finalizing it as an ordinary failed
 workflow step.
 The config file must use canonical snake_case keys.
@@ -403,7 +403,7 @@ For Codex, the checked-in host-binding file allows `CODEX_HOME` into the wrapper
 }
 ```
 
-If the no-mistakes runner profile is missing, malformed, lacks the selected agent's required environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), the filtered child environment does not contain one of its required variables, the selected agent path is missing/non-executable, `HOME/.no-mistakes/config.yaml` is unreadable or invalid, the no-mistakes `agent` setting is `auto` or does not match the profile, or the no-mistakes `agent_path_override.<agent>` setting is missing, non-absolute, or does not match the runner profile, the wrapper fails closed before spawning the no-mistakes command and writes no runner evidence.
+If the no-mistakes runner profile is missing, malformed, lacks the selected agent's required environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), the filtered child environment does not contain one of its required variables, the selected agent path is missing/non-executable, `HOME/.no-mistakes/config.yaml` is unreadable or invalid, the no-mistakes `agent` setting is `auto` or does not match the profile, or the no-mistakes `agent_path_override.<agent>` setting is missing, non-absolute, or does not match the runner profile, the wrapper fails closed before spawning the no-mistakes command and writes no agent result evidence.
 
 For current coding definitions, the implementation and validate steps run through `delegate-supervisor` with `tool: "gnhf"` and `tool: "no-mistakes"` respectively.
 The implementation adapter performs the configured live-wrapper handoff once, records a normalized terminal external-state artifact, and lets a later bounded tick corroborate it.
@@ -476,7 +476,7 @@ script entrypoint itself is missing, the failure is classified as
 remain ordinary command failures. For retryable `no-mistakes` and
 `merge-cleanup` setup failures, `workflow run clear-recovery` can prepare a
 new scheduler attempt after the operator repairs the wrapper path or external
-runner state.
+agent state.
 Delegate-supervisor adapter, handoff, unreadable or inconsistent external-state failures are likewise retryable after the operator repairs the correlated evidence, and an externally blocked attempt is retryable after its blocker clears.
 The retry inserts a fresh immutable attempt that keeps the step-scoped dispatch correlation for handoff and repo-lock identity, preserves a valid non-terminal handoff and prior decisions, and starts a fresh semantic-stall window.
 It sends a prior handoff through adapter recovery before reuse.
@@ -484,12 +484,12 @@ For a locally failed no-mistakes receipt, a correlated failed or cancelled run p
 For binding-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
 An `unsupported_platform` refusal is separately retryable for every dispatched
 step after the workflow moves to Linux or macOS and recovery is cleared there.
-The coding-workflow wrapper also treats known no-mistakes runner lifecycle
-failures as recovery setup failures rather than ordinary failed runner evidence:
+The coding-workflow wrapper also treats known no-mistakes agent lifecycle
+failures as recovery setup failures rather than ordinary failed agent evidence:
 missing external branch-start state, current no-mistakes run status or outcome
 evidence that the run was cancelled before a reliable result, and similarly
-concrete no-result runner lifecycle failures.
-Those cases leave no normalized runner result, so the daemon parks the step for
+concrete no-result agent lifecycle failures.
+Those cases leave no normalized agent result, so the daemon parks the step for
 operator repair and a guarded retry instead of terminalizing the workflow as if
 verification itself failed.
 When upstream no-mistakes reports `checks-passed`, or keeps reporting a running monitor state while the pull request evidence is clean and checks are green or explicitly absent, the adapter normalizes a completed external state and the delegate supervisor records successful executor evidence while upstream no-mistakes may continue its own PR-lifecycle monitoring.

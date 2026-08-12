@@ -10,8 +10,8 @@ import {
   type ExecutorCheckpointRecord,
   type ExecutorRoundRecord,
 } from "../loop/reducer.js";
-import { normalizeRunnerResult } from "../runner/result.js";
-import type { RunnerResult } from "../runner/types.js";
+import { normalizeAgentResult } from "../agent-result/result.js";
+import type { AgentResult } from "../agent-result/types.js";
 import {
   SCRIPT_COMMAND_IDENTITY_PATTERN,
   isPortableScriptCommandIdentity,
@@ -173,7 +173,7 @@ export type SingleShotExecutorHostBindings = {
 export type SingleShotRoundMechanismResult = {
   readonly outcome: SingleShotAttemptOutcome;
   readonly summary?: string;
-  readonly result?: RunnerResult | null;
+  readonly result?: AgentResult | null;
   readonly resultDigest?: string | null;
   readonly artifacts?: SingleShotRoundArtifacts;
   readonly evidence?: SingleShotRoundEvidence;
@@ -1092,10 +1092,10 @@ function normalizeSingleShotMechanismResult(
       "Invalid script mechanism output: script rounds must not report a result document artifact.",
     );
   }
-  let normalizedResult: RunnerResult | null | undefined;
+  let normalizedResult: AgentResult | null | undefined;
   if (result === null) normalizedResult = null;
   if (executor === "agent-once" && result !== undefined && result !== null) {
-    const normalized = normalizeRunnerResult(result);
+    const normalized = normalizeAgentResult(result);
     if (!normalized.ok) {
       throw new Error(
         `Invalid agent-once mechanism output: ${normalized.error}`,

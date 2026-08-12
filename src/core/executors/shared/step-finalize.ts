@@ -2,7 +2,7 @@
  * Shared workflow-step verification + commit / reset finalization transaction.
  *
  * This is the workflow/runtime-owned seam that takes the *output* of a finished
- * workflow-step implementation (its normalized runner-result `success` flag and
+ * workflow-step implementation (its normalized agent-result `success` flag and
  * `commit` intent) and runs Momentum's existing verify -> commit / reset
  * transaction around it, preserving the safety posture the retired foreground
  * iteration path enforced. It owns no durable state: it is a pure transaction
@@ -46,8 +46,8 @@
  *
  * {@link finalizeWorkflowStep} takes the already-parsed `success` flag and
  * `commit` intent. Because a step orchestrator's dispatch result and the
- * executor boundary only carry the runner-result *path* (not the parsed
- * `RunnerResult`), {@link finalizeWorkflowStepFromResultFile} is the companion
+ * executor boundary only carry the agent-result *path* (not the parsed
+ * `AgentResult`), {@link finalizeWorkflowStepFromResultFile} is the companion
  * seam the run-level composition actually calls: it re-reads the durable result
  * document, extracts `success` + `commit`, and then runs the transaction —
  * surfacing `result_missing` / `result_invalid` without touching git when that
@@ -74,8 +74,8 @@ import {
   type FinalizeResetTrigger,
 } from "../../repo/iteration-finalize.js";
 import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "../../../adapters/live-step-wrapper.js";
-import { parseRunnerResult } from "../runner/result.js";
-import type { CommitIntent, RunnerResult } from "../runner/types.js";
+import { parseAgentResult } from "../agent-result/result.js";
+import type { CommitIntent, AgentResult } from "../agent-result/types.js";
 import type {
   VerificationFailure,
   VerificationSuccess,
@@ -87,9 +87,9 @@ export type FinalizeWorkflowStepInput = {
   repoPath: string;
   /** The HEAD the step started from; finalize commits onto / resets to it. */
   baseHead: string;
-  /** The step's normalized runner-result `success` flag. */
+  /** The step's normalized agent-result `success` flag. */
   stepSuccess: boolean;
-  /** The step's normalized runner-result commit intent. */
+  /** The step's normalized agent-result commit intent. */
   commitIntent: CommitIntent;
   verificationCommands: string[];
   verificationTimeoutSec: number;
@@ -182,7 +182,7 @@ export type FinalizeWorkflowStepFromResultFileInput = {
   /** The HEAD the step started from; finalize commits onto / resets to it. */
   baseHead: string;
   /**
-   * Absolute path to the normalized runner-result document the step wrote (the
+   * Absolute path to the normalized agent-result document the step wrote (the
    * orchestrator's `dispatch.resultJsonPath`). Both the `success` flag and the
    * `commit` intent are read from this durable artifact.
    */
@@ -265,7 +265,7 @@ export function finalizeWorkflowStep(
   const finalize = finalizeIteration({
     repoPath,
     baseHead,
-    runnerSuccess: stepSuccess,
+    agentSuccess: stepSuccess,
     commitIntent,
     verificationCommands,
     verificationTimeoutSec,
@@ -285,7 +285,7 @@ export function finalizeWorkflowStep(
         commit: finalize.commit,
         head: finalize.commit.commitSha,
       };
-    case "reset_runner_failure":
+    case "reset_agent_failure":
       return { outcome: "reset_step_failure", reset: finalize.reset };
     case "reset_verification_failure":
       return {
@@ -326,12 +326,12 @@ export function finalizeWorkflowStep(
 }
 
 /**
- * Read the normalized runner-result document a finished step wrote and run
+ * Read the normalized agent-result document a finished step wrote and run
  * {@link finalizeWorkflowStep} from it.
  *
  * A step orchestrator is git-agnostic and
- * its dispatch result carries the runner-result file *path* rather than the
- * parsed `RunnerResult`; the executor boundary deliberately drops the
+ * its dispatch result carries the agent-result file *path* rather than the
+ * parsed `AgentResult`; the executor boundary deliberately drops the
  * domain-shaped commit intent. This seam is therefore where the run-level
  * composition re-reads the durable result to obtain the `success` flag and the
  * explicit, normalized `commit` intent the "Git And Verification Transaction"
@@ -373,7 +373,7 @@ export function finalizeWorkflowStepFromResultFile(
 
 export function finalizeWorkflowStepFromValidatedResult(
   input: FinalizeWorkflowStepFromResultFileInput,
-  result: RunnerResult,
+  result: AgentResult,
 ): FinalizeWorkflowStepFromResultFileResult {
   return finalizeWorkflowStep({
     repoPath: input.repoPath,
@@ -396,7 +396,7 @@ export function finalizeWorkflowStepFromValidatedResult(
 }
 
 export type ReadNormalizedResultFile =
-  | { ok: true; result: RunnerResult; raw: string }
+  | { ok: true; result: AgentResult; raw: string }
   | { ok: false; code: "result_missing" | "result_invalid"; error: string };
 
 /**
@@ -489,7 +489,7 @@ export function readNormalizedResultFile(
       };
     }
     const raw = buffer.subarray(0, offset).toString("utf-8");
-    const parsed = parseRunnerResult(raw);
+    const parsed = parseAgentResult(raw);
     if (!parsed.ok) {
       return {
         ok: false,

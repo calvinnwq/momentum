@@ -238,7 +238,7 @@ const VALID_WRAPPER_RESULT_JSON = JSON.stringify({
   key_changes_made: ["ran the configured wrapper"],
   key_learnings: [],
   remaining_work: [],
-  goal_complete: false,
+  objective_complete: false,
   commit: {
     type: "chore",
     subject: "run watch wrapper",

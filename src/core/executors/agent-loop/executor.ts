@@ -7,7 +7,7 @@
  * finalization decision, and daemon classification." This module owns the
  * *daemon classification* half of one such round: given the executor's own
  * completion recommendation (projected from the bounded round's normalized
- * `RunnerResult`) and the repo-safety finalization outcome (the shared
+ * `AgentResult`) and the repo-safety finalization outcome (the shared
  * `finalizeWorkflowStep*` transaction's result), it decides the contract's
  * "Completion Classification" for the round, the terminal round state, the
  * preserved recovery code, and any durable human gate.
@@ -25,7 +25,7 @@
  * Schema" result/verification/commit/recovery evidence requirement. The
  * projection is two-phase to honour both the contract's Round Lifecycle and the
  * round transition graph: a `capturing_result` patch carries the normalized
- * runner result (summary / key changes / remaining work), then a terminal patch
+ * agent result (summary / key changes / remaining work), then a terminal patch
  * carries the verification status, commit SHA, classification, preserved recovery
  * code, and human gate. {@link planGoalLoopRoundPersistence} ties the decision
  * and both patches to one finalize result so they can never drift, and the
@@ -53,7 +53,7 @@
  *   - "Executors may recommend progress. The daemon decides progress." The
  *     executor's `complete` recommendation is honoured only when the round
  *     actually committed; a verification-failure reset can never complete a step
- *     even if the round reported `goal_complete` ("the daemon must still enforce
+ *     even if the round reported `objective_complete` ("the daemon must still enforce
  *     ... verification status").
  *   - Repo safety wins over everything. Any unsafe or ambiguous finalize outcome
  *     (moved HEAD, failed reset/commit, lost repo lock, missing/invalid result)
@@ -82,7 +82,7 @@ import {
 } from "../loop/reducer.js";
 import type { ExecutorRoundUpdate } from "../loop/persist.js";
 import type { FinalizeWorkflowStepFromResultFileResult } from "../shared/step-finalize.js";
-import type { RunnerResult } from "../runner/types.js";
+import type { AgentResult } from "../agent-result/types.js";
 
 /**
  * The finalize outcomes a agent-loop round consumes: exactly the discriminant of
@@ -117,13 +117,13 @@ export type GoalLoopFinalizeEvidence = {
 
 /**
  * The executor's completion recommendation for one bounded round, projected from
- * the round's normalized {@link RunnerResult}. `success` is whether the round's
- * own work succeeded; `goalComplete` is the round's own recommendation that the
+ * the round's normalized {@link AgentResult}. `success` is whether the round's
+ * own work succeeded; `objectiveComplete` is the round's own recommendation that the
  * implementation step is finished. The daemon treats both as advisory.
  */
 export type GoalLoopRecommendation = {
   success: boolean;
-  goalComplete: boolean;
+  objectiveComplete: boolean;
 };
 
 export type DecideGoalLoopRoundInput = {
@@ -165,7 +165,7 @@ export type PlanGoalLoopRoundPersistenceInput = {
    * result is only consistent with an unsafe finalize outcome; the decision then
    * routes to manual recovery regardless of any recommendation.
    */
-  result: RunnerResult | null;
+  result: AgentResult | null;
   /** The full repo-safety outcome of the round's finalization transaction. */
   finalize: FinalizeWorkflowStepFromResultFileResult;
   /** 0-based index of the round that just finished. */
@@ -203,7 +203,7 @@ export type GoalLoopRoundPersistencePlan = {
   decision: GoalLoopRoundDecision;
   evidence: GoalLoopFinalizeEvidence;
   /**
-   * The `capturing_result` patch carrying the normalized runner result, or
+   * The `capturing_result` patch carrying the normalized agent result, or
    * `null` when the round produced no result to capture (it then transitions
    * straight from `running` to the terminal patch's manual-recovery state).
    */
@@ -454,14 +454,17 @@ const UNSAFE_FINALIZE_OUTCOMES: ReadonlySet<GoalLoopFinalizeOutcome> = new Set([
 ]);
 
 /**
- * Project a normalized runner result into the agent-loop recommendation. The
- * bounded round writes a {@link RunnerResult}; the daemon only needs its
- * `success` flag and `goal_complete` completion recommendation to classify.
+ * Project a normalized agent result into the agent-loop recommendation. The
+ * bounded round writes a {@link AgentResult}; the daemon only needs its
+ * `success` flag and `objective_complete` completion recommendation to classify.
  */
 export function goalLoopRecommendationFromResult(
-  result: RunnerResult,
+  result: AgentResult,
 ): GoalLoopRecommendation {
-  return { success: result.success, goalComplete: result.goal_complete };
+  return {
+    success: result.success,
+    objectiveComplete: result.objective_complete,
+  };
 }
 
 /**
@@ -808,7 +811,7 @@ export function planGoalLoopRoundPersistence(
   const recommendation =
     input.result !== null
       ? goalLoopRecommendationFromResult(input.result)
-      : { success: false, goalComplete: false };
+      : { success: false, objectiveComplete: false };
   const decision = decideGoalLoopRound({
     recommendation,
     finalizeOutcome: input.finalize.outcome,
@@ -858,12 +861,12 @@ export function planGoalLoopRoundPersistence(
 }
 
 function completionRecommendationFromResult(
-  result: RunnerResult | null,
+  result: AgentResult | null,
   fallback: ExecutorCompletionClassification,
 ): ExecutorCompletionClassification {
   if (result === null) return fallback;
   if (!result.success) return "failed";
-  return result.goal_complete ? "complete" : "continue";
+  return result.objective_complete ? "complete" : "continue";
 }
 
 function verificationResultsFromFinalize(
@@ -921,7 +924,7 @@ export function decideGoalLoopRound(
   //    completion recommendation; otherwise continue (budget permitting) or
   //    raise a durable quota gate.
   if (finalizeOutcome === "committed") {
-    if (recommendation.goalComplete) {
+    if (recommendation.objectiveComplete) {
       return {
         classification: "complete",
         roundState: "succeeded",
@@ -939,7 +942,7 @@ export function decideGoalLoopRound(
   }
 
   // 3. A safe reset (step failure or verification failure) produced no commit.
-  //    Verification is authoritative — even a `goal_complete` recommendation
+  //    Verification is authoritative — even a `objective_complete` recommendation
   //    cannot complete a step whose work was reset. Continue (budget permitting)
   //    or raise a durable quota gate.
   return continueOrExhaust({

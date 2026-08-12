@@ -30,7 +30,7 @@ import {
   type PlanGoalLoopRoundStartInput,
 } from "../src/core/executors/agent-loop/executor.js";
 import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/shared/step-finalize.js";
-import type { RunnerResult } from "../src/core/executors/runner/types.js";
+import type { AgentResult } from "../src/core/executors/agent-result/types.js";
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);
@@ -40,7 +40,7 @@ function decide(
   overrides: Partial<DecideGoalLoopRoundInput> = {},
 ): ReturnType<typeof decideGoalLoopRound> {
   const input: DecideGoalLoopRoundInput = {
-    recommendation: { success: true, goalComplete: false },
+    recommendation: { success: true, objectiveComplete: false },
     finalizeOutcome: "committed",
     roundIndex: 0,
     maxRounds: 5,
@@ -52,7 +52,7 @@ function decide(
 describe("decideGoalLoopRound — committed rounds", () => {
   it("classifies a committed, goal-complete round as complete", () => {
     const decision = decide({
-      recommendation: { success: true, goalComplete: true },
+      recommendation: { success: true, objectiveComplete: true },
       finalizeOutcome: "committed",
     });
     expect(decision.classification).toBe("complete");
@@ -64,7 +64,7 @@ describe("decideGoalLoopRound — committed rounds", () => {
 
   it("continues a committed round that made progress with budget remaining", () => {
     const decision = decide({
-      recommendation: { success: true, goalComplete: false },
+      recommendation: { success: true, objectiveComplete: false },
       finalizeOutcome: "committed",
       roundIndex: 1,
       maxRounds: 5,
@@ -77,7 +77,7 @@ describe("decideGoalLoopRound — committed rounds", () => {
 
   it("raises a quota gate when a committed round exhausts the round budget without completing", () => {
     const decision = decide({
-      recommendation: { success: true, goalComplete: false },
+      recommendation: { success: true, objectiveComplete: false },
       finalizeOutcome: "committed",
       roundIndex: 4,
       maxRounds: 5,
@@ -92,7 +92,7 @@ describe("decideGoalLoopRound — committed rounds", () => {
 describe("decideGoalLoopRound — safe resets (verification authority)", () => {
   it("does NOT complete a reset-on-verification-failure round even if the executor recommended completion", () => {
     const decision = decide({
-      recommendation: { success: true, goalComplete: true },
+      recommendation: { success: true, objectiveComplete: true },
       finalizeOutcome: "reset_verification_failure",
       roundIndex: 0,
       maxRounds: 5,
@@ -107,7 +107,7 @@ describe("decideGoalLoopRound — safe resets (verification authority)", () => {
 
   it("continues a reset-on-step-failure round when budget remains", () => {
     const decision = decide({
-      recommendation: { success: false, goalComplete: false },
+      recommendation: { success: false, objectiveComplete: false },
       finalizeOutcome: "reset_step_failure",
       roundIndex: 0,
       maxRounds: 3,
@@ -119,7 +119,7 @@ describe("decideGoalLoopRound — safe resets (verification authority)", () => {
 
   it("raises a quota gate when a reset round exhausts the budget", () => {
     const decision = decide({
-      recommendation: { success: false, goalComplete: false },
+      recommendation: { success: false, objectiveComplete: false },
       finalizeOutcome: "reset_step_failure",
       roundIndex: 2,
       maxRounds: 3,
@@ -134,7 +134,7 @@ describe("decideGoalLoopRound — safe resets (verification authority)", () => {
 describe("decideGoalLoopRound — repo-safety / manual recovery boundaries", () => {
   it("routes a moved-HEAD finalize to manual recovery with the head_mismatch code", () => {
     const decision = decide({
-      recommendation: { success: true, goalComplete: true },
+      recommendation: { success: true, objectiveComplete: true },
       finalizeOutcome: "manual_recovery_required",
       roundIndex: 0,
       maxRounds: 5,
@@ -180,7 +180,7 @@ describe("decideGoalLoopRound — repo-safety / manual recovery boundaries", () 
 describe("decideGoalLoopRound — budget semantics", () => {
   it("treats a null maxRounds as unbounded", () => {
     const decision = decide({
-      recommendation: { success: true, goalComplete: false },
+      recommendation: { success: true, objectiveComplete: false },
       finalizeOutcome: "committed",
       roundIndex: 999,
       maxRounds: null,
@@ -237,14 +237,14 @@ describe("attemptStateForRoundClassification", () => {
 });
 
 describe("goalLoopRecommendationFromResult", () => {
-  it("projects success and goal_complete from a normalized runner result", () => {
-    const result: RunnerResult = {
+  it("projects success and objective_complete from a normalized runner result", () => {
+    const result: AgentResult = {
       success: true,
       summary: "did work",
       key_changes_made: ["a"],
       key_learnings: [],
       remaining_work: ["b"],
-      goal_complete: false,
+      objective_complete: false,
       commit: {
         type: "feat",
         scope: undefined,
@@ -255,18 +255,18 @@ describe("goalLoopRecommendationFromResult", () => {
     };
     expect(goalLoopRecommendationFromResult(result)).toEqual({
       success: true,
-      goalComplete: false,
+      objectiveComplete: false,
     });
   });
 
   it("reflects a goal-complete result", () => {
-    const result: RunnerResult = {
+    const result: AgentResult = {
       success: true,
       summary: "finished",
       key_changes_made: [],
       key_learnings: [],
       remaining_work: [],
-      goal_complete: true,
+      objective_complete: true,
       commit: {
         type: "chore",
         scope: undefined,
@@ -277,7 +277,7 @@ describe("goalLoopRecommendationFromResult", () => {
     };
     expect(goalLoopRecommendationFromResult(result)).toEqual({
       success: true,
-      goalComplete: true,
+      objectiveComplete: true,
     });
   });
 });
@@ -296,14 +296,14 @@ function verifyCmd(succeeded: boolean) {
   };
 }
 
-function runnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
+function runnerResult(overrides: Partial<AgentResult> = {}): AgentResult {
   return {
     success: true,
     summary: "implemented the bounded round",
     key_changes_made: ["added the agent-loop projection"],
     key_learnings: ["learned a thing"],
     remaining_work: ["wire up the orchestrator"],
-    goal_complete: false,
+    objective_complete: false,
     commit: {
       type: "feat",
       scope: "agent-loop",
@@ -397,7 +397,7 @@ const RESET_FAILED_WITH_VERIFY: FinalizeWorkflowStepFromResultFileResult = {
 
 const RESET_FAILED_NO_VERIFY: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "reset_failed",
-  trigger: "runner_failure",
+  trigger: "agent_failure",
   verification: null,
   reset: { ok: false, code: "git_failed", error: "git reset failed" },
 };
@@ -497,7 +497,7 @@ describe("goalLoopFinalizeEvidenceFromResult", () => {
 
 describe("planGoalLoopRoundPersistence — committed completion", () => {
   it("captures the normalized result then persists a complete terminal patch", () => {
-    const result = runnerResult({ goal_complete: true });
+    const result = runnerResult({ objective_complete: true });
     const plan = planGoalLoopRoundPersistence({
       result,
       finalize: COMMITTED,
@@ -541,7 +541,7 @@ describe("planGoalLoopRoundPersistence — committed completion", () => {
 
   it("produces a transition-legal running -> capture -> terminal sequence", () => {
     const plan = planGoalLoopRoundPersistence({
-      result: runnerResult({ goal_complete: true }),
+      result: runnerResult({ objective_complete: true }),
       finalize: COMMITTED,
       roundIndex: 0,
       maxRounds: 5,
@@ -562,7 +562,7 @@ describe("planGoalLoopRoundPersistence — committed completion", () => {
 describe("planGoalLoopRoundPersistence — continue and quota", () => {
   it("captures progress and continues a committed-but-incomplete round", () => {
     const plan = planGoalLoopRoundPersistence({
-      result: runnerResult({ goal_complete: false }),
+      result: runnerResult({ objective_complete: false }),
       finalize: COMMITTED,
       roundIndex: 1,
       maxRounds: 5,
@@ -576,7 +576,7 @@ describe("planGoalLoopRoundPersistence — continue and quota", () => {
 
   it("raises a quota gate on the terminal patch when the budget is exhausted", () => {
     const plan = planGoalLoopRoundPersistence({
-      result: runnerResult({ goal_complete: false }),
+      result: runnerResult({ objective_complete: false }),
       finalize: COMMITTED,
       roundIndex: 4,
       maxRounds: 5,
@@ -592,7 +592,7 @@ describe("planGoalLoopRoundPersistence — continue and quota", () => {
 describe("planGoalLoopRoundPersistence — verification authority", () => {
   it("captures the reset round's result but never completes it", () => {
     const plan = planGoalLoopRoundPersistence({
-      result: runnerResult({ goal_complete: true }),
+      result: runnerResult({ objective_complete: true }),
       finalize: RESET_VERIFICATION_FAILURE,
       roundIndex: 0,
       maxRounds: 5,
@@ -716,7 +716,7 @@ describe("planGoalLoopRoundPersistence — manual recovery boundaries", () => {
 describe("planGoalLoopRoundPersistence — result digest", () => {
   it("stamps a supplied result digest onto the capture patch", () => {
     const plan = planGoalLoopRoundPersistence({
-      result: runnerResult({ goal_complete: true }),
+      result: runnerResult({ objective_complete: true }),
       finalize: COMMITTED,
       roundIndex: 0,
       maxRounds: 5,
@@ -755,7 +755,7 @@ describe("planGoalLoopRoundPersistence — result digest", () => {
 describe("planGoalLoopRoundPersistence — changed files", () => {
   it("stamps the supplied committed changed files onto the terminal patch", () => {
     const plan = planGoalLoopRoundPersistence({
-      result: runnerResult({ goal_complete: true }),
+      result: runnerResult({ objective_complete: true }),
       finalize: COMMITTED,
       roundIndex: 0,
       maxRounds: 5,
@@ -768,7 +768,7 @@ describe("planGoalLoopRoundPersistence — changed files", () => {
 
   it("omits changed files from the terminal patch when none are supplied", () => {
     const plan = planGoalLoopRoundPersistence({
-      result: runnerResult({ goal_complete: true }),
+      result: runnerResult({ objective_complete: true }),
       finalize: COMMITTED,
       roundIndex: 0,
       maxRounds: 5,

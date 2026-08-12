@@ -17,19 +17,19 @@ were left in place; importers still reference the concrete modules below.
 
 ## Local structure
 
-| Concern                        | Modules                                                                                                                        |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| Executor SDK                   | `sdk/types.ts`, `sdk/envelope.ts`, `sdk/registry.ts`, `sdk/config-schema.ts`, `sdk/portable-command.ts`, `sdk/driver.ts`       |
-| Executor loop                  | `loop/reducer.ts`, `loop/persist.ts`                                                                                           |
-| Agent-loop executor            | `agent-loop/sdk.ts`, `agent-loop/executor.ts`, `agent-loop/mechanism.ts`, `agent-loop/orchestrator.ts`, `agent-loop/prompt.ts` |
-| Single-shot executor           | `single-shot/sdk.ts`, `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts`                     |
-| Delegate-supervisor executor   | `delegate-supervisor/executor.ts`, `delegate-supervisor/classifier.ts`, `delegate-supervisor/types.ts`                         |
-| Live-step executor             | `live-step/executor.ts`, `live-step/sdk-executor.ts` (compatibility live-wrapper lane)                                         |
-| Shared step finalization       | `shared/step-finalize.ts` (neutral verify -> commit / reset seam)                                                              |
-| No-mistakes mechanism          | `no-mistakes/mechanism.ts`                                                                                                     |
-| Runner support                 | `runner/profile.ts`                                                                                                            |
-| Runner smoke                   | `smoke/linear-read.ts`, `smoke/workflow-harness.ts`                                                                            |
-| Runner result shapes & parsing | `runner/types.ts`, `runner/result.ts`                                                                                          |
+| Concern                       | Modules                                                                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Executor SDK                  | `sdk/types.ts`, `sdk/envelope.ts`, `sdk/registry.ts`, `sdk/config-schema.ts`, `sdk/portable-command.ts`, `sdk/driver.ts`       |
+| Executor loop                 | `loop/reducer.ts`, `loop/persist.ts`                                                                                           |
+| Agent-loop executor           | `agent-loop/sdk.ts`, `agent-loop/executor.ts`, `agent-loop/mechanism.ts`, `agent-loop/orchestrator.ts`, `agent-loop/prompt.ts` |
+| Single-shot executor          | `single-shot/sdk.ts`, `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts`                     |
+| Delegate-supervisor executor  | `delegate-supervisor/executor.ts`, `delegate-supervisor/classifier.ts`, `delegate-supervisor/types.ts`                         |
+| Live-step executor            | `live-step/executor.ts`, `live-step/sdk-executor.ts` (compatibility live-wrapper lane)                                         |
+| Shared step finalization      | `shared/step-finalize.ts` (neutral verify -> commit / reset seam)                                                              |
+| No-mistakes mechanism         | `no-mistakes/mechanism.ts`                                                                                                     |
+| Runner support                | `runner/profile.ts`                                                                                                            |
+| Runner smoke                  | `smoke/linear-read.ts`, `smoke/workflow-harness.ts`                                                                            |
+| Agent result shapes & parsing | `agent-result/types.ts`, `agent-result/result.ts`                                                                              |
 
 `loop/reducer.ts` is the central pure reducer and the most widely consumed entry
 point; `loop/persist.ts` wraps it with persistence. The agent-loop and single-shot
@@ -91,9 +91,9 @@ driving remain separate runtime concerns joined by the same executor identity an
 declared config schema.
 Before artifact writes, result observations, or completion checkpoints, the lifecycle runtime-normalizes the complete runner-adapter return.
 Malformed JavaScript or casted returns leave only the atomically materialized attempt, running round, and dispatch-binding checkpoint for recovery.
-Successful `agent-once` turns require a successful normalized `RunnerResult`; exit-code-based `script` turns forbid result-document evidence.
-The native `agent-loop` executor renders deterministic per-round prompts through `agent-loop/prompt.ts`, then treats runner-authored `RunnerResult` JSON as input to finalization only.
-The prompted-result bridge clears stale result files before handing the prompt and configured result path to the runner, so an old result cannot be finalized as new progress.
+Successful `agent-once` turns require a successful normalized `AgentResult`; exit-code-based `script` turns forbid result-document evidence.
+The native `agent-loop` executor renders deterministic per-round prompts through `agent-loop/prompt.ts`, then treats agent-authored `AgentResult` JSON as input to finalization only.
+The prompted-result bridge clears stale result files before handing the prompt and configured result path to the agent, so an old result cannot be finalized as new progress.
 After finalization, its authoritative evidence is the `executor_attempts` / `executor_rounds` tree plus child artifacts, checkpoints, findings, and decisions that `workflow run logs` reads today.
 The concrete agent-loop mechanism writes `commit_or_reset_evidence` as a digested finalization sidecar at `<verification-log>.finalization.json` when the verification log path is a usable absolute path.
 The current coding workflow selects GNHF as portable tool config below `delegate-supervisor`, while retained legacy definitions follow the raw-identity compatibility rule in `SPEC.md` when running beneath the legacy `goal-loop` spelling.
@@ -148,17 +148,17 @@ Binding-backed recovery may take over an active lock for the same interrupted st
 
 Every current adapter → executor-core edge has an explicit SDK disposition:
 
-| Adapter edge                                                                                                                                 | Disposition                                                                                                                                                                                                                                                      |
-| -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live-step-wrapper.ts` → `runner/result.ts` and `runner/types.ts`                                                                            | Resolved: the pure `RunnerResult` schema, parser, and normalizers are official SDK runtime surface.                                                                                                                                                              |
-| `host-bindings-registry.ts` → `sdk/portable-command.ts`                                                                                      | Resolved: the dependency-free portable command identity validator is official SDK config surface shared with host bindings.                                                                                                                                      |
-| `git-transaction.ts` → `runner/types.ts`                                                                                                     | Resolved: type-only use of the SDK `CommitIntent` shape.                                                                                                                                                                                                         |
-| `no-mistakes-executor.ts` → `delegate-supervisor/classifier.ts`                                                                              | Resolved compatibility edge: recorded legacy mirror entrypoints delegate to the official supervision classification authority instead of carrying a second classifier.                                                                                           |
-| `no-mistakes-executor.ts` / `no-mistakes-orchestrator.ts` → `loop/*` and `no-mistakes/mechanism.ts`                                          | Temporary compatibility edge: the legacy mirror remains readable for recorded `no-mistakes` attempts, while new coding definitions use the core `delegate-supervisor` lifecycle and narrow tool adapter.                                                         |
-| `no-mistakes-tool-adapter.ts` → `delegate-supervisor/types.ts` and `no-mistakes/mechanism.ts`                                                | Resolved: the adapter implements the official delegated-tool lifecycle interface and reuses the tool-owned external-state reader / normalizer; it imports no executor persistence or controller internals.                                                       |
-| `profile-backed-delegate-tool-adapter.ts` → `delegate-supervisor/{classifier,types}.ts`, `live-step/sdk-executor.ts`, and `runner/result.ts` | Resolved host-adapter edge: the binding bridge implements the delegated-tool interface, uses the single classification authority and official runner parser, and reuses live-step finalization without importing executor persistence or the durable controller. |
-| `real-workflow-probe.ts` → `smoke/workflow-harness.ts`                                                                                       | Temporary, explicitly re-justified: this is gated smoke/test support and will move behind a test-support boundary rather than become SDK runtime.                                                                                                                |
-| `runner/profile.ts`                                                                                                                          | Compatibility support only; machine-local runner resolution folds into host bindings and is not portable step config or a third-party executor API.                                                                                                              |
+| Adapter edge                                                                                                                                       | Disposition                                                                                                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-step-wrapper.ts` → `agent-result/result.ts` and `agent-result/types.ts`                                                                      | Resolved: the pure `AgentResult` schema, parser, and normalizers are official SDK runtime surface.                                                                                                                                                                     |
+| `host-bindings-registry.ts` → `sdk/portable-command.ts`                                                                                            | Resolved: the dependency-free portable command identity validator is official SDK config surface shared with host bindings.                                                                                                                                            |
+| `git-transaction.ts` → `agent-result/types.ts`                                                                                                     | Resolved: type-only use of the SDK `CommitIntent` shape.                                                                                                                                                                                                               |
+| `no-mistakes-executor.ts` → `delegate-supervisor/classifier.ts`                                                                                    | Resolved compatibility edge: recorded legacy mirror entrypoints delegate to the official supervision classification authority instead of carrying a second classifier.                                                                                                 |
+| `no-mistakes-executor.ts` / `no-mistakes-orchestrator.ts` → `loop/*` and `no-mistakes/mechanism.ts`                                                | Temporary compatibility edge: the legacy mirror remains readable for recorded `no-mistakes` attempts, while new coding definitions use the core `delegate-supervisor` lifecycle and narrow tool adapter.                                                               |
+| `no-mistakes-tool-adapter.ts` → `delegate-supervisor/types.ts` and `no-mistakes/mechanism.ts`                                                      | Resolved: the adapter implements the official delegated-tool lifecycle interface and reuses the tool-owned external-state reader / normalizer; it imports no executor persistence or controller internals.                                                             |
+| `profile-backed-delegate-tool-adapter.ts` → `delegate-supervisor/{classifier,types}.ts`, `live-step/sdk-executor.ts`, and `agent-result/result.ts` | Resolved host-adapter edge: the binding bridge implements the delegated-tool interface, uses the single classification authority and official agent-result parser, and reuses live-step finalization without importing executor persistence or the durable controller. |
+| `real-workflow-probe.ts` → `smoke/workflow-harness.ts`                                                                                             | Temporary, explicitly re-justified: this is gated smoke/test support and will move behind a test-support boundary rather than become SDK runtime.                                                                                                                      |
+| `runner/profile.ts`                                                                                                                                | Compatibility support only; machine-local runner resolution folds into host bindings and is not portable step config or a third-party executor API.                                                                                                                    |
 
 `test/executor-sdk-import-boundaries.test.ts` pins this exact allowlist so no
 new adapter reverse dependency can appear without a named disposition. The end
@@ -174,12 +174,13 @@ adapter interfaces, never executor persistence.
 ## Deferred
 
 - Exported executor-specific types stay beside their behavior in their owning module. The
-  shared runner-result shapes now live at `src/core/executors/runner/types.ts`
-  (`COMMIT_TYPES`, `CommitType`, `CommitIntent`, `RunnerResult`, and the
-  `RunnerResult{Error,Success,Parse}` envelopes), with their parser
-  (`parseRunnerResult` / `normalizeRunnerResult` / `normalizeCommitIntent`) in
-  `src/core/executors/runner/result.ts`. Both were drained from the former root
-  `src/runner-result.ts` under the type-placement slice.
+  shared agent-result shapes now live at `src/core/executors/agent-result/types.ts`
+  (`COMMIT_TYPES`, `CommitType`, `CommitIntent`, `AgentResult`, and the
+  `AgentResult{Error,Success,Parse}` envelopes), with their parser
+  (`parseAgentResult` / `normalizeAgentResult` / `normalizeCommitIntent`) in
+  `src/core/executors/agent-result/result.ts`. Both were moved from the former
+  `src/core/executors/runner/{result,types}.ts` modules under the vocabulary
+  rename.
   `COMMIT_TYPES` is a runtime const, but it backs the `CommitType` union and has
   no behavior, so it is colocated with the type it defines.
 - No executor barrel/seam consolidation and no finalizer/reconciliation redesign.

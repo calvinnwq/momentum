@@ -12,9 +12,9 @@
  * transaction and projects the outcome into the
  * {@link GoalLoopRoundMechanismResult} the driver consumes.
  *
- * The prompted-result bridge adds the runner-facing half: it renders the native
+ * The prompted-result bridge adds the agent-facing half: it renders the native
  * per-round prompt, clears any stale result file, hands the prompt + configured
- * result path to an injected runner, and then reuses the same result-file
+ * result path to an injected agent, and then reuses the same result-file
  * finalization bridge. Prompt text is an input artifact only; classification is
  * still driven by the normalized result document and repo-safety evidence.
  *
@@ -36,7 +36,7 @@
  *
  *   - The normalized `result` is `null` exactly when the finalize seam judged the
  *     result document unusable (`result_missing` / `result_invalid`); for every
- *     other outcome the same document is re-read into the `RunnerResult` the round
+ *     other outcome the same document is re-read into the `AgentResult` the round
  *     captures, so a captured result can never disagree with the finalize verdict
  *     on the document. The `resultDigest` (the round-schema `result_digest`
  *     reattach fingerprint) is computed from those same bytes, so it is non-null
@@ -94,9 +94,9 @@ export type GoalLoopRoundMechanismFromResultFileInput =
   };
 
 /**
- * Runner-facing input for a prompted native agent-loop round.
+ * Agent-facing input for a prompted native agent-loop round.
  *
- * The runner reads `promptFilePath` or the in-memory `prompt`, writes exactly one
+ * The agent reads `promptFilePath` or the in-memory `prompt`, writes exactly one
  * normalized result JSON document at `resultFilePath`, and leaves git commit /
  * reset decisions to Momentum.
  */
@@ -159,12 +159,12 @@ export function goalLoopRoundMechanismFromResultFile(
 }
 
 /**
- * Render the native agent-loop prompt, let a runner author the configured result
+ * Render the native agent-loop prompt, let an agent author the configured result
  * document, then reuse {@link goalLoopRoundMechanismFromResultFile} for parsing,
  * verification, commit/reset, and recovery classification.
  *
- * The prompt path is a runner input artifact, not a durable classification
- * source. If the runner does not write a usable result file, the existing
+ * The prompt path is an agent input artifact, not a durable classification
+ * source. If the agent does not write a usable result file, the existing
  * result-file mechanism still routes to explicit `result_missing` or
  * `result_invalid` recovery evidence.
  */

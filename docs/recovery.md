@@ -211,7 +211,7 @@ to refuse until that lease condition is resolved.
 An `unsupported_platform` refusal is eligible for this retry preparation on any
 dispatched step after the run moves to Linux or macOS.
 When a dispatched `validate` or `merge-cleanup` live-wrapper attempt failed
-before clean runner evidence existed because the wrapper/build path was stale or
+before clean agent-result evidence existed because the wrapper/build path was stale or
 unavailable, or because `merge-cleanup` refused before apply on auth, target,
 PR-state readback, expected-head, cleanup-branch, or mergeability checks,
 `workflow run clear-recovery` prepares the step for a scheduler retry after the operator repairs the environment or target state.
@@ -220,12 +220,12 @@ Before the step row is reopened for retry, Momentum preserves the previous `step
 For a retryable dispatched attempt, the same transaction releases only that attempt's repo locks in `needs_manual_recovery`; if the clear later refuses or fails, retry preparation and lock release roll back together.
 An active repo lock retained by an interrupted delegate intent is not cleared blindly.
 The next dispatcher may take it over only for the same step-scoped deterministic dispatch correlation, either after lock expiry or after scheduler recovery proves and releases the matching stale dispatch owner, while all stored repository, run, job, holder, attempt, and deadline fields still match.
-For `no-mistakes`, the coding-workflow wrapper also parks known external runner
+For `no-mistakes`, the coding-workflow wrapper also parks known external agent
 lifecycle failures in this same retryable recovery lane: missing branch-start /
 gate state and current run status or outcome evidence showing cancellation
 before reliable completion.
 These are not trusted as verification failures because the external no-mistakes
-runner did not produce reliable pass/fail evidence.
+agent did not produce reliable pass/fail evidence.
 When `delegate-supervisor` sees the same running semantic progress digest for four minutes, it parks the active round and attempt for manual recovery instead of treating repeated polls as fresh progress.
 The raw external-state digest still updates in `inputDigest`, the semantic digest remains in `resultDigest`, and the last semantic-progress time carries across the bounded poll rounds.
 Clear recovery only after the delegated external run produces fresh progress or terminal evidence.

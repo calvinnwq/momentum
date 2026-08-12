@@ -14,16 +14,16 @@ const ADAPTER_EXECUTOR_CORE_EDGE_DISPOSITIONS = new Map<string, string>([
     "compatibility mirror delegates to the official supervision classifier",
   ],
   [
-    "src/adapters/git-transaction.ts -> src/core/executors/runner/types.ts",
+    "src/adapters/git-transaction.ts -> src/core/executors/agent-result/types.ts",
     "official SDK CommitIntent type surface",
   ],
   [
-    "src/adapters/live-step-wrapper.ts -> src/core/executors/runner/result.ts",
-    "official SDK RunnerResult parser surface",
+    "src/adapters/live-step-wrapper.ts -> src/core/executors/agent-result/result.ts",
+    "official SDK AgentResult parser surface",
   ],
   [
-    "src/adapters/live-step-wrapper.ts -> src/core/executors/runner/types.ts",
-    "official SDK RunnerResult type surface",
+    "src/adapters/live-step-wrapper.ts -> src/core/executors/agent-result/types.ts",
+    "official SDK AgentResult type surface",
   ],
   [
     "src/adapters/host-bindings-registry.ts -> src/core/executors/sdk/portable-command.ts",
@@ -54,8 +54,8 @@ const ADAPTER_EXECUTOR_CORE_EDGE_DISPOSITIONS = new Map<string, string>([
     "host adapter reuses built-in finalization without executor persistence",
   ],
   [
-    "src/adapters/profile-backed-delegate-tool-adapter.ts -> src/core/executors/runner/result.ts",
-    "host adapter uses the official SDK RunnerResult parser surface",
+    "src/adapters/profile-backed-delegate-tool-adapter.ts -> src/core/executors/agent-result/result.ts",
+    "host adapter uses the official SDK AgentResult parser surface",
   ],
   [
     "src/adapters/no-mistakes-executor.ts -> src/core/executors/loop/reducer.ts",
@@ -85,16 +85,16 @@ const README_MARKER_BY_EDGE = new Map<string, string>([
     "`no-mistakes-executor.ts` → `delegate-supervisor/classifier.ts`",
   ],
   [
-    "src/adapters/git-transaction.ts -> src/core/executors/runner/types.ts",
-    "`git-transaction.ts` → `runner/types.ts`",
+    "src/adapters/git-transaction.ts -> src/core/executors/agent-result/types.ts",
+    "`git-transaction.ts` → `agent-result/types.ts`",
   ],
   [
-    "src/adapters/live-step-wrapper.ts -> src/core/executors/runner/result.ts",
-    "`live-step-wrapper.ts` → `runner/result.ts` and `runner/types.ts`",
+    "src/adapters/live-step-wrapper.ts -> src/core/executors/agent-result/result.ts",
+    "`live-step-wrapper.ts` → `agent-result/result.ts` and `agent-result/types.ts`",
   ],
   [
-    "src/adapters/live-step-wrapper.ts -> src/core/executors/runner/types.ts",
-    "`live-step-wrapper.ts` → `runner/result.ts` and `runner/types.ts`",
+    "src/adapters/live-step-wrapper.ts -> src/core/executors/agent-result/types.ts",
+    "`live-step-wrapper.ts` → `agent-result/result.ts` and `agent-result/types.ts`",
   ],
   [
     "src/adapters/host-bindings-registry.ts -> src/core/executors/sdk/portable-command.ts",
@@ -127,12 +127,12 @@ const README_MARKER_BY_EDGE = new Map<string, string>([
     "src/adapters/profile-backed-delegate-tool-adapter.ts -> src/core/executors/delegate-supervisor/classifier.ts",
     "src/adapters/profile-backed-delegate-tool-adapter.ts -> src/core/executors/delegate-supervisor/types.ts",
     "src/adapters/profile-backed-delegate-tool-adapter.ts -> src/core/executors/live-step/sdk-executor.ts",
-    "src/adapters/profile-backed-delegate-tool-adapter.ts -> src/core/executors/runner/result.ts",
+    "src/adapters/profile-backed-delegate-tool-adapter.ts -> src/core/executors/agent-result/result.ts",
   ].map(
     (edge) =>
       [
         edge,
-        "`profile-backed-delegate-tool-adapter.ts` → `delegate-supervisor/{classifier,types}.ts`, `live-step/sdk-executor.ts`, and `runner/result.ts`",
+        "`profile-backed-delegate-tool-adapter.ts` → `delegate-supervisor/{classifier,types}.ts`, `live-step/sdk-executor.ts`, and `agent-result/result.ts`",
       ] as const,
   ),
   [

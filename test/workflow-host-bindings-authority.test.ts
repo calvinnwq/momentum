@@ -40,12 +40,12 @@ const tempDirs: string[] = [];
 
 const COMMAND_A_SCRIPT = `printf 'command A\\n' > "$MOMENTUM_REPO_PATH/command-a.txt"
 cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
-{"success":true,"summary":"command A completed","key_changes_made":["command-a.txt"],"key_learnings":[],"remaining_work":[],"goal_complete":true,"commit":{"type":"test","subject":"complete command A","body":"","breaking":false}}
+{"success":true,"summary":"command A completed","key_changes_made":["command-a.txt"],"key_learnings":[],"remaining_work":[],"objective_complete":true,"commit":{"type":"test","subject":"complete command A","body":"","breaking":false}}
 JSON`;
 
 const COMMAND_B_SCRIPT = `printf 'command B\\n' > "$MOMENTUM_REPO_PATH/command-b.txt"
 cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
-{"success":true,"summary":"command B completed","key_changes_made":["command-b.txt"],"key_learnings":[],"remaining_work":[],"goal_complete":true,"commit":{"type":"test","subject":"complete command B","body":"","breaking":false}}
+{"success":true,"summary":"command B completed","key_changes_made":["command-b.txt"],"key_learnings":[],"remaining_work":[],"objective_complete":true,"commit":{"type":"test","subject":"complete command B","body":"","breaking":false}}
 JSON`;
 
 afterEach(() => {
