@@ -71,8 +71,17 @@ CREATE TABLE goals (
 CREATE TABLE workflow_runs (
   id TEXT PRIMARY KEY,
   state TEXT NOT NULL,
+  goal_id TEXT REFERENCES goals(id),
   source TEXT NOT NULL,
   source_artifact_path TEXT,
+  plan_json TEXT NOT NULL DEFAULT '{}',
+  batch_group TEXT,
+  batch_role TEXT,
+  needs_manual_recovery INTEGER NOT NULL DEFAULT 0,
+  manual_recovery_reason TEXT,
+  manual_recovery_at INTEGER,
+  started_at INTEGER,
+  finished_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 ) STRICT;

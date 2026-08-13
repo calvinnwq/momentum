@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { runCli } from "../src/cli.js";
 import { evidenceRecordToJsonShape } from "../src/renderers/evidence.js";
@@ -14,6 +15,8 @@ import type { IntentApplyAudit } from "../src/core/intent/apply-audits.js";
 import type { TrackerItem } from "../src/core/tracker/items.js";
 import type { UpdateIntent } from "../src/core/intent/update-intents.js";
 
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, "..");
 const tempRoots: string[] = [];
 
 afterEach(() => {
@@ -35,7 +38,11 @@ async function run(args: string[]): Promise<CliResult> {
   const code = await runCli(args, {
     stdout: { write: (chunk: string) => ((stdout += chunk), true) },
     stderr: { write: (chunk: string) => ((stderr += chunk), true) },
-    env: { ...process.env, HOME: home },
+    env: {
+      ...process.env,
+      HOME: home,
+      MOMENTUM_HOME: path.join(home, ".momentum"),
+    },
   });
   return { code, stdout, stderr };
 }
