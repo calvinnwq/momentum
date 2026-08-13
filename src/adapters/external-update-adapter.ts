@@ -6,7 +6,7 @@
  * intentionally narrow:
  *
  *  - Defines the durable input shape an external apply needs (a pending
- *    `UpdateIntent`, the resolved target, optional source/evidence context,
+ *    `UpdateIntent`, the resolved target, optional tracker/evidence context,
  *    operator metadata, and policy metadata).
  *  - Defines a stable error code taxonomy that covers both preview-time and
  *    write-time failures, so callers can branch deterministically.

@@ -108,14 +108,14 @@ type EvidenceRow = {
 };
 
 /**
- * Inspect a Goal's terminal state, its linked TrackerItems, and the goal/source
+ * Inspect a Goal's terminal state, its linked TrackerItems, and the goal/tracker
  * evidence records, then create (or replay) durable `tracker_satisfied` update
  * intents for every linked open TrackerItem with verification evidence. A
  * completed Goal can have multiple linked open TrackerItems and therefore
  * multiple pending intents.
  *
  * Idempotency: the intent's idempotency key is bound to the goal + adapter +
- * source external id, so repeated evaluations after additional evidence
+ * tracker external id, so repeated evaluations after additional evidence
  * ingestion do not duplicate intents.
  *
  * No external write is ever performed; the intent's status stays `pending`.

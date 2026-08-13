@@ -167,7 +167,7 @@ commands need the same shape, move it to `src/renderers/` first. Do not let
 domain modules import commands or renderers, and do not read or write
 `process.stdout` / `process.stderr` outside the CLI or rendering layers.
 
-## Adding Source Modules
+## Adding Runtime Modules
 
 Do not add new root `src/*.ts` modules. Place new runtime behavior under the
 narrowest owner: command orchestration in `src/commands/`, output contracts in

@@ -11,7 +11,7 @@
  *   1. Validate input and load the pending intent.
  *   2. Refuse when no repo context, when MOMENTUM.md fails to load, or when
  *      the effective `intent_apply_policy` is not `external_apply_allowed`.
- *   3. Resolve adapter and intent-type support; resolve source/evidence context
+ *   3. Resolve adapter and intent-type support; resolve tracker/evidence context
  *      and the external target reference.
  *   4. Refuse when the adapter's credential env var is missing.
  *   5. Render the adapter preview (idempotency marker + comment body).
