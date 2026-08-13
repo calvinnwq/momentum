@@ -68,6 +68,15 @@ CREATE TABLE goals (
   updated_at INTEGER NOT NULL
 ) STRICT;
 
+CREATE TABLE workflow_runs (
+  id TEXT PRIMARY KEY,
+  state TEXT NOT NULL,
+  source TEXT NOT NULL,
+  source_artifact_path TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
 CREATE TABLE source_items (
   id TEXT PRIMARY KEY,
   adapter_kind TEXT NOT NULL,
@@ -317,20 +326,15 @@ function seedLegacySourceGraph(dataDir: string): SeededGraph {
              'linear:ext-uuid-1:source_satisfied:goal_tracker_mig_1', 5000, 5001)`,
   ).run(intentId, goalId, linkedItemId, evidenceId);
 
-  db.close();
-
-  // Let openDb's own additive pass create the current workflow tables, then
-  // seed the unrelated-source workflow run through a plain insert.
-  const seeded = openDb(dataDir);
   const workflowRunId = "wf_tracker_mig_1";
-  seeded
+  db
     .prepare(
       `INSERT INTO workflow_runs
          (id, state, source, source_artifact_path, created_at, updated_at)
        VALUES (?, 'succeeded', 'workflow-definition', '/tmp/wf-artifact.json', 6000, 6001)`,
     )
     .run(workflowRunId);
-  seeded.close();
+  db.close();
 
   return {
     goalId,

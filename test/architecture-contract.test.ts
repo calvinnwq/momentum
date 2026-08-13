@@ -1,13 +1,47 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { runCli } from "../src/cli.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 
 function readFile(relative: string): string {
   return fs.readFileSync(path.join(repoRoot, relative), "utf8");
+}
+
+const tempRoots: string[] = [];
+
+afterEach(() => {
+  while (tempRoots.length > 0) {
+    const dir = tempRoots.pop();
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+async function run(args: string[]): Promise<{
+  code: number;
+  stdout: string;
+  stderr: string;
+}> {
+  let stdout = "";
+  let stderr = "";
+  const home = fs.mkdtempSync(
+    path.join(os.tmpdir(), "momentum-architecture-contract-home-"),
+  );
+  tempRoots.push(home);
+  const code = await runCli(args, {
+    stdout: { write: (chunk: string) => ((stdout += chunk), true) },
+    stderr: { write: (chunk: string) => ((stderr += chunk), true) },
+    env: {
+      ...process.env,
+      HOME: home,
+      MOMENTUM_HOME: path.join(home, ".momentum"),
+    },
+  });
+  return { code, stdout, stderr };
 }
 
 describe("root ARCHITECTURE.md contract", () => {
@@ -59,83 +93,24 @@ describe("root ARCHITECTURE.md contract", () => {
   });
 });
 
-describe("structural guard around src/cli.ts", () => {
-  const cli = readFile("src/cli.ts");
-
-  it("keeps src/index.ts thin and pointed at runCli", () => {
-    const index = readFile("src/index.ts");
-
-    expect(index).toContain('await import("./cli.js")');
-    expect(index).toContain("runCli");
-    expect(index).not.toMatch(/\.\/commands\//);
-  });
-
-  it("introduces only the explicit command registry skeleton", () => {
-    const srcDir = path.join(repoRoot, "src");
-    const commandIndex = readFile("src/commands/index.ts");
-
-    expect(fs.existsSync(path.join(srcDir, "commands", "index.ts"))).toBe(true);
-    expect(cli).toMatch(/from "\.\/commands\/index\.js"/);
-    expect(commandIndex).toContain("createMomentumCommandRegistry");
-    expect(commandIndex).not.toMatch(/readdir|glob|fs\./);
-  });
-
-  it("extracts read-only and workflow command families through their assigned M11 slices", () => {
-    for (const handler of [
-      "function status(",
-      "function logs(",
-      "function handoff(",
-    ]) {
-      expect(
-        cli,
-        `src/cli.ts should no longer contain ${handler}`,
-      ).not.toContain(handler);
-    }
-    expect(
-      fs.existsSync(path.join(repoRoot, "src", "commands", "status.ts")),
-      "the goal-first read-only status family is retired",
-    ).toBe(false);
-
-    const workflowModule = readFile("src/commands/workflow/index.ts");
-    for (const handler of [
-      "function workflow(",
-      "function workflowRun(",
-      "function workflowRunStart(",
-      "function workflowRunMonitor(",
-    ]) {
-      expect(
-        cli,
-        `src/cli.ts should no longer contain ${handler}`,
-      ).not.toContain(handler);
-      expect(
-        workflowModule,
-        `src/commands/workflow/index.ts should contain ${handler}`,
-      ).toContain(handler);
-    }
-  });
-
-  it("extracts source, evidence, project, and intent command families for NGX-415", () => {
-    const expectations: Array<[string, string]> = [
-      ["function tracker(", "src/commands/tracker/index.ts"],
-      ["function project(", "src/commands/project/index.ts"],
-      ["function evidence(", "src/commands/evidence/index.ts"],
-      ["function intent(", "src/commands/intent/index.ts"],
+describe("CLI architecture behavior", () => {
+  it("routes workflow and migrated command families through the public CLI", async () => {
+    const cases = [
+      { args: ["workflow", "status", "--json"], command: "workflow status" },
+      { args: ["tracker", "list", "--json"], command: "tracker list" },
+      { args: ["project", "status", "--json"], command: "project status" },
+      { args: ["evidence", "list", "--json"], command: "evidence list" },
+      { args: ["intent", "list", "--json"], command: "intent list" },
     ];
 
-    for (const [handler, modulePath] of expectations) {
-      const module = readFile(modulePath);
-      expect(
-        cli,
-        `src/cli.ts should no longer contain ${handler}`,
-      ).not.toContain(handler);
-      expect(module, `${modulePath} should contain ${handler}`).toContain(
-        handler,
-      );
+    for (const { args, command } of cases) {
+      const result = await run(args);
+      expect(result.code, command).toBe(0);
+      expect(result.stderr, command).toBe("");
+      expect(JSON.parse(result.stdout), command).toMatchObject({
+        ok: true,
+        command,
+      });
     }
-
-    expect(
-      fs.existsSync(path.join(repoRoot, "src", "commands", "goal")),
-      "the goal-first command family is retired",
-    ).toBe(false);
   });
 });

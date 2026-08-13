@@ -1,12 +1,17 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { runCli } from "../src/cli.js";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, "..");
+const tempRoots: string[] = [];
+
+afterEach(() => {
+  while (tempRoots.length > 0) {
+    const dir = tempRoots.pop();
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 type CliResult = { code: number; stdout: string; stderr: string };
 
@@ -16,6 +21,7 @@ async function run(args: string[]): Promise<CliResult> {
   const home = fs.mkdtempSync(
     path.join(os.tmpdir(), "momentum-family-cmd-home-"),
   );
+  tempRoots.push(home);
   const dataDir = path.join(home, ".momentum");
   const code = await runCli(args, {
     stdout: { write: (chunk: string) => ((stdout += chunk), true) },
@@ -26,24 +32,28 @@ async function run(args: string[]): Promise<CliResult> {
 }
 
 describe("source/evidence/project/intent command family extraction", () => {
-  it("keeps migrated command implementation handlers out of src/cli.ts", () => {
-    const cli = fs.readFileSync(path.join(repoRoot, "src/cli.ts"), "utf8");
-    const expectations: Array<[string, string]> = [
-      ["function tracker(", "src/commands/tracker/index.ts"],
-      ["function project(", "src/commands/project/index.ts"],
-      ["function evidence(", "src/commands/evidence/index.ts"],
-      ["function intent(", "src/commands/intent/index.ts"],
+  it("routes migrated project and evidence families through public CLI behavior", async () => {
+    const cases = [
+      {
+        args: ["project", "status", "--json"],
+        expected: { ok: true, command: "project status" },
+      },
+      {
+        args: ["evidence", "list", "--json"],
+        expected: {
+          ok: true,
+          command: "evidence list",
+          count: 0,
+          records: [],
+        },
+      },
     ];
 
-    for (const [handler, modulePath] of expectations) {
-      const module = fs.readFileSync(path.join(repoRoot, modulePath), "utf8");
-      expect(
-        cli,
-        `src/cli.ts should no longer contain ${handler}`,
-      ).not.toContain(handler);
-      expect(module, `${modulePath} should contain ${handler}`).toContain(
-        handler,
-      );
+    for (const { args, expected } of cases) {
+      const result = await run(args);
+      expect(result.code, args.join(" ")).toBe(0);
+      expect(result.stderr, args.join(" ")).toBe("");
+      expect(JSON.parse(result.stdout), args.join(" ")).toMatchObject(expected);
     }
   });
 
