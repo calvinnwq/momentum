@@ -13,12 +13,14 @@ type CliResult = { code: number; stdout: string; stderr: string };
 async function run(args: string[]): Promise<CliResult> {
   let stdout = "";
   let stderr = "";
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-family-cmd-home-"));
+  const home = fs.mkdtempSync(
+    path.join(os.tmpdir(), "momentum-family-cmd-home-"),
+  );
   const dataDir = path.join(home, ".momentum");
   const code = await runCli(args, {
     stdout: { write: (chunk: string) => ((stdout += chunk), true) },
     stderr: { write: (chunk: string) => ((stderr += chunk), true) },
-    env: { ...process.env, HOME: home, MOMENTUM_HOME: dataDir }
+    env: { ...process.env, HOME: home, MOMENTUM_HOME: dataDir },
   });
   return { code, stdout, stderr };
 }
@@ -27,29 +29,34 @@ describe("source/evidence/project/intent command family extraction", () => {
   it("keeps migrated command implementation handlers out of src/cli.ts", () => {
     const cli = fs.readFileSync(path.join(repoRoot, "src/cli.ts"), "utf8");
     const expectations: Array<[string, string]> = [
-      ["function source(", "src/commands/source/index.ts"],
+      ["function tracker(", "src/commands/tracker/index.ts"],
       ["function project(", "src/commands/project/index.ts"],
       ["function evidence(", "src/commands/evidence/index.ts"],
-      ["function intent(", "src/commands/intent/index.ts"]
+      ["function intent(", "src/commands/intent/index.ts"],
     ];
 
     for (const [handler, modulePath] of expectations) {
       const module = fs.readFileSync(path.join(repoRoot, modulePath), "utf8");
-      expect(cli, `src/cli.ts should no longer contain ${handler}`).not.toContain(handler);
-      expect(module, `${modulePath} should contain ${handler}`).toContain(handler);
+      expect(
+        cli,
+        `src/cli.ts should no longer contain ${handler}`,
+      ).not.toContain(handler);
+      expect(module, `${modulePath} should contain ${handler}`).toContain(
+        handler,
+      );
     }
   });
 
-  it("preserves a healthy empty source list JSON envelope", async () => {
-    const result = await run(["source", "list", "--json"]);
+  it("preserves a healthy empty tracker list JSON envelope", async () => {
+    const result = await run(["tracker", "list", "--json"]);
 
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
     expect(JSON.parse(result.stdout)).toMatchObject({
       ok: true,
-      command: "source list",
+      command: "tracker list",
       items: [],
-      count: 0
+      count: 0,
     });
   });
 
@@ -62,7 +69,7 @@ describe("source/evidence/project/intent command family extraction", () => {
       ok: true,
       command: "intent list",
       intents: [],
-      count: 0
+      count: 0,
     });
   });
 
@@ -74,20 +81,29 @@ describe("source/evidence/project/intent command family extraction", () => {
     expect(JSON.parse(result.stderr)).toMatchObject({
       ok: false,
       code: "usage_error",
-      message: "Unknown command: goal"
+      message: "Unknown command: goal",
     });
   });
 
   it("renders the shared Momentum help block for text-mode usage errors", async () => {
     const cases: Array<{ args: string[]; message: string }> = [
       {
-        args: ["source"],
+        args: ["tracker"],
         message:
-          "Missing required subcommand for source. Expected: list, get, link, unlink, reconcile."
+          "Missing required subcommand for tracker. Expected: list, get, link, unlink, reconcile.",
       },
-      { args: ["project", "bogus"], message: "Unknown project subcommand: bogus" },
-      { args: ["evidence", "bogus"], message: "Unknown evidence subcommand: bogus" },
-      { args: ["intent", "bogus"], message: "Unknown intent subcommand: bogus" }
+      {
+        args: ["project", "bogus"],
+        message: "Unknown project subcommand: bogus",
+      },
+      {
+        args: ["evidence", "bogus"],
+        message: "Unknown evidence subcommand: bogus",
+      },
+      {
+        args: ["intent", "bogus"],
+        message: "Unknown intent subcommand: bogus",
+      },
     ];
 
     for (const { args, message } of cases) {
@@ -97,14 +113,16 @@ describe("source/evidence/project/intent command family extraction", () => {
       expect(result.stdout).toBe("");
       expect(
         result.stderr.startsWith(`${message}\n\nMomentum\n\nUsage:\n`),
-        `${args.join(" ")} renders the Momentum help header`
+        `${args.join(" ")} renders the Momentum help header`,
       ).toBe(true);
-      expect(result.stderr, `${args.join(" ")} indents the command list`).toMatch(
-        /\n {2}momentum workflow status /
-      );
-      expect(result.stderr, `${args.join(" ")} omits retired goal-first commands`).not.toContain(
-        "momentum goal start"
-      );
+      expect(
+        result.stderr,
+        `${args.join(" ")} indents the command list`,
+      ).toMatch(/\n {2}momentum workflow status /);
+      expect(
+        result.stderr,
+        `${args.join(" ")} omits retired goal-first commands`,
+      ).not.toContain("momentum goal start");
     }
   });
 });

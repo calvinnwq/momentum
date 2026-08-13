@@ -402,18 +402,18 @@ idempotency marker, and must fail closed without losing the refusal reason.
 Before a workflow `tracker-refresh` external write is attempted, the tail
 lifecycle preflight must prove `LINEAR_API_KEY` in the applying process,
 `intent_apply_policy: external_apply_allowed`, a workflow issue scope, a matching
-Linear source item, and either one pending Linear `status_update` intent or enough
-unique issue-scope/source evidence to seed the expected pending `status_update` intent
+Linear tracker item, and either one pending Linear `status_update` intent or enough
+unique issue-scope/tracker evidence to seed the expected pending `status_update` intent
 with a `Done` payload deterministically.
 The resulting intent must carry a valid payload with exactly one `state` / `stateId` and the stable idempotency marker.
 If durable external-apply audit evidence already proves the intended write
 landed and post-apply reconcile succeeded, `tracker-refresh` reconciles without
 another Linear mutation.
 
-## Source And Adapter Boundaries
+## Tracker And Adapter Boundaries
 
-Source adapters are read-only with respect to external systems. They write only
-Momentum source tables, source snapshots, reconciliation runs, evidence, and
+Tracker adapters are read-only with respect to external systems. They write only
+Momentum tracker tables, tracker snapshots, reconciliation runs, evidence, and
 local update intents. They must not mutate Goal, Iteration, Job, workflow,
 executor, git, or external-write state.
 
@@ -532,7 +532,7 @@ The wrapper validates `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG` before spawning 
 For the `validate` step, the wrapper config must include a `runner_profile` block that selects the `axi` interface, declares `stdin: "closed"`, records the selected no-mistakes agent (`claude`, `codex`, `opencode`, or `rovodev`), records that agent's required harness environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), and names the configured absolute executable agent path.
 The wrapper checks the filtered child environment, executable agent path, no-mistakes `HOME/.no-mistakes/config.yaml` top-level `agent`, and no-mistakes top-level `agent_path_override.<agent>` config against that profile before spawning no-mistakes, so missing agent environment, `agent=auto`, malformed YAML, duplicate config keys, nested-only overrides, a missing/non-executable agent path, a mismatched no-mistakes agent override, or an unsafe stdin policy fails closed as setup recovery instead of relying on ambient daemon state.
 The `merge-cleanup` wrapper owns its side-effecting tail lifecycle: preflight proves explicit GitHub auth (`GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR`), durable target identity (`merge_cleanup.pull_request_id`, `expected_head_sha`, and `cleanup_branch`), and live PR state/head/mergeability in the same worker before apply can spawn the merge command; already-merged or already-deleted cleanup state routes to reconcile instead of another mutation. This remains tail-local and is not promoted into workflow-level structural preflight.
-The `tracker-refresh` daemon tail owns the same preflight -> apply -> reconcile shape around the existing external-apply path: missing auth, missing source item, ambiguous source evidence, duplicate/stale intent, invalid payload, policy denial, or mismatched audit evidence fails closed before the Linear client is called; a missing intent can be deterministically seeded to `Done` only from the workflow issue scope plus a unique matching Linear source item, and already-applied succeeded audit evidence maps to terminal executor evidence instead of generic update-step repair.
+The `tracker-refresh` daemon tail owns the same preflight -> apply -> reconcile shape around the existing external-apply path: missing auth, missing tracker item, ambiguous tracker evidence, duplicate/stale intent, invalid payload, policy denial, or mismatched audit evidence fails closed before the Linear client is called; a missing intent can be deterministically seeded to `Done` only from the workflow issue scope plus a unique matching Linear tracker item, and already-applied succeeded audit evidence maps to terminal executor evidence instead of generic update-step repair.
 For the `validate` step, the no-mistakes tool adapter hands off the external run and normalizes its state for `delegate-supervisor`. A reported `checks-passed` outcome, or an otherwise-still-monitoring run with current clean pull request evidence and green or explicitly absent checks, is terminal Momentum success only when no current blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state is present.
 That terminal handoff evidence is persisted for a full 40-character commit SHA before supervision.
 It settles only after a fresh status view corroborates the same run, branch, and exact current repository `HEAD` with passed or explicitly absent CI, no active findings, and no unresolved decisions; a compatible lagging monitoring view may corroborate the cached terminal state without replacing it.
@@ -571,7 +571,7 @@ src/renderers/            text / JSON envelope rendering helpers
 src/adapters/             infrastructure-facing clients and runtime adapters
 src/config/               env, path, and default-resolution support
 src/shared/               cross-cutting helpers with no narrower domain owner
-src/core/<domain>/        workflow, executors, goal, source, intent, daemon, repo, evidence
+src/core/<domain>/        workflow, executors, goal, tracker, intent, daemon, repo, evidence
 ```
 
 Import direction is fixed:

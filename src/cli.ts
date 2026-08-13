@@ -10,14 +10,14 @@ import {
   createMomentumCommandRegistry,
   dispatchMomentumCommand,
 } from "./commands/index.js";
-import { source } from "./commands/source/index.js";
+import { tracker } from "./commands/tracker/index.js";
 import { project } from "./commands/project/index.js";
 import { evidence } from "./commands/evidence/index.js";
 import { intent } from "./commands/intent/index.js";
 import { openclaw } from "./commands/openclaw/index.js";
 import { workflow } from "./commands/workflow/index.js";
 import { intentApplyAuditToJsonShape } from "./renderers/intent.js";
-import { sourceReconciliationPaginationStopped } from "./renderers/source.js";
+import { trackerReconciliationPaginationStopped } from "./renderers/tracker.js";
 import {
   emitDaemonStartFailure,
   emitDaemonStartLoopResult,
@@ -88,10 +88,10 @@ import {
   resolveIntentApplyPolicy,
 } from "./core/intent/policy.js";
 import {
-  listSourceReconciliationRuns,
-  type SourceReconciliationRun,
-} from "./core/source/reconciliation-runs.js";
-import { type LinearReconciliationClient } from "./core/source/reconciliation.js";
+  listTrackerReconciliationRuns,
+  type TrackerReconciliationRun,
+} from "./core/tracker/reconciliation-runs.js";
+import { type LinearReconciliationClient } from "./core/tracker/reconciliation.js";
 import {
   summarizeEvidenceRecords,
   type EvidenceRecordsSummary,
@@ -170,7 +170,7 @@ type ParsedFlags = {
   maxPages?: number;
   goal?: string;
   path?: string;
-  sourceItem?: string;
+  trackerItem?: string;
   source?: string;
   evidenceType?: string;
   limit?: number;
@@ -285,8 +285,8 @@ export async function runCli(
     return routedCommand.code;
   }
 
-  if (command === "source") {
-    return source(parsed, io, deps);
+  if (command === "tracker") {
+    return tracker(parsed, io, deps);
   }
 
   if (command === "daemon") {
@@ -810,7 +810,7 @@ function buildDoctorEvidencePayload(
         ok: true,
         totalRecords: summary.totalRecords,
         goalLinkedRecords: summary.goalLinkedRecords,
-        sourceItemLinkedRecords: summary.sourceItemLinkedRecords,
+        sourceItemLinkedRecords: summary.trackerItemLinkedRecords,
         lastRecord: null,
       };
     }
@@ -818,7 +818,7 @@ function buildDoctorEvidencePayload(
       ok: true,
       totalRecords: summary.totalRecords,
       goalLinkedRecords: summary.goalLinkedRecords,
-      sourceItemLinkedRecords: summary.sourceItemLinkedRecords,
+      sourceItemLinkedRecords: summary.trackerItemLinkedRecords,
       lastRecord: {
         id: summary.lastRecord.id,
         source: summary.lastRecord.source,
@@ -826,7 +826,7 @@ function buildDoctorEvidencePayload(
         occurredAt: summary.lastRecord.occurredAt,
         summary: summary.lastRecord.summary,
         goalId: summary.lastRecord.goalId,
-        sourceItemId: summary.lastRecord.sourceItemId,
+        sourceItemId: summary.lastRecord.trackerItemId,
       },
     };
   } finally {
@@ -893,14 +893,14 @@ function buildDoctorSourcesPayload(
         `SELECT
             COUNT(*) AS total,
             SUM(CASE WHEN goal_id IS NULL THEN 0 ELSE 1 END) AS linked
-           FROM source_items`,
+           FROM tracker_items`,
       )
       .get() as { total: number; linked: number | null } | undefined;
     const totalSourceItems = counts?.total ?? 0;
     const linkedSourceItems = counts?.linked ?? 0;
     const unlinkedSourceItems = totalSourceItems - linkedSourceItems;
 
-    const runs = listSourceReconciliationRuns(db);
+    const runs = listTrackerReconciliationRuns(db);
     if (runs.length === 0) {
       return {
         ok: true,
@@ -910,7 +910,7 @@ function buildDoctorSourcesPayload(
         lastReconciliation: null,
       };
     }
-    const last = runs[runs.length - 1] as SourceReconciliationRun;
+    const last = runs[runs.length - 1] as TrackerReconciliationRun;
     return {
       ok: true,
       totalSourceItems,
@@ -925,7 +925,7 @@ function buildDoctorSourcesPayload(
         error: last.error,
         itemsSeen: last.itemsSeen,
         itemsUpserted: last.itemsUpserted,
-        paginationStopped: sourceReconciliationPaginationStopped(last),
+        paginationStopped: trackerReconciliationPaginationStopped(last),
       },
     };
   } finally {
@@ -1034,7 +1034,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let maxPages: number | undefined;
   let goal: string | undefined;
   let pathFlag: string | undefined;
-  let sourceItem: string | undefined;
+  let trackerItem: string | undefined;
   let source: string | undefined;
   let evidenceType: string | undefined;
   let limit: number | undefined;
@@ -1237,12 +1237,12 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
-    if (arg === "--source-item") {
+    if (arg === "--tracker-item") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
-        error ??= "Missing required value for --source-item.";
+        error ??= "Missing required value for --tracker-item.";
       } else {
-        sourceItem = value;
+        trackerItem = value;
         index += 1;
       }
       continue;
@@ -1714,7 +1714,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (maxPages !== undefined) parsed.maxPages = maxPages;
   if (goal !== undefined) parsed.goal = goal;
   if (pathFlag !== undefined) parsed.path = pathFlag;
-  if (sourceItem !== undefined) parsed.sourceItem = sourceItem;
+  if (trackerItem !== undefined) parsed.trackerItem = trackerItem;
   if (source !== undefined) parsed.source = source;
   if (evidenceType !== undefined) parsed.evidenceType = evidenceType;
   if (limit !== undefined) parsed.limit = limit;

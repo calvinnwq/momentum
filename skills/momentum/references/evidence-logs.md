@@ -29,7 +29,7 @@ dedupe; cursors are for replay.
 ```bash
 <momentum> evidence ingest --path <file-or-dir> --json
 <momentum> evidence list --goal <id> --json
-<momentum> evidence list --source-item <id> --json
+<momentum> evidence list --tracker-item <id> --json
 ```
 
 When adding evidence to support recovery or an operator decision, keep the

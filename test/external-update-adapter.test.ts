@@ -12,7 +12,7 @@ import {
   resolveExternalUpdateAdapterForIntent,
   type ExternalUpdateAdapter,
   type ExternalUpdateAdapterInput,
-  type ExternalUpdateAdapterTarget
+  type ExternalUpdateAdapterTarget,
 } from "../src/adapters/external-update-adapter.js";
 import type { UpdateIntent } from "../src/core/intent/update-intents.js";
 
@@ -26,12 +26,12 @@ function buildIntent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {
       goalState: "completed",
       evidenceType: "no_mistakes_complete",
       sourceExternalId: "linear-issue-1",
-      sourceExternalKey: "NGX-1"
+      sourceExternalKey: "NGX-1",
     },
     reason:
       "Goal completed with verification evidence (no_mistakes_complete); source item NGX-1 appears satisfied.",
     goalId: "goal_test_1",
-    sourceItemId: "source_item_test_1",
+    trackerItemId: "source_item_test_1",
     evidenceRecordId: "evidence_record_test_1",
     status: "pending",
     idempotencyKey: "linear:linear-issue-1:source_satisfied:goal_test_1",
@@ -43,32 +43,37 @@ function buildIntent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {
     appliedAt: null,
     skippedAt: null,
     canceledAt: null,
-    ...overrides
+    ...overrides,
   };
 }
 
-function buildTarget(overrides: Partial<ExternalUpdateAdapterTarget> = {}): ExternalUpdateAdapterTarget {
+function buildTarget(
+  overrides: Partial<ExternalUpdateAdapterTarget> = {},
+): ExternalUpdateAdapterTarget {
   return {
     adapterKind: "linear",
     externalId: "linear-issue-1",
     externalKey: "NGX-1",
     url: "https://linear.app/example/issue/NGX-1",
     title: "Example issue title",
-    ...overrides
+    ...overrides,
   };
 }
 
 function buildInput(
-  overrides: Partial<ExternalUpdateAdapterInput> = {}
+  overrides: Partial<ExternalUpdateAdapterInput> = {},
 ): ExternalUpdateAdapterInput {
   const base: ExternalUpdateAdapterInput = {
     intent: buildIntent(),
     target: buildTarget(),
-    operator: { reason: "Operator confirmed Goal completion.", actor: "calvin" },
+    operator: {
+      reason: "Operator confirmed Goal completion.",
+      actor: "calvin",
+    },
     policy: {
       intentApplyPolicy: "external_apply_allowed",
-      allowStatusMutation: false
-    }
+      allowStatusMutation: false,
+    },
   };
   return { ...base, ...overrides };
 }
@@ -84,8 +89,8 @@ describe("external update adapter registry", () => {
     expect(summaries).toEqual([
       {
         kind: "linear",
-        supportedIntentTypes: ["source_satisfied", "status_update"]
-      }
+        supportedIntentTypes: ["source_satisfied", "status_update"],
+      },
     ]);
   });
 
@@ -104,7 +109,7 @@ describe("external update adapter registry", () => {
   it("resolves the linear adapter for an eligible source_satisfied intent", () => {
     const adapter = resolveExternalUpdateAdapterForIntent({
       adapterKind: "linear",
-      intentType: "source_satisfied"
+      intentType: "source_satisfied",
     });
     expect(adapter?.kind).toBe("linear");
   });
@@ -112,7 +117,7 @@ describe("external update adapter registry", () => {
   it("resolves the linear adapter for an eligible status_update intent", () => {
     const adapter = resolveExternalUpdateAdapterForIntent({
       adapterKind: "linear",
-      intentType: "status_update"
+      intentType: "status_update",
     });
     expect(adapter?.kind).toBe("linear");
   });
@@ -121,8 +126,8 @@ describe("external update adapter registry", () => {
     expect(
       resolveExternalUpdateAdapterForIntent({
         adapterKind: "linear",
-        intentType: "some_future_intent"
-      })
+        intentType: "some_future_intent",
+      }),
     ).toBeUndefined();
   });
 
@@ -130,8 +135,8 @@ describe("external update adapter registry", () => {
     expect(
       resolveExternalUpdateAdapterForIntent({
         adapterKind: "github",
-        intentType: "source_satisfied"
-      })
+        intentType: "source_satisfied",
+      }),
     ).toBeUndefined();
   });
 });
@@ -148,7 +153,7 @@ describe("external update adapter result taxonomy", () => {
       "write_rejected",
       "write_timeout",
       "malformed_response",
-      "validation_failed"
+      "validation_failed",
     ]) {
       expect(EXTERNAL_UPDATE_ADAPTER_ERROR_CODES).toContain(code);
     }
@@ -157,7 +162,7 @@ describe("external update adapter result taxonomy", () => {
   it("intentionally excludes reconciliation-specific codes (owned by NGX-300/NGX-301)", () => {
     const reconciliationCodes = [
       "post_apply_reconcile_failed",
-      "post_apply_reconcile_mismatch"
+      "post_apply_reconcile_mismatch",
     ];
     for (const code of reconciliationCodes) {
       expect(EXTERNAL_UPDATE_ADAPTER_ERROR_CODES).not.toContain(code);
@@ -167,7 +172,7 @@ describe("external update adapter result taxonomy", () => {
   it("exposes the supported mutation kinds for previews", () => {
     expect(EXTERNAL_UPDATE_MUTATION_KINDS).toEqual([
       "comment",
-      "status_transition"
+      "status_transition",
     ]);
   });
 });
@@ -177,21 +182,23 @@ describe("buildIdempotencyMarker", () => {
     const marker = buildIdempotencyMarker({
       adapterKind: "linear",
       intentId: "update_intent_1",
-      payload: { foo: "bar" }
+      payload: { foo: "bar" },
     });
-    expect(marker.startsWith("momentum-intent:linear:update_intent_1:")).toBe(true);
+    expect(marker.startsWith("momentum-intent:linear:update_intent_1:")).toBe(
+      true,
+    );
   });
 
   it("returns the same marker for the same intent payload across calls", () => {
     const a = buildIdempotencyMarker({
       adapterKind: "linear",
       intentId: "update_intent_1",
-      payload: { a: 1, b: "two" }
+      payload: { a: 1, b: "two" },
     });
     const b = buildIdempotencyMarker({
       adapterKind: "linear",
       intentId: "update_intent_1",
-      payload: { b: "two", a: 1 }
+      payload: { b: "two", a: 1 },
     });
     expect(a).toBe(b);
   });
@@ -200,17 +207,17 @@ describe("buildIdempotencyMarker", () => {
     const base = buildIdempotencyMarker({
       adapterKind: "linear",
       intentId: "update_intent_1",
-      payload: { foo: "bar" }
+      payload: { foo: "bar" },
     });
     const otherIntent = buildIdempotencyMarker({
       adapterKind: "linear",
       intentId: "update_intent_2",
-      payload: { foo: "bar" }
+      payload: { foo: "bar" },
     });
     const otherPayload = buildIdempotencyMarker({
       adapterKind: "linear",
       intentId: "update_intent_1",
-      payload: { foo: "baz" }
+      payload: { foo: "baz" },
     });
     expect(otherIntent).not.toBe(base);
     expect(otherPayload).not.toBe(base);
@@ -226,7 +233,7 @@ describe("previewExternalUpdate", () => {
     const expectedMarker = buildIdempotencyMarker({
       adapterKind: "linear",
       intentId: "update_intent_test_1",
-      payload: buildIntent().payload
+      payload: buildIntent().payload,
     });
 
     expect(result.preview).toMatchObject({
@@ -234,18 +241,20 @@ describe("previewExternalUpdate", () => {
       intentId: "update_intent_test_1",
       intentType: "source_satisfied",
       mutationKind: "comment",
-      idempotencyMarker: expectedMarker
+      idempotencyMarker: expectedMarker,
     });
     expect(result.preview.target).toMatchObject({
       adapterKind: "linear",
       externalId: "linear-issue-1",
-      externalKey: "NGX-1"
+      externalKey: "NGX-1",
     });
     expect(result.preview.summary).toContain("NGX-1");
     expect(result.preview.summary).toContain("source_satisfied");
     expect(result.preview.commentBody).toContain(expectedMarker);
     expect(result.preview.commentBody).toContain("Operator (calvin)");
-    expect(result.preview.commentBody).toContain("Operator confirmed Goal completion.");
+    expect(result.preview.commentBody).toContain(
+      "Operator confirmed Goal completion.",
+    );
   });
 
   it("returns a status-transition preview for an eligible status_update intent", () => {
@@ -253,18 +262,18 @@ describe("previewExternalUpdate", () => {
       intentType: "status_update",
       payload: {
         state: "Done",
-        comment: "Native workflow finished and should close the tracker."
+        comment: "Native workflow finished and should close the tracker.",
       },
-      reason: "Close the tracker after workflow success."
+      reason: "Close the tracker after workflow success.",
     });
     const result = previewExternalUpdate(
       buildInput({
         intent,
         policy: {
           intentApplyPolicy: "external_apply_allowed",
-          allowStatusMutation: true
-        }
-      })
+          allowStatusMutation: true,
+        },
+      }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -272,12 +281,14 @@ describe("previewExternalUpdate", () => {
     expect(result.preview).toMatchObject({
       intentType: "status_update",
       mutationKind: "status_transition",
-      summary: "Linear status update on NGX-1: Done"
+      summary: "Linear status update on NGX-1: Done",
     });
     expect(result.preview.commentBody).toContain(
-      "Native workflow finished and should close the tracker."
+      "Native workflow finished and should close the tracker.",
     );
-    expect(result.preview.commentBody).toContain(result.preview.idempotencyMarker);
+    expect(result.preview.commentBody).toContain(
+      result.preview.idempotencyMarker,
+    );
   });
 
   it("returns validation_failed when status_update payload has no target state", () => {
@@ -285,9 +296,9 @@ describe("previewExternalUpdate", () => {
       buildInput({
         intent: buildIntent({
           intentType: "status_update",
-          payload: { comment: "missing state" }
-        })
-      })
+          payload: { comment: "missing state" },
+        }),
+      }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -300,9 +311,9 @@ describe("previewExternalUpdate", () => {
       buildInput({
         intent: buildIntent({
           intentType: "status_update",
-          payload: { state: "Done", stateId: "state-done" }
-        })
-      })
+          payload: { state: "Done", stateId: "state-done" },
+        }),
+      }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -330,9 +341,12 @@ describe("previewExternalUpdate", () => {
   it("returns unsupported_adapter for unregistered adapter kinds", () => {
     const result = previewExternalUpdate(
       buildInput({
-        intent: buildIntent({ adapterKind: "github", targetExternalId: "gh-1" }),
-        target: buildTarget({ adapterKind: "github", externalId: "gh-1" })
-      })
+        intent: buildIntent({
+          adapterKind: "github",
+          targetExternalId: "gh-1",
+        }),
+        target: buildTarget({ adapterKind: "github", externalId: "gh-1" }),
+      }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -343,8 +357,8 @@ describe("previewExternalUpdate", () => {
   it("returns unsupported_intent_type when the adapter does not support the intent type", () => {
     const result = previewExternalUpdate(
       buildInput({
-        intent: buildIntent({ intentType: "some_future_intent" })
-      })
+        intent: buildIntent({ intentType: "some_future_intent" }),
+      }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -356,8 +370,8 @@ describe("previewExternalUpdate", () => {
     const result = previewExternalUpdate(
       buildInput({
         intent: buildIntent({ targetExternalId: null }),
-        target: buildTarget({ externalId: "" })
-      })
+        target: buildTarget({ externalId: "" }),
+      }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -367,8 +381,8 @@ describe("previewExternalUpdate", () => {
   it("returns validation_failed when the operator reason is empty", () => {
     const result = previewExternalUpdate(
       buildInput({
-        operator: { reason: "   ", actor: "calvin" }
-      })
+        operator: { reason: "   ", actor: "calvin" },
+      }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -379,9 +393,9 @@ describe("previewExternalUpdate", () => {
       buildInput({
         policy: {
           intentApplyPolicy: "create_intents_only",
-          allowStatusMutation: false
-        }
-      })
+          allowStatusMutation: false,
+        },
+      }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -392,8 +406,8 @@ describe("previewExternalUpdate", () => {
   it("returns validation_failed when intent target id does not match the resolved target", () => {
     const result = previewExternalUpdate(
       buildInput({
-        target: buildTarget({ externalId: "linear-issue-other" })
-      })
+        target: buildTarget({ externalId: "linear-issue-other" }),
+      }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -406,11 +420,11 @@ describe("previewExternalUpdate", () => {
       supportedIntentTypes: ["source_satisfied"],
       preview: () => {
         throw new Error("write client exploded");
-      }
+      },
     };
 
     const result = previewExternalUpdate(buildInput(), {
-      adapters: new Map([["linear", throwingAdapter]])
+      adapters: new Map([["linear", throwingAdapter]]),
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -424,8 +438,8 @@ describe("no external mutation side effects in boundary slice", () => {
     const moduleSource = await import("node:fs").then((fs) =>
       fs.readFileSync(
         new URL("../src/adapters/external-update-adapter.ts", import.meta.url),
-        "utf8"
-      )
+        "utf8",
+      ),
     );
     // Anchored at line start, ignoring import lines, ensure no http/network
     // transport is wired up from the boundary module in this slice.
@@ -435,12 +449,12 @@ describe("no external mutation side effects in boundary slice", () => {
       "node:https",
       'from "http"',
       'from "https"',
-      "fetch("
+      "fetch(",
     ];
     for (const needle of forbidden) {
       expect(
         moduleSource.includes(needle),
-        `boundary module should not reference ${needle}`
+        `boundary module should not reference ${needle}`,
       ).toBe(false);
     }
   });

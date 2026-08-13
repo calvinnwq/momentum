@@ -5,8 +5,8 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { buildLinearHttpReconciliationClient } from "../src/adapters/linear-http-client.js";
-import { reconcileLinearSource } from "../src/core/source/reconciliation.js";
-import { listSourceItems } from "../src/core/source/items.js";
+import { reconcileLinearTracker } from "../src/core/tracker/reconciliation.js";
+import { listTrackerItems } from "../src/core/tracker/items.js";
 import {
   REAL_SMOKE_EVIDENCE_DIR_ENV_VAR,
   REAL_SMOKE_LINEAR_OPT_IN_ENV_VAR,
@@ -91,7 +91,7 @@ describe.skipIf(plan.mode === "skip")(
         if (plan.endpoint !== null) clientOptions.endpoint = plan.endpoint;
         const client = buildLinearHttpReconciliationClient(clientOptions);
 
-        const result = await reconcileLinearSource(db, {
+        const result = await reconcileLinearTracker(db, {
           client,
           filters: plan.filters,
           dryRun: plan.dryRun,
@@ -99,7 +99,7 @@ describe.skipIf(plan.mode === "skip")(
         });
 
         const outcome = classifyRealSmokeReadOutcome(result);
-        const items = listSourceItems(db, { adapterKind: "linear" });
+        const items = listTrackerItems(db, { adapterKind: "linear" });
 
         const evidencePath = recordEvidence("linear-read", {
           issue: "NGX-372",

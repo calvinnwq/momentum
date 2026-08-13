@@ -1,7 +1,4 @@
-import {
-  usageError,
-  type CliIo
-} from "../../renderers/cli-output.js";
+import { usageError, type CliIo } from "../../renderers/cli-output.js";
 import {
   emitIntentDecisionSuccess,
   emitIntentExternalApplySuccess,
@@ -11,7 +8,7 @@ import {
   type IntentApplyPolicySummary,
   type IntentCommand,
   type IntentExternalApplySummary,
-  type IntentFailure
+  type IntentFailure,
 } from "../../renderers/intent.js";
 import { openDb } from "../../adapters/db.js";
 import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
@@ -20,7 +17,7 @@ import {
   loadMomentumPolicy,
   resolveIntentApplyPolicy,
   type PolicyEffectiveFieldSource,
-  type UpdateIntentApplyPolicy
+  type UpdateIntentApplyPolicy,
 } from "../../core/intent/policy.js";
 import {
   UPDATE_INTENT_STATUSES,
@@ -35,18 +32,18 @@ import {
   type UpdateIntent,
   type UpdateIntentDecisionInput,
   type UpdateIntentDecisionResult,
-  type UpdateIntentStatus
+  type UpdateIntentStatus,
 } from "../../core/intent/update-intents.js";
 import {
   summarizeIntentApplyAuditsForIntent,
-  type IntentApplyAuditSummary
+  type IntentApplyAuditSummary,
 } from "../../core/intent/apply-audits.js";
 import {
   defaultBuildLinearRefreshClient,
   executeExternalApply,
   LINEAR_API_KEY_ENV_VAR,
   type ExecuteExternalApplyDeps,
-  type ExecuteExternalApplyResult
+  type ExecuteExternalApplyResult,
 } from "../../core/intent/apply-execute.js";
 import { type LinearExternalUpdateClient } from "../../adapters/linear-external-update-client.js";
 import { type LinearIssueRefreshClient } from "../../adapters/linear-issue-refresh.js";
@@ -63,15 +60,27 @@ export type LinearIssueRefreshClientFactoryInput = {
 
 export type CliDeps = {
   buildLinearExternalUpdateClient?: (
-    input: LinearExternalUpdateClientFactoryInput
+    input: LinearExternalUpdateClientFactoryInput,
   ) => LinearExternalUpdateClient;
   buildLinearIssueRefreshClient?: (
-    input: LinearIssueRefreshClientFactoryInput
+    input: LinearIssueRefreshClientFactoryInput,
   ) => LinearIssueRefreshClient | null;
 };
 
 type ParsedFlags = {
-  args: string[]; json: boolean; dataDir?: string; goal?: string; sourceItem?: string; status?: string; reason?: string; limit?: number; externalApply: boolean; repo?: string; adapter?: string; evidenceType?: string; evidenceRecord?: string;
+  args: string[];
+  json: boolean;
+  dataDir?: string;
+  goal?: string;
+  trackerItem?: string;
+  status?: string;
+  reason?: string;
+  limit?: number;
+  externalApply: boolean;
+  repo?: string;
+  adapter?: string;
+  evidenceType?: string;
+  evidenceRecord?: string;
 };
 
 type IntentApplyPolicyResolution =
@@ -81,7 +90,7 @@ type IntentApplyPolicyResolution =
 const LINEAR_API_KEY_ENV = LINEAR_API_KEY_ENV_VAR;
 
 function buildFallbackIntentApplyPolicySummary(
-  externalApplyRequested: boolean
+  externalApplyRequested: boolean,
 ): IntentApplyPolicySummary {
   return {
     effective: DEFAULT_INTENT_APPLY_POLICY,
@@ -91,21 +100,21 @@ function buildFallbackIntentApplyPolicySummary(
     note:
       "`intent apply` records the operator's manual mark only; " +
       "pass --external-apply with a repo whose MOMENTUM.md sets " +
-      "intent_apply_policy: external_apply_allowed to perform an external tracker write."
+      "intent_apply_policy: external_apply_allowed to perform an external tracker write.",
   };
 }
 
 export function intent(
   parsed: ParsedFlags,
   io: CliIo,
-  deps: CliDeps
+  deps: CliDeps,
 ): number | Promise<number> {
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
       "Missing required subcommand for intent. Expected: list, get, apply, skip, cancel.",
       parsed,
-      io
+      io,
     );
   }
   if (subcommand === "list") {
@@ -131,7 +140,7 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
     return usageError(
       `Unexpected argument for intent list: ${parsed.args[2]}`,
       parsed,
-      io
+      io,
     );
   }
 
@@ -146,7 +155,7 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
     return emitIntentFailure(parsed, io, {
       command: "intent list",
       code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err)
+      message: err instanceof Error ? err.message : String(err),
     });
   }
 
@@ -158,7 +167,7 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
         code: "invalid_status",
         message: `Invalid --status value: ${parsed.status}. Expected one of: ${UPDATE_INTENT_STATUSES.join(", ")}.`,
         dataDir,
-        status: parsed.status
+        status: parsed.status,
       });
     }
     statusFilter = parsed.status;
@@ -175,8 +184,8 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
   if (parsed.goal !== undefined && parsed.goal.length > 0) {
     filters.goalId = parsed.goal;
   }
-  if (parsed.sourceItem !== undefined && parsed.sourceItem.length > 0) {
-    filters.sourceItemId = parsed.sourceItem;
+  if (parsed.trackerItem !== undefined && parsed.trackerItem.length > 0) {
+    filters.trackerItemId = parsed.trackerItem;
   }
   if (parsed.evidenceRecord !== undefined && parsed.evidenceRecord.length > 0) {
     filters.evidenceRecordId = parsed.evidenceRecord;
@@ -200,21 +209,21 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
           code: "goal_not_found",
           message: `Goal not found: ${filters.goalId}`,
           dataDir,
-          goalId: filters.goalId
+          goalId: filters.goalId,
         });
       }
     }
-    if (filters.sourceItemId !== undefined && filters.sourceItemId !== null) {
+    if (filters.trackerItemId !== undefined && filters.trackerItemId !== null) {
       const row = db
-        .prepare("SELECT id FROM source_items WHERE id = ?")
-        .get(filters.sourceItemId) as { id: string } | undefined;
+        .prepare("SELECT id FROM tracker_items WHERE id = ?")
+        .get(filters.trackerItemId) as { id: string } | undefined;
       if (!row) {
         return emitIntentFailure(parsed, io, {
           command: "intent list",
-          code: "source_item_not_found",
-          message: `Source item not found: ${filters.sourceItemId}`,
+          code: "tracker_item_not_found",
+          message: `Tracker item not found: ${filters.trackerItemId}`,
           dataDir,
-          sourceItemId: filters.sourceItemId
+          trackerItemId: filters.trackerItemId,
         });
       }
     }
@@ -231,7 +240,7 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
           code: "evidence_record_not_found",
           message: `Evidence record not found: ${filters.evidenceRecordId}`,
           dataDir,
-          evidenceRecordId: filters.evidenceRecordId
+          evidenceRecordId: filters.evidenceRecordId,
         });
       }
     }
@@ -243,8 +252,8 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
     if (filters.intentType !== undefined)
       countOptions.intentType = filters.intentType;
     if (filters.goalId !== undefined) countOptions.goalId = filters.goalId;
-    if (filters.sourceItemId !== undefined)
-      countOptions.sourceItemId = filters.sourceItemId;
+    if (filters.trackerItemId !== undefined)
+      countOptions.trackerItemId = filters.trackerItemId;
     if (filters.evidenceRecordId !== undefined)
       countOptions.evidenceRecordId = filters.evidenceRecordId;
     totalAvailable =
@@ -255,7 +264,7 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
     for (const intent of intents) {
       auditSummaries.set(
         intent.id,
-        summarizeIntentApplyAuditsForIntent(db, intent.id)
+        summarizeIntentApplyAuditsForIntent(db, intent.id),
       );
     }
   } finally {
@@ -272,7 +281,7 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
     intents,
     auditSummaries,
     totalAvailable,
-    truncated
+    truncated,
   });
 }
 
@@ -282,14 +291,14 @@ function intentGet(parsed: ParsedFlags, io: CliIo): number {
     return usageError(
       "Missing required <intent-id> for intent get.",
       parsed,
-      io
+      io,
     );
   }
   if (parsed.args.length > 3) {
     return usageError(
       `Unexpected argument for intent get: ${parsed.args[3]}`,
       parsed,
-      io
+      io,
     );
   }
 
@@ -305,7 +314,7 @@ function intentGet(parsed: ParsedFlags, io: CliIo): number {
       command: "intent get",
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
-      intentId
+      intentId,
     });
   }
 
@@ -327,7 +336,7 @@ function intentGet(parsed: ParsedFlags, io: CliIo): number {
       code: "intent_not_found",
       message: `Update intent not found: ${intentId}`,
       dataDir,
-      intentId
+      intentId,
     });
   }
 
@@ -346,7 +355,7 @@ function intentDecision(
   parsed: ParsedFlags,
   io: CliIo,
   action: IntentDecisionAction,
-  deps: CliDeps
+  deps: CliDeps,
 ): number | Promise<number> {
   const command = intentDecisionCommand(action);
   const intentId = parsed.args[2];
@@ -354,14 +363,14 @@ function intentDecision(
     return usageError(
       `Missing required <intent-id> for ${command}.`,
       parsed,
-      io
+      io,
     );
   }
   if (parsed.args.length > 3) {
     return usageError(
       `Unexpected argument for ${command}: ${parsed.args[3]}`,
       parsed,
-      io
+      io,
     );
   }
 
@@ -371,7 +380,7 @@ function intentDecision(
       command,
       code: "reason_required",
       message: `Missing required --reason for ${command}.`,
-      intentId
+      intentId,
     });
   }
 
@@ -381,18 +390,21 @@ function intentDecision(
       io,
       deps,
       intentId,
-      reason
+      reason,
     });
   }
 
-  const applyPolicyResolution = buildIntentApplyPolicySummary(parsed.repo, false);
+  const applyPolicyResolution = buildIntentApplyPolicySummary(
+    parsed.repo,
+    false,
+  );
 
   if (!applyPolicyResolution.ok) {
     return emitIntentFailure(parsed, io, {
       command,
       code: "policy_load_failed",
       message: applyPolicyResolution.message,
-      intentId
+      intentId,
     });
   }
   const applyPolicy = applyPolicyResolution.summary;
@@ -409,7 +421,7 @@ function intentDecision(
       command,
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
-      intentId
+      intentId,
     });
   }
 
@@ -418,7 +430,7 @@ function intentDecision(
   try {
     const input: UpdateIntentDecisionInput = {
       intentId,
-      decisionReason: reason
+      decisionReason: reason,
     };
     if (action === "apply") {
       result = markUpdateIntentApplied(db, input);
@@ -437,7 +449,7 @@ function intentDecision(
       code: result.code,
       message: result.message,
       dataDir,
-      intentId
+      intentId,
     };
     if (result.code === "intent_already_terminal" && result.currentStatus) {
       failure.currentStatus = result.currentStatus;
@@ -453,7 +465,7 @@ function intentDecision(
     dataDir,
     previousStatus: result.previousStatus,
     record: result.intent,
-    ...(action === "apply" ? { applyPolicy } : {})
+    ...(action === "apply" ? { applyPolicy } : {}),
   });
 }
 
@@ -479,7 +491,7 @@ async function intentExternalApply(args: {
       command,
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
-      intentId
+      intentId,
     });
   }
 
@@ -518,7 +530,7 @@ async function intentExternalApply(args: {
       repoPath: parsed.repo ?? null,
       env,
       statusMutation: null,
-      deps: executeDeps
+      deps: executeDeps,
     });
   } catch (err) {
     return emitIntentFailure(parsed, io, {
@@ -528,7 +540,7 @@ async function intentExternalApply(args: {
         err instanceof Error ? err.message : String(err)
       }`,
       dataDir,
-      intentId
+      intentId,
     });
   } finally {
     db.close();
@@ -545,7 +557,7 @@ async function intentExternalApply(args: {
       dataDir,
       intentId,
       applyPolicy,
-      externalApply
+      externalApply,
     };
     if (
       result.code === "intent_already_terminal" &&
@@ -561,13 +573,13 @@ async function intentExternalApply(args: {
     dataDir,
     record: result.intent,
     applyPolicy,
-    externalApply
+    externalApply,
   });
 }
 
 function buildExternalApplyPolicySummary(
   result: ExecuteExternalApplyResult,
-  externalApplyRequested: boolean
+  externalApplyRequested: boolean,
 ): IntentApplyPolicySummary {
   const base = buildFallbackIntentApplyPolicySummary(externalApplyRequested);
   const resolved = result.context.applyPolicy;
@@ -576,9 +588,11 @@ function buildExternalApplyPolicySummary(
   const performed = externalApplyPerformed(result);
   let note: string;
   if (result.ok && result.resultCode === "already_applied") {
-    note = "External apply was already present; no tracker write was performed.";
+    note =
+      "External apply was already present; no tracker write was performed.";
   } else if (result.ok) {
-    note = "External apply was performed through the configured tracker adapter.";
+    note =
+      "External apply was performed through the configured tracker adapter.";
   } else if (performed) {
     note =
       "External write was performed, but post-write finalization did not complete; inspect externalApply and run operator recovery before retrying.";
@@ -593,7 +607,7 @@ function buildExternalApplyPolicySummary(
     effective: resolved.value,
     source,
     externalApplyPerformed: performed,
-    note
+    note,
   };
 }
 
@@ -601,13 +615,13 @@ function externalApplyPerformed(result: ExecuteExternalApplyResult): boolean {
   if (result.ok) return result.resultCode !== "already_applied";
   return Boolean(
     result.external?.commentId ||
-      result.external?.statusTransitioned ||
-      result.external?.alreadyApplied
+    result.external?.statusTransitioned ||
+    result.external?.alreadyApplied,
   );
 }
 
 function buildIntentExternalApplySummary(
-  result: ExecuteExternalApplyResult
+  result: ExecuteExternalApplyResult,
 ): IntentExternalApplySummary {
   const ctx = result.context;
   const external = result.external;
@@ -619,14 +633,14 @@ function buildIntentExternalApplySummary(
       externalId: ctx.target.externalId,
       externalKey: ctx.target.externalKey,
       url: ctx.target.url,
-      title: ctx.target.title
+      title: ctx.target.title,
     },
     allowStatusMutation: ctx.allowStatusMutation,
     mutationKind: ctx.mutationKind,
     auditId: ctx.auditId,
     reconcile: {
       status: ctx.reconcile.status,
-      warning: ctx.reconcile.warning
+      warning: ctx.reconcile.warning,
     },
     external: external
       ? {
@@ -639,15 +653,15 @@ function buildIntentExternalApplySummary(
           statusTransitioned: external.statusTransitioned,
           nextStateId: external.nextStateId,
           nextStateName: external.nextStateName,
-          idempotencyMarker: external.idempotencyMarker
+          idempotencyMarker: external.idempotencyMarker,
         }
-      : null
+      : null,
   };
 }
 
 function buildIntentApplyPolicySummary(
   repoOverride: string | undefined,
-  externalApplyRequested: boolean
+  externalApplyRequested: boolean,
 ): IntentApplyPolicyResolution {
   let effective: UpdateIntentApplyPolicy = DEFAULT_INTENT_APPLY_POLICY;
   let source: PolicyEffectiveFieldSource = "builtin_default";
@@ -658,7 +672,7 @@ function buildIntentApplyPolicySummary(
         ok: false,
         code: load.code,
         message: load.error,
-        path: load.path
+        path: load.path,
       };
     }
     if (load.ok && load.present) {
@@ -672,8 +686,8 @@ function buildIntentApplyPolicySummary(
     summary: {
       ...buildFallbackIntentApplyPolicySummary(externalApplyRequested),
       effective,
-      source
-    }
+      source,
+    },
   };
 }
 

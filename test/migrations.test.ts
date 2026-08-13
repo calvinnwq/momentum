@@ -96,9 +96,9 @@ describe("applyQueueMigrations", () => {
       }
 
       expect(tableNames(db)).toContain("daemon_runs");
-      expect(tableNames(db)).toContain("source_items");
-      expect(tableNames(db)).toContain("source_snapshots");
-      expect(tableNames(db)).toContain("source_reconciliation_runs");
+      expect(tableNames(db)).toContain("tracker_items");
+      expect(tableNames(db)).toContain("tracker_snapshots");
+      expect(tableNames(db)).toContain("tracker_reconciliation_runs");
       expect(tableNames(db)).toContain("evidence_records");
       expect(tableNames(db)).toContain("update_intents");
 
@@ -113,7 +113,7 @@ describe("applyQueueMigrations", () => {
         "payload_json",
         "reason",
         "goal_id",
-        "source_item_id",
+        "tracker_item_id",
         "evidence_record_id",
         "status",
         "idempotency_key",
@@ -146,7 +146,7 @@ describe("applyQueueMigrations", () => {
         "summary",
         "metadata_json",
         "goal_id",
-        "source_item_id",
+        "tracker_item_id",
         "run_id",
         "step_id",
         "ingest_key",
@@ -159,7 +159,7 @@ describe("applyQueueMigrations", () => {
         ).toContain(col);
       }
 
-      const sourceItemColumns = getColumns(db, "source_items").map(
+      const trackerItemColumns = getColumns(db, "tracker_items").map(
         (row) => row.name,
       );
       for (const col of [
@@ -177,8 +177,8 @@ describe("applyQueueMigrations", () => {
         "updated_at",
       ]) {
         expect(
-          sourceItemColumns,
-          `missing source_items column: ${col}`,
+          trackerItemColumns,
+          `missing tracker_items column: ${col}`,
         ).toContain(col);
       }
 
@@ -223,14 +223,14 @@ describe("applyQueueMigrations", () => {
       expect(indexes).toContain("idx_daemon_runs_one_active");
       expect(indexes).toContain("idx_evidence_records_ingest_key");
       expect(indexes).toContain("idx_evidence_records_goal");
-      expect(indexes).toContain("idx_evidence_records_source_item");
+      expect(indexes).toContain("idx_evidence_records_tracker_item");
       expect(indexes).toContain("idx_evidence_records_source_type");
       expect(indexes).toContain("idx_evidence_records_occurred_at");
       expect(indexes).toContain("idx_evidence_records_run_step");
       expect(indexes).toContain("idx_update_intents_idempotency_key");
       expect(indexes).toContain("idx_update_intents_status");
       expect(indexes).toContain("idx_update_intents_goal");
-      expect(indexes).toContain("idx_update_intents_source_item");
+      expect(indexes).toContain("idx_update_intents_tracker_item");
       expect(indexes).toContain("idx_update_intents_evidence");
       expect(indexes).toContain("idx_update_intents_adapter_target");
       expect(indexes).toContain("idx_update_intents_created_at");
@@ -390,7 +390,7 @@ describe("applyQueueMigrations", () => {
           payload_json TEXT NOT NULL DEFAULT '{}',
           reason TEXT NOT NULL,
           goal_id TEXT,
-          source_item_id TEXT,
+          tracker_item_id TEXT,
           evidence_record_id TEXT,
           status TEXT NOT NULL DEFAULT 'pending',
           idempotency_key TEXT NOT NULL,
@@ -470,7 +470,7 @@ describe("applyQueueMigrations", () => {
           summary TEXT NOT NULL,
           metadata_json TEXT NOT NULL DEFAULT '{}',
           goal_id TEXT,
-          source_item_id TEXT,
+          tracker_item_id TEXT,
           ingest_key TEXT NOT NULL,
           created_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL

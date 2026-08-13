@@ -4,7 +4,7 @@
  * After the two-phase external apply path mutates Linear, this module performs
  * a targeted refresh of just the touched issue, confirms the apply idempotency
  * marker is reflected in Linear, and persists the refreshed payload to local
- * SourceItem state. The reconciliation outcome surface uses a fixed taxonomy
+ * TrackerItem state. The reconciliation outcome surface uses a fixed taxonomy
  * so operator surfaces and the audit ledger can record a stable code/message.
  *
  * Invariants the orchestrator must preserve:
@@ -12,7 +12,7 @@
  *  - Scope is single-issue. The orchestrator never triggers project- or
  *    milestone-wide reconciliation (`SPEC.md`).
  *  - Reconcile is best-effort and never reverts the external apply. The Linear
- *    write is already authoritative — local audit/SourceItem state is the
+ *    write is already authoritative — local audit/TrackerItem state is the
  *    durable trace.
  *  - The marker check uses the same idempotency marker that the apply preview
  *    embedded in the Linear comment body so a single source of truth governs
@@ -25,16 +25,13 @@
 import type { MomentumDb } from "../../adapters/db.js";
 import {
   normalizeLinearIssue,
-  LINEAR_SOURCE_ADAPTER_KIND
-} from "../../adapters/linear-source-adapter.js";
+  LINEAR_TRACKER_ADAPTER_KIND,
+} from "../../adapters/linear-tracker-adapter.js";
 import type {
   LinearIssueRefreshClient,
-  LinearIssueRefreshTarget
+  LinearIssueRefreshTarget,
 } from "../../adapters/linear-issue-refresh.js";
-import {
-  recordSourceSnapshot,
-  upsertSourceItem
-} from "../source/items.js";
+import { recordTrackerSnapshot, upsertTrackerItem } from "../tracker/items.js";
 
 export const POST_APPLY_RECONCILE_OUTCOME_CODES = Object.freeze([
   "success",
@@ -42,7 +39,7 @@ export const POST_APPLY_RECONCILE_OUTCOME_CODES = Object.freeze([
   "mismatch_persists",
   "refresh_failed",
   "post_apply_reconcile_failed",
-  "targeted_refresh_unsupported"
+  "targeted_refresh_unsupported",
 ] as const);
 
 export type PostApplyReconcileOutcomeCode =
@@ -51,7 +48,7 @@ export type PostApplyReconcileOutcomeCode =
 export type PostApplyReconcileOutcome = {
   code: PostApplyReconcileOutcomeCode;
   detail: string;
-  sourceItemId: string | null;
+  trackerItemId: string | null;
   snapshotId: string | null;
 };
 
@@ -69,18 +66,18 @@ export type PostApplyReconcileInput = {
 };
 
 export async function reconcileAfterExternalApply(
-  input: PostApplyReconcileInput
+  input: PostApplyReconcileInput,
 ): Promise<PostApplyReconcileOutcome> {
-  if (input.adapterKind !== LINEAR_SOURCE_ADAPTER_KIND) {
+  if (input.adapterKind !== LINEAR_TRACKER_ADAPTER_KIND) {
     return outcome(
       "targeted_refresh_unsupported",
-      `Adapter "${input.adapterKind}" has no targeted refresh primitive; post-apply reconcile is skipped.`
+      `Adapter "${input.adapterKind}" has no targeted refresh primitive; post-apply reconcile is skipped.`,
     );
   }
   if (!input.client) {
     return outcome(
       "targeted_refresh_unsupported",
-      `Adapter "${input.adapterKind}" has no refresh client wired; post-apply reconcile is skipped.`
+      `Adapter "${input.adapterKind}" has no refresh client wired; post-apply reconcile is skipped.`,
     );
   }
   if (
@@ -89,7 +86,7 @@ export async function reconcileAfterExternalApply(
   ) {
     return outcome(
       "post_apply_reconcile_failed",
-      "reconcileAfterExternalApply requires a non-empty externalId."
+      "reconcileAfterExternalApply requires a non-empty externalId.",
     );
   }
   if (
@@ -98,13 +95,13 @@ export async function reconcileAfterExternalApply(
   ) {
     return outcome(
       "post_apply_reconcile_failed",
-      "reconcileAfterExternalApply requires a non-empty idempotencyMarker."
+      "reconcileAfterExternalApply requires a non-empty idempotencyMarker.",
     );
   }
 
   const target: LinearIssueRefreshTarget = {
     kind: "id",
-    value: input.externalId
+    value: input.externalId,
   };
 
   let refreshResult: Awaited<ReturnType<PostApplyReconcileClient["refresh"]>>;
@@ -113,7 +110,7 @@ export async function reconcileAfterExternalApply(
   } catch (error) {
     return outcome(
       "post_apply_reconcile_failed",
-      `Linear refresh client threw: ${describeError(error)}`
+      `Linear refresh client threw: ${describeError(error)}`,
     );
   }
 
@@ -121,22 +118,22 @@ export async function reconcileAfterExternalApply(
     if (refreshResult.code === "target_missing") {
       return outcome(
         "stale_source",
-        `Linear no longer recognizes target ${input.externalId}: ${refreshResult.error}`
+        `Linear no longer recognizes target ${input.externalId}: ${refreshResult.error}`,
       );
     }
     return outcome(
       "refresh_failed",
-      `Linear refresh failed (${refreshResult.code}): ${refreshResult.error}`
+      `Linear refresh failed (${refreshResult.code}): ${refreshResult.error}`,
     );
   }
 
   const markerPresent = refreshResult.comments.some((comment) =>
-    comment.body.includes(input.idempotencyMarker)
+    comment.body.includes(input.idempotencyMarker),
   );
   if (!markerPresent) {
     return outcome(
       "mismatch_persists",
-      `Linear refresh did not surface idempotency marker ${input.idempotencyMarker}; Linear may not yet reflect the apply.`
+      `Linear refresh did not surface idempotency marker ${input.idempotencyMarker}; Linear may not yet reflect the apply.`,
     );
   }
 
@@ -144,61 +141,61 @@ export async function reconcileAfterExternalApply(
   if (!normalized.ok) {
     return outcome(
       "post_apply_reconcile_failed",
-      `Linear refresh payload could not be normalized: ${normalized.error}`
+      `Linear refresh payload could not be normalized: ${normalized.error}`,
     );
   }
 
   const clock = input.now ? { now: input.now } : {};
 
   try {
-    const item = upsertSourceItem(
+    const item = upsertTrackerItem(
       input.db,
       {
-        adapterKind: LINEAR_SOURCE_ADAPTER_KIND,
+        adapterKind: LINEAR_TRACKER_ADAPTER_KIND,
         externalId: normalized.item.externalId,
         externalKey: normalized.item.externalKey ?? null,
         url: normalized.item.url ?? null,
         title: normalized.item.title,
         status: normalized.item.status ?? null,
         metadata: normalized.item.metadata ?? {},
-        observedAt: normalized.item.observedAt
+        observedAt: normalized.item.observedAt,
       },
-      clock
+      clock,
     );
-    const snapshot = recordSourceSnapshot(
+    const snapshot = recordTrackerSnapshot(
       input.db,
       {
-        sourceItemId: item.id,
-        adapterKind: LINEAR_SOURCE_ADAPTER_KIND,
+        trackerItemId: item.id,
+        adapterKind: LINEAR_TRACKER_ADAPTER_KIND,
         externalId: normalized.item.externalId,
         observedAt: normalized.item.observedAt,
         snapshot: {
           issue: refreshResult.issue,
-          comments: refreshResult.comments
-        }
+          comments: refreshResult.comments,
+        },
       },
-      clock
+      clock,
     );
     return {
       code: "success",
       detail:
-        "Linear refresh confirmed the apply idempotency marker; SourceItem snapshot recorded.",
-      sourceItemId: item.id,
-      snapshotId: snapshot.id
+        "Linear refresh confirmed the apply idempotency marker; TrackerItem snapshot recorded.",
+      trackerItemId: item.id,
+      snapshotId: snapshot.id,
     };
   } catch (error) {
     return outcome(
       "post_apply_reconcile_failed",
-      `Linear refresh succeeded but local SourceItem update failed: ${describeError(error)}`
+      `Linear refresh succeeded but local TrackerItem update failed: ${describeError(error)}`,
     );
   }
 }
 
 function outcome(
   code: PostApplyReconcileOutcomeCode,
-  detail: string
+  detail: string,
 ): PostApplyReconcileOutcome {
-  return { code, detail, sourceItemId: null, snapshotId: null };
+  return { code, detail, trackerItemId: null, snapshotId: null };
 }
 
 function describeError(error: unknown): string {

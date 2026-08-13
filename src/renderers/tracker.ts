@@ -1,16 +1,16 @@
 import type {
-  LinkGoalToSourceItemErrorCode,
-  LinkGoalToSourceItemResult,
-  SourceItem,
-  UnlinkGoalFromSourceItemErrorCode,
-  UnlinkGoalFromSourceItemResult
-} from "../core/source/items.js";
-import type { SourceReconciliationRun } from "../core/source/reconciliation-runs.js";
+  LinkGoalToTrackerItemErrorCode,
+  LinkGoalToTrackerItemResult,
+  TrackerItem,
+  UnlinkGoalFromTrackerItemErrorCode,
+  UnlinkGoalFromTrackerItemResult,
+} from "../core/tracker/items.js";
+import type { TrackerReconciliationRun } from "../core/tracker/reconciliation-runs.js";
 import type {
   LinearReconciliationFilters,
-  ReconcileLinearSourceResult
-} from "../core/source/reconciliation.js";
-import type { EvaluateGoalForSourceSatisfiedIntentResult } from "../core/source/update-intent-generator.js";
+  ReconcileLinearTrackerResult,
+} from "../core/tracker/reconciliation.js";
+import type { EvaluateGoalForTrackerSatisfiedIntentResult } from "../core/tracker/update-intent-generator.js";
 import { evidenceRecordToJsonShape } from "./evidence.js";
 import { updateIntentToJsonShape } from "./intent.js";
 import { write, writeJson, type CliIo } from "./cli-output.js";
@@ -19,7 +19,9 @@ type JsonFlags = {
   json: boolean;
 };
 
-export function sourceItemToJsonShape(item: SourceItem): Record<string, unknown> {
+export function trackerItemToJsonShape(
+  item: TrackerItem,
+): Record<string, unknown> {
   return {
     id: item.id,
     adapterKind: item.adapterKind,
@@ -32,30 +34,30 @@ export function sourceItemToJsonShape(item: SourceItem): Record<string, unknown>
     lastObservedAt: item.lastObservedAt,
     goalId: item.goalId,
     createdAt: item.createdAt,
-    updatedAt: item.updatedAt
+    updatedAt: item.updatedAt,
   };
 }
 
-export function emitSourceList(
+export function emitTrackerList(
   parsed: JsonFlags,
   io: CliIo,
   data: {
     dataDir: string;
     adapter: string | null;
-    items: SourceItem[];
-    lastReconciliation: SourceReconciliationRun | null;
-  }
+    items: TrackerItem[];
+    lastReconciliation: TrackerReconciliationRun | null;
+  },
 ): number {
   const payload = {
     ok: true,
-    command: "source list",
+    command: "tracker list",
     dataDir: data.dataDir,
     adapter: data.adapter,
     count: data.items.length,
-    items: data.items.map(sourceItemToJsonShape),
+    items: data.items.map(trackerItemToJsonShape),
     lastReconciliation: data.lastReconciliation
-      ? sourceReconciliationRunToJsonShape(data.lastReconciliation)
-      : null
+      ? trackerReconciliationRunToJsonShape(data.lastReconciliation)
+      : null,
   };
 
   if (parsed.json) {
@@ -64,24 +66,25 @@ export function emitSourceList(
   }
 
   const lines = [
-    `Source items: ${data.items.length}`,
+    `Tracker items: ${data.items.length}`,
     `Adapter: ${data.adapter ?? "(all)"}`,
     `Data dir: ${data.dataDir}`,
-    ...data.items.map((item) =>
-      `- ${item.id} [${item.adapterKind}] ${item.externalKey ?? item.externalId}: ` +
-      `${item.title}${item.status ? ` (${item.status})` : ""}`
-    )
+    ...data.items.map(
+      (item) =>
+        `- ${item.id} [${item.adapterKind}] ${item.externalKey ?? item.externalId}: ` +
+        `${item.title}${item.status ? ` (${item.status})` : ""}`,
+    ),
   ];
   if (data.lastReconciliation) {
-    const paginationStopped = sourceReconciliationPaginationStopped(
-      data.lastReconciliation
+    const paginationStopped = trackerReconciliationPaginationStopped(
+      data.lastReconciliation,
     );
     const stoppedText = paginationStopped
       ? `, stopped=${paginationStopped.reason}`
       : "";
     lines.push(
       `Last reconciliation: ${data.lastReconciliation.adapterKind} ${data.lastReconciliation.state}` +
-        ` (seen=${data.lastReconciliation.itemsSeen}, upserted=${data.lastReconciliation.itemsUpserted}${stoppedText})`
+        ` (seen=${data.lastReconciliation.itemsSeen}, upserted=${data.lastReconciliation.itemsUpserted}${stoppedText})`,
     );
   } else {
     lines.push("Last reconciliation: (none)");
@@ -91,16 +94,16 @@ export function emitSourceList(
   return 0;
 }
 
-export function emitSourceGet(
+export function emitTrackerGet(
   parsed: JsonFlags,
   io: CliIo,
-  data: { dataDir: string; item: SourceItem }
+  data: { dataDir: string; item: TrackerItem },
 ): number {
   const payload = {
     ok: true,
-    command: "source get",
+    command: "tracker get",
     dataDir: data.dataDir,
-    item: sourceItemToJsonShape(data.item)
+    item: trackerItemToJsonShape(data.item),
   };
 
   if (parsed.json) {
@@ -108,58 +111,61 @@ export function emitSourceGet(
     return 0;
   }
 
-  write(io.stdout, [
-    `Source item: ${data.item.id}`,
-    `Adapter: ${data.item.adapterKind}`,
-    `External id: ${data.item.externalId}`,
-    `External key: ${data.item.externalKey ?? "(unset)"}`,
-    `URL: ${data.item.url ?? "(unset)"}`,
-    `Title: ${data.item.title}`,
-    `Status: ${data.item.status ?? "(unset)"}`,
-    `Goal: ${data.item.goalId ?? "(unlinked)"}`,
-    `Last observed at: ${data.item.lastObservedAt}`,
-    `Data dir: ${data.dataDir}`,
-    ""
-  ].join("\n"));
+  write(
+    io.stdout,
+    [
+      `Tracker item: ${data.item.id}`,
+      `Adapter: ${data.item.adapterKind}`,
+      `External id: ${data.item.externalId}`,
+      `External key: ${data.item.externalKey ?? "(unset)"}`,
+      `URL: ${data.item.url ?? "(unset)"}`,
+      `Title: ${data.item.title}`,
+      `Status: ${data.item.status ?? "(unset)"}`,
+      `Goal: ${data.item.goalId ?? "(unlinked)"}`,
+      `Last observed at: ${data.item.lastObservedAt}`,
+      `Data dir: ${data.dataDir}`,
+      "",
+    ].join("\n"),
+  );
   return 0;
 }
 
-export function emitSourceLink(
+export function emitTrackerLink(
   parsed: JsonFlags,
   io: CliIo,
   data: {
     dataDir: string;
     goalId: string;
-    result: Extract<LinkGoalToSourceItemResult, { ok: true }>;
-    intentEvaluations: EvaluateGoalForSourceSatisfiedIntentResult[];
-  }
+    result: Extract<LinkGoalToTrackerItemResult, { ok: true }>;
+    intentEvaluations: EvaluateGoalForTrackerSatisfiedIntentResult[];
+  },
 ): number {
   const intentsCreated = data.intentEvaluations.filter(
-    (entry) => entry.outcome === "intent_created"
+    (entry) => entry.outcome === "intent_created",
   ).length;
   const intentsReplayed = data.intentEvaluations.filter(
-    (entry) => entry.outcome === "intent_replayed"
+    (entry) => entry.outcome === "intent_replayed",
   ).length;
   const intentWarnings = data.intentEvaluations.filter(
-    (entry) => entry.outcome === "evidence_insufficient"
+    (entry) => entry.outcome === "evidence_insufficient",
   ).length;
 
   const payload = {
     ok: true,
-    command: "source link",
+    command: "tracker link",
     dataDir: data.dataDir,
     goalId: data.goalId,
-    sourceItemId: data.result.sourceItem.id,
+    trackerItemId: data.result.trackerItem.id,
     changed: data.result.changed,
     skippedReason: data.result.skippedReason,
     previousGoalId: data.result.previousGoalId,
     counts: {
       intentsCreated,
       intentsReplayed,
-      intentWarnings
+      intentWarnings,
     },
     intentEvaluations: data.intentEvaluations.map(intentEvaluationToJsonShape),
-    item: sourceItemToJsonShape(data.result.sourceItem)
+    item: trackerItemToJsonShape(data.result.trackerItem),
   };
 
   if (parsed.json) {
@@ -169,37 +175,37 @@ export function emitSourceLink(
 
   const lines = [
     data.result.changed
-      ? `Linked source item ${data.result.sourceItem.id} to goal ${data.goalId}.`
-      : `Source item ${data.result.sourceItem.id} already linked to goal ${data.goalId}; no change.`,
-    `Adapter: ${data.result.sourceItem.adapterKind}`,
-    `External key: ${data.result.sourceItem.externalKey ?? "(unset)"}`,
-    `Title: ${data.result.sourceItem.title}`,
+      ? `Linked tracker item ${data.result.trackerItem.id} to goal ${data.goalId}.`
+      : `Tracker item ${data.result.trackerItem.id} already linked to goal ${data.goalId}; no change.`,
+    `Adapter: ${data.result.trackerItem.adapterKind}`,
+    `External key: ${data.result.trackerItem.externalKey ?? "(unset)"}`,
+    `Title: ${data.result.trackerItem.title}`,
     `Intents created: ${intentsCreated}`,
     `Intents replayed: ${intentsReplayed}`,
     `Intent warnings: ${intentWarnings}`,
     `Data dir: ${data.dataDir}`,
-    ""
+    "",
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
 }
 
-export function emitSourceUnlink(
+export function emitTrackerUnlink(
   parsed: JsonFlags,
   io: CliIo,
   data: {
     dataDir: string;
-    result: Extract<UnlinkGoalFromSourceItemResult, { ok: true }>;
-  }
+    result: Extract<UnlinkGoalFromTrackerItemResult, { ok: true }>;
+  },
 ): number {
   const payload = {
     ok: true,
-    command: "source unlink",
+    command: "tracker unlink",
     dataDir: data.dataDir,
-    sourceItemId: data.result.sourceItem.id,
+    trackerItemId: data.result.trackerItem.id,
     changed: data.result.changed,
     previousGoalId: data.result.previousGoalId,
-    item: sourceItemToJsonShape(data.result.sourceItem)
+    item: trackerItemToJsonShape(data.result.trackerItem),
   };
 
   if (parsed.json) {
@@ -209,29 +215,29 @@ export function emitSourceUnlink(
 
   const lines = [
     data.result.changed
-      ? `Unlinked source item ${data.result.sourceItem.id} (was goal ${data.result.previousGoalId}).`
-      : `Source item ${data.result.sourceItem.id} was already unlinked; no change.`,
-    `Adapter: ${data.result.sourceItem.adapterKind}`,
-    `Title: ${data.result.sourceItem.title}`,
+      ? `Unlinked tracker item ${data.result.trackerItem.id} (was goal ${data.result.previousGoalId}).`
+      : `Tracker item ${data.result.trackerItem.id} was already unlinked; no change.`,
+    `Adapter: ${data.result.trackerItem.adapterKind}`,
+    `Title: ${data.result.trackerItem.title}`,
     `Data dir: ${data.dataDir}`,
-    ""
+    "",
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
 }
 
-export type SourceReconcileSuccessPayload = {
+export type TrackerReconcileSuccessPayload = {
   dataDir: string;
   adapter: "linear";
   filters: LinearReconciliationFilters;
   dryRun: boolean;
-  result: ReconcileLinearSourceResult;
+  result: ReconcileLinearTrackerResult;
 };
 
-export function emitSourceReconcileResult(
+export function emitTrackerReconcileResult(
   parsed: JsonFlags,
   io: CliIo,
-  data: SourceReconcileSuccessPayload
+  data: TrackerReconcileSuccessPayload,
 ): number {
   const run = data.result.run;
   const stop = data.result.paginationStopped;
@@ -241,18 +247,18 @@ export function emitSourceReconcileResult(
 
   const payload: Record<string, unknown> = {
     ok,
-    command: "source reconcile linear",
+    command: "tracker reconcile linear",
     dataDir: data.dataDir,
     adapter: data.adapter,
     filters: data.filters,
     dryRun: data.dryRun,
-    run: sourceReconciliationRunToJsonShape(run),
+    run: trackerReconciliationRunToJsonShape(run),
     counts,
     paginationStopped: {
       reason: stop.reason,
       pageIndex: stop.pageIndex,
       code: stopCode,
-      error: stop.error ?? null
+      error: stop.error ?? null,
     },
     itemsSampled: data.result.items.slice(0, 25).map((item) => ({
       classification: item.classification,
@@ -260,8 +266,8 @@ export function emitSourceReconcileResult(
       externalKey: item.externalKey,
       pageIndex: item.pageIndex,
       errorCode: item.errorCode ?? null,
-      error: item.error ?? null
-    }))
+      error: item.error ?? null,
+    })),
   };
 
   if (parsed.json) {
@@ -270,8 +276,8 @@ export function emitSourceReconcileResult(
   }
 
   const headline = data.dryRun
-    ? `Source reconcile (dry-run, ${data.adapter}): ${run.state}`
-    : `Source reconcile (${data.adapter}): ${run.state}`;
+    ? `Tracker reconcile (dry-run, ${data.adapter}): ${run.state}`
+    : `Tracker reconcile (${data.adapter}): ${run.state}`;
   const lines: string[] = [
     headline,
     `Run id: ${run.id}`,
@@ -281,7 +287,7 @@ export function emitSourceReconcileResult(
     `Updated: ${counts.itemsUpdated}`,
     `Skipped: ${counts.itemsSkipped}`,
     `Errored: ${counts.itemsErrored}`,
-    `Stopped: ${stop.reason}${stopCode ? ` (${stopCode})` : ""}`
+    `Stopped: ${stop.reason}${stopCode ? ` (${stopCode})` : ""}`,
   ];
   if (run.error) lines.push(`Error: ${run.error}`);
   lines.push(`Data dir: ${data.dataDir}`, "");
@@ -289,27 +295,27 @@ export function emitSourceReconcileResult(
   return ok ? 0 : 1;
 }
 
-export type SourceReconcileFailure = {
+export type TrackerReconcileFailure = {
   code:
     | "data_dir_failed"
-    | "unsupported_source_adapter"
-    | "source_config_invalid"
-    | "source_adapter_threw";
+    | "unsupported_tracker_adapter"
+    | "tracker_config_invalid"
+    | "tracker_adapter_threw";
   message: string;
   dataDir?: string;
   adapter?: string;
 };
 
-export function emitSourceReconcileFailure(
+export function emitTrackerReconcileFailure(
   parsed: JsonFlags,
   io: CliIo,
-  failure: SourceReconcileFailure
+  failure: TrackerReconcileFailure,
 ): number {
   const payload: Record<string, unknown> = {
     ok: false,
-    command: "source reconcile linear",
+    command: "tracker reconcile linear",
     code: failure.code,
-    message: failure.message
+    message: failure.message,
   };
   if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
   if (failure.adapter !== undefined) payload["adapter"] = failure.adapter;
@@ -322,15 +328,15 @@ export function emitSourceReconcileFailure(
   return 1;
 }
 
-export type SourceReconciliationPaginationStoppedJson = {
+export type TrackerReconciliationPaginationStoppedJson = {
   reason: string;
   pageIndex: number;
   code: string | null;
   error: string | null;
 };
 
-export function sourceReconciliationRunToJsonShape(
-  run: SourceReconciliationRun
+export function trackerReconciliationRunToJsonShape(
+  run: TrackerReconciliationRun,
 ): Record<string, unknown> {
   return {
     id: run.id,
@@ -342,15 +348,15 @@ export function sourceReconciliationRunToJsonShape(
     itemsSeen: run.itemsSeen,
     itemsUpserted: run.itemsUpserted,
     metadata: run.metadata,
-    paginationStopped: sourceReconciliationPaginationStopped(run),
+    paginationStopped: trackerReconciliationPaginationStopped(run),
     createdAt: run.createdAt,
-    updatedAt: run.updatedAt
+    updatedAt: run.updatedAt,
   };
 }
 
-export function sourceReconciliationPaginationStopped(
-  run: SourceReconciliationRun
-): SourceReconciliationPaginationStoppedJson | null {
+export function trackerReconciliationPaginationStopped(
+  run: TrackerReconciliationRun,
+): TrackerReconciliationPaginationStoppedJson | null {
   const stop = run.metadata["paginationStopped"];
   if (!stop || typeof stop !== "object" || Array.isArray(stop)) return null;
   const record = stop as Record<string, unknown>;
@@ -361,39 +367,39 @@ export function sourceReconciliationPaginationStopped(
     reason: record["reason"],
     pageIndex: pageIndex as number,
     code: typeof record["code"] === "string" ? record["code"] : null,
-    error: typeof record["error"] === "string" ? record["error"] : null
+    error: typeof record["error"] === "string" ? record["error"] : null,
   };
 }
 
-export type SourceFailureCode =
+export type TrackerFailureCode =
   | "data_dir_failed"
-  | "source_item_not_found"
-  | LinkGoalToSourceItemErrorCode
-  | UnlinkGoalFromSourceItemErrorCode;
+  | "tracker_item_not_found"
+  | LinkGoalToTrackerItemErrorCode
+  | UnlinkGoalFromTrackerItemErrorCode;
 
-export type SourceFailure = {
-  code: SourceFailureCode;
+export type TrackerFailure = {
+  code: TrackerFailureCode;
   message: string;
-  sourceItemId?: string;
+  trackerItemId?: string;
   goalId?: string;
   currentGoalId?: string | null;
   dataDir?: string;
 };
 
-export function emitSourceFailure(
+export function emitTrackerFailure(
   parsed: JsonFlags,
   io: CliIo,
-  command: "source list" | "source get" | "source link" | "source unlink",
-  failure: SourceFailure
+  command: "tracker list" | "tracker get" | "tracker link" | "tracker unlink",
+  failure: TrackerFailure,
 ): number {
   const payload: Record<string, unknown> = {
     ok: false,
     command,
     code: failure.code,
-    message: failure.message
+    message: failure.message,
   };
-  if (failure.sourceItemId !== undefined) {
-    payload["sourceItemId"] = failure.sourceItemId;
+  if (failure.trackerItemId !== undefined) {
+    payload["trackerItemId"] = failure.trackerItemId;
   }
   if (failure.goalId !== undefined) {
     payload["goalId"] = failure.goalId;
@@ -412,7 +418,7 @@ export function emitSourceFailure(
 }
 
 export function intentEvaluationToJsonShape(
-  result: EvaluateGoalForSourceSatisfiedIntentResult
+  result: EvaluateGoalForTrackerSatisfiedIntentResult,
 ): Record<string, unknown> {
   if (
     result.outcome === "intent_created" ||
@@ -421,22 +427,22 @@ export function intentEvaluationToJsonShape(
     return {
       outcome: result.outcome,
       intent: updateIntentToJsonShape(result.intent),
-      sourceItem: sourceItemToJsonShape(result.sourceItem),
+      trackerItem: trackerItemToJsonShape(result.trackerItem),
       verificationEvidence: evidenceRecordToJsonShape(
-        result.verificationEvidence
-      )
+        result.verificationEvidence,
+      ),
     };
   }
   if (result.outcome === "evidence_insufficient") {
     return {
       outcome: result.outcome,
-      warning: { ...result.warning }
+      warning: { ...result.warning },
     };
   }
-  if (result.outcome === "source_already_terminal") {
+  if (result.outcome === "tracker_already_terminal") {
     return {
       outcome: result.outcome,
-      sourceItem: sourceItemToJsonShape(result.sourceItem)
+      trackerItem: trackerItemToJsonShape(result.trackerItem),
     };
   }
   return { ...result };

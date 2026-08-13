@@ -23,7 +23,7 @@ Momentum never modifies the data directory outside the resolved path. Each store
 
 ```text
 <data-dir>/
-  momentum.db                  # SQLite (goals, jobs, events, repo_locks, daemon_runs, source_items, source_snapshots, source_reconciliation_runs, evidence_records, update_intents, intent_apply_audits, workflow_runs, workflow_steps, workflow_approvals, workflow_leases, workflow_events, workflow_definitions, step_definitions, workflow_run_lineage, workflow_run_coding_compatibility, workflow_run_import_metadata, executor_* tables)
+  momentum.db                  # SQLite (goals, jobs, events, repo_locks, daemon_runs, tracker_items, tracker_snapshots, tracker_reconciliation_runs, evidence_records, update_intents, intent_apply_audits, workflow_runs, workflow_steps, workflow_approvals, workflow_leases, workflow_events, workflow_definitions, step_definitions, workflow_run_lineage, workflow_run_coding_compatibility, workflow_run_import_metadata, executor_* tables)
   openclaw-supervisor/
     <encoded-run-id>.json      # Per-run OpenClaw supervise cursor/digest suppression state
     <encoded-run-id>.auto-actions.jsonl
@@ -57,9 +57,9 @@ A single `momentum.db` per data directory backs durable state across all goals:
   An unresolved delegate intent may take over its matching active lock after lock expiry or after the scheduler proves and releases the same stale dispatch owner.
   A compare-and-swap over the repository, run, job, previous holder, attempt, and deadline prevents displacement of a concurrent or newer owner, then fences later lock writes by the new holder and attempt.
 - `daemon_runs` — orchestrator-run state (register-only or managed-loop), the source of truth for `daemon status` and `doctor`'s daemon-readiness block.
-- `source_items` — durable rows for external tracker items (linked or unlinked) seen by source adapters.
-- `source_snapshots` — point-in-time JSON snapshots captured during reconciliation.
-- `source_reconciliation_runs` — per-run summary (counts, pagination flags, classification breakdown).
+- `tracker_items` — durable rows for external tracker items (linked or unlinked) seen by tracker adapters.
+- `tracker_snapshots` — point-in-time JSON snapshots captured during reconciliation.
+- `tracker_reconciliation_runs` — per-run summary (counts, pagination flags, classification breakdown).
 - `evidence_records` — normalized agent-workflow rows ingested via `evidence ingest`, including nullable `run_id` / `step_id` workflow linkage columns indexed by `(run_id, step_id)` for run and step evidence lookups.
 - `update_intents` — durable external-tracker update intents in `pending` / `applied` / `skipped` / `canceled` states, plus an `apply_state` column tracking the per-intent external-apply CAS state (`idle` / `in_flight` / `blocked`).
 - `intent_apply_audits` — append-only audit ledger for external-apply attempts on `update_intents`; one row per claim with lifecycle (`claimed` / `succeeded` / `failed` / `blocked` / `audit_incomplete`), idempotency marker, preview/result fields, and reconcile metadata.
@@ -118,7 +118,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
   The step-scoped `<run-id>::<step-id>::dispatch` token survives only as narrowly scoped correlation provenance: external delegate handoff receipts and repo-lock job identity still correlate by it across retries, but it is no longer a row id in the active hierarchy.
   When a bounded daemon cycle or watch tick uses valid host bindings, an ordinary live-wrapper scaffold is terminalized from the wrapper result after repo-safety, verification, and commit/reset finalization, then reconciled in place.
   A binding-backed delegate-supervisor wrapper result instead becomes durable handoff and terminal-candidate evidence; the attempt and step remain non-terminal until a later external-state read receives a daemon-accepted terminal classification.
-  For the built-in `tracker-refresh` step's `external-apply` executor, the daemon terminalizes it only after issue-scope, policy/auth, matching-source, one pending `status_update` intent or deterministic evidence to seed the expected `Done` intent, valid-payload, and idempotency-marker preflight passes, or from already-applied successful audit evidence.
+  For the built-in `tracker-refresh` step's `external-apply` executor, the daemon terminalizes it only after issue-scope, policy/auth, matching-tracker-item, one pending `status_update` intent or deterministic evidence to seed the expected `Done` intent, valid-payload, and idempotency-marker preflight passes, or from already-applied successful audit evidence.
   Configured `subworkflow` steps use the same scaffold shape to attach child-run evidence before the parent step is reconciled; missing child config, invalid canonical lineage, unsafe recursion, unsupported attachment, invalid child state, and ambiguous child terminals route to manual recovery.
   An `unsupported_platform` or `runtime_unavailable` refusal on any dispatched step leaves its attempt as immutable evidence; after `workflow run clear-recovery` prepares the step on a repaired or supported host, the next dispatch inserts a fresh attempt with the next `attempt_number` instead of reopening the earlier attempt or duplicating the session.
   Retryable delegate-supervisor adapter, handoff, unreadable or inconsistent external-state, and cleared external-blocker outcomes use the same incremented-attempt path.

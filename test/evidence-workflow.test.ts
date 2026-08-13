@@ -616,7 +616,7 @@ describe("parseWorkflowArtifact", () => {
     expect(byType.get("postflight_complete")!.stepId).toBe("postflight:1");
   });
 
-  it("propagates goalId and sourceItemId options onto every emitted record", () => {
+  it("propagates goalId and trackerItemId options onto every emitted record", () => {
     const root = makeTempDir();
     const runDir = path.join(root, "cwfp-link");
     writeJsonFile(path.join(runDir, "plan.json"), basePlan("cwfp-link"));
@@ -631,13 +631,13 @@ describe("parseWorkflowArtifact", () => {
 
     const result = parseWorkflowArtifact(runDir, {
       goalId: "goal-xyz",
-      sourceItemId: "source-item-abc",
+      trackerItemId: "source-item-abc",
     });
 
     expect(result.records).toHaveLength(2);
     for (const record of result.records) {
       expect(record.goalId).toBe("goal-xyz");
-      expect(record.sourceItemId).toBe("source-item-abc");
+      expect(record.trackerItemId).toBe("source-item-abc");
     }
   });
 

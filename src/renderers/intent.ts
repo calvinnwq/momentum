@@ -1,7 +1,13 @@
 import type { IntentApplyAudit } from "../core/intent/apply-audits.js";
 import type { IntentApplyAuditSummary } from "../core/intent/apply-audits.js";
-import type { PolicyEffectiveFieldSource, UpdateIntentApplyPolicy } from "../core/intent/policy.js";
-import type { UpdateIntent, UpdateIntentStatus } from "../core/intent/update-intents.js";
+import type {
+  PolicyEffectiveFieldSource,
+  UpdateIntentApplyPolicy,
+} from "../core/intent/policy.js";
+import type {
+  UpdateIntent,
+  UpdateIntentStatus,
+} from "../core/intent/update-intents.js";
 import { write, writeJson, type CliIo } from "./cli-output.js";
 
 export type IntentCommand =
@@ -57,7 +63,7 @@ export type IntentFailure = {
   dataDir?: string;
   intentId?: string;
   goalId?: string;
-  sourceItemId?: string;
+  trackerItemId?: string;
   evidenceRecordId?: string;
   status?: string;
   currentStatus?: UpdateIntentStatus;
@@ -65,7 +71,9 @@ export type IntentFailure = {
   externalApply?: IntentExternalApplySummary;
 };
 
-export function updateIntentToJsonShape(record: UpdateIntent): Record<string, unknown> {
+export function updateIntentToJsonShape(
+  record: UpdateIntent,
+): Record<string, unknown> {
   return {
     id: record.id,
     adapterKind: record.adapterKind,
@@ -74,7 +82,7 @@ export function updateIntentToJsonShape(record: UpdateIntent): Record<string, un
     payload: record.payload,
     reason: record.reason,
     goalId: record.goalId,
-    sourceItemId: record.sourceItemId,
+    trackerItemId: record.trackerItemId,
     evidenceRecordId: record.evidenceRecordId,
     status: record.status,
     idempotencyKey: record.idempotencyKey,
@@ -85,15 +93,15 @@ export function updateIntentToJsonShape(record: UpdateIntent): Record<string, un
     updatedAt: record.updatedAt,
     appliedAt: record.appliedAt,
     skippedAt: record.skippedAt,
-    canceledAt: record.canceledAt
+    canceledAt: record.canceledAt,
   };
 }
 
-export type IntentApplyAuditJsonShape = ReturnType<typeof intentApplyAuditToJsonShape>;
+export type IntentApplyAuditJsonShape = ReturnType<
+  typeof intentApplyAuditToJsonShape
+>;
 
-export function intentApplyAuditToJsonShape(
-  audit: IntentApplyAudit
-): {
+export function intentApplyAuditToJsonShape(audit: IntentApplyAudit): {
   id: string;
   adapterKind: string;
   provider: string;
@@ -137,7 +145,7 @@ export function intentApplyAuditToJsonShape(
     externalRefs: audit.externalRefs,
     reconcile: audit.reconcile,
     createdAt: audit.createdAt,
-    updatedAt: audit.updatedAt
+    updatedAt: audit.updatedAt,
   };
 }
 
@@ -150,7 +158,7 @@ export type IntentApplyAuditSummaryJsonShape = {
 };
 
 export function intentApplyAuditSummaryToJsonShape(
-  summary: IntentApplyAuditSummary | null
+  summary: IntentApplyAuditSummary | null,
 ): IntentApplyAuditSummaryJsonShape {
   if (!summary) {
     return {
@@ -162,9 +170,9 @@ export function intentApplyAuditSummaryToJsonShape(
         succeeded: 0,
         failed: 0,
         blocked: 0,
-        audit_incomplete: 0
+        audit_incomplete: 0,
       },
-      latestAttempt: null
+      latestAttempt: null,
     };
   }
   return {
@@ -174,12 +182,12 @@ export function intentApplyAuditSummaryToJsonShape(
     counts: summary.counts,
     latestAttempt: summary.latestAttempt
       ? intentApplyAuditToJsonShape(summary.latestAttempt)
-      : null
+      : null,
   };
 }
 
 export function renderExternalApplyTextLines(
-  external: IntentApplyAuditSummaryJsonShape
+  external: IntentApplyAuditSummaryJsonShape,
 ): string[] {
   const counts = external.counts;
   const lines: string[] = [
@@ -187,7 +195,7 @@ export function renderExternalApplyTextLines(
     `External apply attempts: total=${external.totalAttempts} ` +
       `succeeded=${counts.succeeded} failed=${counts.failed} ` +
       `claimed=${counts.claimed} blocked=${counts.blocked} ` +
-      `audit_incomplete=${counts.audit_incomplete}`
+      `audit_incomplete=${counts.audit_incomplete}`,
   ];
   const latest = external.latestAttempt;
   if (!latest) {
@@ -197,19 +205,19 @@ export function renderExternalApplyTextLines(
   lines.push(
     `External apply latest attempt: ${latest.id} ${latest.lifecycleState}` +
       ` (result=${latest.resultStatus ?? "(none)"}` +
-      ` code=${latest.resultCode ?? "(none)"})`
+      ` code=${latest.resultCode ?? "(none)"})`,
   );
   lines.push(
     `External apply latest target: ${latest.adapterKind}/` +
       `${latest.target.externalKey ?? "(none)"}` +
-      ` (${latest.target.externalId ?? "(none)"})`
+      ` (${latest.target.externalId ?? "(none)"})`,
   );
   const refs = latest.externalRefs;
   if (refs.commentId || refs.commentUrl || refs.stateTransitionId) {
     lines.push(
       `External apply refs: comment=${refs.commentId ?? "(none)"}` +
         ` url=${refs.commentUrl ?? "(none)"}` +
-        ` transition=${refs.stateTransitionId ?? "(none)"}`
+        ` transition=${refs.stateTransitionId ?? "(none)"}`,
     );
   }
   return lines;
@@ -225,7 +233,7 @@ export function emitIntentListSuccess(
       adapterKind?: string;
       intentType?: string;
       goalId?: string | null;
-      sourceItemId?: string | null;
+      trackerItemId?: string | null;
       evidenceRecordId?: string | null;
       limit?: number;
     };
@@ -233,7 +241,7 @@ export function emitIntentListSuccess(
     auditSummaries: ReadonlyMap<string, IntentApplyAuditSummary | null>;
     totalAvailable: number;
     truncated: boolean;
-  }
+  },
 ): number {
   const {
     dataDir,
@@ -242,7 +250,7 @@ export function emitIntentListSuccess(
     intents,
     auditSummaries,
     totalAvailable,
-    truncated
+    truncated,
   } = input;
   const payload = {
     ok: true,
@@ -252,7 +260,7 @@ export function emitIntentListSuccess(
     adapter: filters.adapterKind ?? null,
     intentType: filters.intentType ?? null,
     goalId: filters.goalId ?? null,
-    sourceItemId: filters.sourceItemId ?? null,
+    trackerItemId: filters.trackerItemId ?? null,
     evidenceRecordId: filters.evidenceRecordId ?? null,
     limit: filters.limit ?? null,
     count: intents.length,
@@ -261,9 +269,9 @@ export function emitIntentListSuccess(
     intents: intents.map((record) => ({
       ...updateIntentToJsonShape(record),
       externalApply: intentApplyAuditSummaryToJsonShape(
-        auditSummaries.get(record.id) ?? null
-      )
-    }))
+        auditSummaries.get(record.id) ?? null,
+      ),
+    })),
   };
 
   if (parsed.json) {
@@ -279,7 +287,7 @@ export function emitIntentListSuccess(
     `Adapter: ${filters.adapterKind ?? "(any)"}`,
     `Intent type: ${filters.intentType ?? "(any)"}`,
     `Goal: ${filters.goalId ?? "(any)"}`,
-    `Source item: ${filters.sourceItemId ?? "(any)"}`,
+    `Tracker item: ${filters.trackerItemId ?? "(any)"}`,
     `Evidence record: ${filters.evidenceRecordId ?? "(any)"}`,
     `Data dir: ${dataDir}`,
     ...intents.map((record) => {
@@ -297,7 +305,7 @@ export function emitIntentListSuccess(
         `${record.reason}`
       );
     }),
-    ""
+    "",
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -310,7 +318,7 @@ export function emitIntentGetSuccess(
     dataDir: string;
     record: UpdateIntent;
     auditSummary: IntentApplyAuditSummary | null;
-  }
+  },
 ): number {
   const { dataDir, record } = input;
   const externalApply = intentApplyAuditSummaryToJsonShape(input.auditSummary);
@@ -319,7 +327,7 @@ export function emitIntentGetSuccess(
     command: "intent get",
     dataDir,
     intent: updateIntentToJsonShape(record),
-    externalApply
+    externalApply,
   };
 
   if (parsed.json) {
@@ -334,7 +342,7 @@ export function emitIntentGetSuccess(
     `Intent type: ${record.intentType}`,
     `Status: ${record.status}`,
     `Goal: ${record.goalId ?? "(unlinked)"}`,
-    `Source item: ${record.sourceItemId ?? "(unlinked)"}`,
+    `Tracker item: ${record.trackerItemId ?? "(unlinked)"}`,
     `Evidence record: ${record.evidenceRecordId ?? "(unlinked)"}`,
     `Idempotency key: ${record.idempotencyKey}`,
     `Reason: ${record.reason}`,
@@ -346,7 +354,7 @@ export function emitIntentGetSuccess(
     `Canceled at: ${record.canceledAt ?? "(unset)"}`,
     ...renderExternalApplyTextLines(externalApply),
     `Data dir: ${dataDir}`,
-    ""
+    "",
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -361,14 +369,14 @@ export function emitIntentDecisionSuccess(
     previousStatus: UpdateIntentStatus;
     record: UpdateIntent;
     applyPolicy?: IntentApplyPolicySummary;
-  }
+  },
 ): number {
   const payload: Record<string, unknown> = {
     ok: true,
     command: input.command,
     dataDir: input.dataDir,
     previousStatus: input.previousStatus,
-    intent: updateIntentToJsonShape(input.record)
+    intent: updateIntentToJsonShape(input.record),
   };
   if (input.applyPolicy !== undefined) {
     payload["applyPolicy"] = input.applyPolicy;
@@ -392,11 +400,11 @@ export function emitIntentDecisionSuccess(
     `Skipped at: ${record.skippedAt ?? "(unset)"}`,
     `Canceled at: ${record.canceledAt ?? "(unset)"}`,
     `Updated at: ${record.updatedAt}`,
-    `Data dir: ${input.dataDir}`
+    `Data dir: ${input.dataDir}`,
   ];
   if (input.applyPolicy !== undefined) {
     lines.push(
-      `Apply policy: ${input.applyPolicy.effective} (${input.applyPolicy.source}); ${input.applyPolicy.note}`
+      `Apply policy: ${input.applyPolicy.effective} (${input.applyPolicy.source}); ${input.applyPolicy.note}`,
     );
   }
   lines.push("");
@@ -412,7 +420,7 @@ export function emitIntentExternalApplySuccess(
     record: UpdateIntent;
     applyPolicy: IntentApplyPolicySummary;
     externalApply: IntentExternalApplySummary;
-  }
+  },
 ): number {
   const payload = {
     ok: true,
@@ -421,7 +429,7 @@ export function emitIntentExternalApplySuccess(
     previousStatus: "pending",
     intent: updateIntentToJsonShape(input.record),
     applyPolicy: input.applyPolicy,
-    externalApply: input.externalApply
+    externalApply: input.externalApply,
   };
 
   if (parsed.json) {
@@ -447,16 +455,16 @@ export function emitIntentExternalApplySuccess(
     `Data dir: ${input.dataDir}`,
     `Apply policy: ${input.applyPolicy.effective} (${input.applyPolicy.source}); ${input.applyPolicy.note}`,
     `External apply: ${externalApplyStatus} (audit ${input.externalApply.auditId ?? "(none)"})`,
-    `Target: ${target.adapterKind} ${target.externalKey ?? target.externalId ?? "(unknown)"}${target.url ? ` <${target.url}>` : ""}`
+    `Target: ${target.adapterKind} ${target.externalKey ?? target.externalId ?? "(unknown)"}${target.url ? ` <${target.url}>` : ""}`,
   ];
   if (input.externalApply.external) {
     const ext = input.externalApply.external;
     lines.push(
-      `Comment: ${ext.commentId ?? "(none)"}${ext.commentUrl ? ` <${ext.commentUrl}>` : ""}${ext.alreadyApplied ? " (replay)" : ""}`
+      `Comment: ${ext.commentId ?? "(none)"}${ext.commentUrl ? ` <${ext.commentUrl}>` : ""}${ext.alreadyApplied ? " (replay)" : ""}`,
     );
     if (ext.statusTransitioned) {
       lines.push(
-        `Status transition: ${ext.nextStateName ?? ext.nextStateId ?? "(unknown)"}`
+        `Status transition: ${ext.nextStateName ?? ext.nextStateId ?? "(unknown)"}`,
       );
     }
     lines.push(`Idempotency marker: ${ext.idempotencyMarker}`);
@@ -467,7 +475,7 @@ export function emitIntentExternalApplySuccess(
         input.externalApply.reconcile.warning
           ? ` (${input.externalApply.reconcile.warning})`
           : ""
-      }`
+      }`,
     );
   }
   lines.push("");
@@ -478,19 +486,19 @@ export function emitIntentExternalApplySuccess(
 export function emitIntentFailure(
   parsed: { json: boolean },
   io: CliIo,
-  failure: IntentFailure
+  failure: IntentFailure,
 ): number {
   const payload: Record<string, unknown> = {
     ok: false,
     command: failure.command,
     code: failure.code,
-    message: failure.message
+    message: failure.message,
   };
   if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
   if (failure.intentId !== undefined) payload["intentId"] = failure.intentId;
   if (failure.goalId !== undefined) payload["goalId"] = failure.goalId;
-  if (failure.sourceItemId !== undefined) {
-    payload["sourceItemId"] = failure.sourceItemId;
+  if (failure.trackerItemId !== undefined) {
+    payload["trackerItemId"] = failure.trackerItemId;
   }
   if (failure.evidenceRecordId !== undefined) {
     payload["evidenceRecordId"] = failure.evidenceRecordId;

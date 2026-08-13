@@ -784,7 +784,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
       ).run(runId);
       db.prepare(
-        `INSERT INTO source_items
+        `INSERT INTO tracker_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES ('source_ngx1001', 'linear', 'linear-issue-1001', 'NGX-1001',
@@ -794,7 +794,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       db.prepare(
         `INSERT INTO update_intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
-            reason, source_item_id, status, idempotency_key, created_at,
+            reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
          VALUES ('intent_ngx1001', 'linear', 'linear-issue-1001',
                  'status_update',
@@ -942,7 +942,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
       ).run(runId);
       db.prepare(
-        `INSERT INTO source_items
+        `INSERT INTO tracker_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES ('source_ngx1001_seeded', 'linear', 'linear-issue-1001',
@@ -1041,23 +1041,23 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     try {
       const intents = verifyDb
         .prepare(
-          `SELECT intent_type, payload_json, source_item_id, status,
+          `SELECT intent_type, payload_json, tracker_item_id, status,
                   idempotency_key
              FROM update_intents
-            WHERE source_item_id = 'source_ngx1001_seeded'
+            WHERE tracker_item_id = 'source_ngx1001_seeded'
             ORDER BY created_at ASC`,
         )
         .all() as Array<{
         intent_type: string;
         payload_json: string;
-        source_item_id: string;
+        tracker_item_id: string;
         status: string;
         idempotency_key: string;
       }>;
       expect(intents).toHaveLength(1);
       expect(intents[0]).toMatchObject({
         intent_type: "status_update",
-        source_item_id: "source_ngx1001_seeded",
+        tracker_item_id: "source_ngx1001_seeded",
         status: "applied",
         idempotency_key: "linear:linear-issue-1001:status_update:done",
       });
@@ -1113,7 +1113,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
       ).run(runId);
       db.prepare(
-        `INSERT INTO source_items
+        `INSERT INTO tracker_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES ('source_ngx1001_missing_auth', 'linear', 'linear-issue-1001', 'NGX-1001',
@@ -1123,7 +1123,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       db.prepare(
         `INSERT INTO update_intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
-            reason, source_item_id, status, idempotency_key, created_at,
+            reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
          VALUES ('intent_ngx1001_missing_auth', 'linear', 'linear-issue-1001',
                  'source_satisfied', '{"kind":"comment"}', 'evidence says done',
@@ -1220,7 +1220,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
       ).run(runId);
       db.prepare(
-        `INSERT INTO source_items
+        `INSERT INTO tracker_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES ('source_ngx1002_default_policy', 'linear', 'linear-issue-1002', 'NGX-1002',
@@ -1230,7 +1230,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       db.prepare(
         `INSERT INTO update_intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
-            reason, source_item_id, status, idempotency_key, created_at,
+            reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
          VALUES ('intent_ngx1002_default_policy', 'linear', 'linear-issue-1002',
                  'source_satisfied', '{"kind":"comment"}', 'evidence says done',
@@ -1332,7 +1332,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
       ).run(runId);
       db.prepare(
-        `INSERT INTO source_items
+        `INSERT INTO tracker_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES ('source_ngx1003_invalid_policy', 'linear', 'linear-issue-1003', 'NGX-1003',
@@ -1342,7 +1342,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       db.prepare(
         `INSERT INTO update_intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
-            reason, source_item_id, status, idempotency_key, created_at,
+            reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
          VALUES ('intent_ngx1003_invalid_policy', 'linear', 'linear-issue-1003',
                  'status_update', '{"state":"Done"}', 'evidence says done',
@@ -1442,7 +1442,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
       ).run(runId);
       db.prepare(
-        `INSERT INTO source_items
+        `INSERT INTO tracker_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES ('source_ngx1004_invalid_target_state', 'linear', 'linear-issue-1004', 'NGX-1004',
@@ -1452,7 +1452,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       db.prepare(
         `INSERT INTO update_intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
-            reason, source_item_id, status, idempotency_key, created_at,
+            reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
          VALUES ('intent_ngx1004_invalid_target_state', 'linear', 'linear-issue-1004',
                  'status_update', '{"state":"Done","stateId":"done-id"}',
@@ -1565,7 +1565,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
       ).run(runId);
       db.prepare(
-        `INSERT INTO source_items
+        `INSERT INTO tracker_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES ('source_ngx565_applied_invalid_policy', 'linear', 'linear-issue-565', 'NGX-565',
@@ -1575,7 +1575,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       db.prepare(
         `INSERT INTO update_intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
-            reason, source_item_id, status, idempotency_key, created_at,
+            reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
          VALUES (?, 'linear', 'linear-issue-565',
                  'status_update', ?, 'workflow complete',
@@ -1715,7 +1715,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
       ).run(runId);
       db.prepare(
-        `INSERT INTO source_items
+        `INSERT INTO tracker_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES ('source_ngx522', 'linear', 'linear-issue-522', 'NGX-522',
@@ -1725,7 +1725,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       db.prepare(
         `INSERT INTO update_intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
-            reason, source_item_id, status, idempotency_key, created_at,
+            reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
          VALUES ('intent_aaa_ngx522_source_satisfied', 'linear', 'linear-issue-522',
                  'source_satisfied', '{"kind":"comment"}',
@@ -1736,7 +1736,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       db.prepare(
         `INSERT INTO update_intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
-            reason, source_item_id, status, idempotency_key, created_at,
+            reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
          VALUES ('intent_ngx522', 'linear', 'linear-issue-522',
                  'status_update',

@@ -11,7 +11,7 @@ import {
   listEvidenceRecords,
   listLatestEvidenceRecordsForGoal,
   summarizeEvidenceRecords,
-  type EvidenceRecordIngestInput
+  type EvidenceRecordIngestInput,
 } from "../src/core/evidence/records.js";
 
 const tempRoots: string[] = [];
@@ -30,7 +30,7 @@ function makeTempDir(prefix = "momentum-evidence-records-"): string {
 }
 
 function baseInput(
-  overrides: Partial<EvidenceRecordIngestInput> = {}
+  overrides: Partial<EvidenceRecordIngestInput> = {},
 ): EvidenceRecordIngestInput {
   return {
     source: "agent-workflow",
@@ -42,7 +42,7 @@ function baseInput(
     summary: "Plan created for NGX-test",
     metadata: { mode: "execute-ready" },
     ingestKey: "agent-workflow:cwfp-test:plan_created",
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -50,34 +50,34 @@ function insertGoal(db: ReturnType<typeof openDb>, id: string): void {
   db.prepare(
     `INSERT INTO goals
        (id, title, branch, artifact_dir, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(id, `Goal ${id}`, `momentum/${id}`, `/tmp/${id}`, 1, 1);
 }
 
-function insertSourceItem(
+function insertTrackerItem(
   db: ReturnType<typeof openDb>,
   id: string,
-  externalKey = id
+  externalKey = id,
 ): void {
   db.prepare(
-    `INSERT INTO source_items
+    `INSERT INTO tracker_items
        (id, adapter_kind, external_id, external_key, url, title,
         status, metadata_json, last_observed_at, goal_id,
         created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     "linear",
     `ext-${id}`,
     externalKey,
     `https://linear.app/example/issue/${externalKey}`,
-    `SourceItem ${id}`,
+    `TrackerItem ${id}`,
     "open",
     "{}",
     1,
     null,
     1,
-    1
+    1,
   );
 }
 
@@ -92,27 +92,29 @@ describe("evidence record storage", () => {
       expect(result.record.type).toBe("plan_created");
       expect(result.record.formatVersion).toBe(1);
       expect(result.record.artifactPath).toBe(
-        "/tmp/.agent-workflows/cwfp-test/plan.json"
+        "/tmp/.agent-workflows/cwfp-test/plan.json",
       );
       expect(result.record.externalId).toBe("cwfp-test");
       expect(result.record.occurredAt).toBe(2000);
       expect(result.record.summary).toBe("Plan created for NGX-test");
       expect(result.record.metadata).toEqual({ mode: "execute-ready" });
       expect(result.record.ingestKey).toBe(
-        "agent-workflow:cwfp-test:plan_created"
+        "agent-workflow:cwfp-test:plan_created",
       );
       expect(result.record.createdAt).toBe(2100);
       expect(result.record.updatedAt).toBe(2100);
       expect(result.record.goalId).toBeNull();
-      expect(result.record.sourceItemId).toBeNull();
+      expect(result.record.trackerItemId).toBeNull();
       expect(result.record.runId).toBeNull();
       expect(result.record.stepId).toBeNull();
       expect(result.record.id).toMatch(/^evidence_record_/);
 
-      expect(getEvidenceRecordById(db, result.record.id)).toEqual(result.record);
-      expect(
-        getEvidenceRecordByIngestKey(db, result.record.ingestKey)
-      ).toEqual(result.record);
+      expect(getEvidenceRecordById(db, result.record.id)).toEqual(
+        result.record,
+      );
+      expect(getEvidenceRecordByIngestKey(db, result.record.ingestKey)).toEqual(
+        result.record,
+      );
     } finally {
       db.close();
     }
@@ -124,13 +126,15 @@ describe("evidence record storage", () => {
       const result = ingestEvidenceRecord(
         db,
         baseInput({ runId: "cwfp-test", stepId: "implementation" }),
-        { now: () => 2100 }
+        { now: () => 2100 },
       );
 
       expect(result.created).toBe(true);
       expect(result.record.runId).toBe("cwfp-test");
       expect(result.record.stepId).toBe("implementation");
-      expect(getEvidenceRecordById(db, result.record.id)).toEqual(result.record);
+      expect(getEvidenceRecordById(db, result.record.id)).toEqual(
+        result.record,
+      );
     } finally {
       db.close();
     }
@@ -142,7 +146,7 @@ describe("evidence record storage", () => {
       const result = ingestEvidenceRecord(
         db,
         baseInput({ runId: "cwfp-test" }),
-        { now: () => 2100 }
+        { now: () => 2100 },
       );
 
       expect(result.record.runId).toBe("cwfp-test");
@@ -162,7 +166,7 @@ describe("evidence record storage", () => {
       const linked = ingestEvidenceRecord(
         db,
         baseInput({ runId: "cwfp-test", stepId: "implementation" }),
-        { now: () => 2200 }
+        { now: () => 2200 },
       );
 
       expect(linked.created).toBe(false);
@@ -174,7 +178,7 @@ describe("evidence record storage", () => {
       const rebound = ingestEvidenceRecord(
         db,
         baseInput({ runId: "cwfp-other", stepId: "no-mistakes" }),
-        { now: () => 2300 }
+        { now: () => 2300 },
       );
 
       expect(rebound.created).toBe(false);
@@ -195,9 +199,9 @@ describe("evidence record storage", () => {
         baseInput({
           summary: "Different summary on replay",
           metadata: { mode: "execute-ready", replay: true },
-          occurredAt: 3000
+          occurredAt: 3000,
         }),
-        { now: () => 3300 }
+        { now: () => 3300 },
       );
 
       expect(second.created).toBe(false);
@@ -213,40 +217,40 @@ describe("evidence record storage", () => {
     try {
       insertGoal(db, "goal-linked");
       insertGoal(db, "goal-other");
-      insertSourceItem(db, "si-linked");
-      insertSourceItem(db, "si-other");
+      insertTrackerItem(db, "si-linked");
+      insertTrackerItem(db, "si-other");
 
       const first = ingestEvidenceRecord(db, baseInput(), { now: () => 2100 });
       expect(first.record.goalId).toBeNull();
-      expect(first.record.sourceItemId).toBeNull();
+      expect(first.record.trackerItemId).toBeNull();
 
       const linked = ingestEvidenceRecord(
         db,
         baseInput({
           goalId: "goal-linked",
-          sourceItemId: "si-linked"
+          trackerItemId: "si-linked",
         }),
-        { now: () => 2200 }
+        { now: () => 2200 },
       );
 
       expect(linked.created).toBe(false);
       expect(linked.record.id).toBe(first.record.id);
       expect(linked.record.goalId).toBe("goal-linked");
-      expect(linked.record.sourceItemId).toBe("si-linked");
+      expect(linked.record.trackerItemId).toBe("si-linked");
       expect(linked.record.updatedAt).toBe(2200);
 
       const rebound = ingestEvidenceRecord(
         db,
         baseInput({
           goalId: "goal-other",
-          sourceItemId: "si-other"
+          trackerItemId: "si-other",
         }),
-        { now: () => 2300 }
+        { now: () => 2300 },
       );
 
       expect(rebound.created).toBe(false);
       expect(rebound.record.goalId).toBe("goal-linked");
-      expect(rebound.record.sourceItemId).toBe("si-linked");
+      expect(rebound.record.trackerItemId).toBe("si-linked");
       expect(rebound.record.updatedAt).toBe(2200);
     } finally {
       db.close();
@@ -261,9 +265,9 @@ describe("evidence record storage", () => {
         baseInput({
           ingestKey: "agent-workflow:cwfp-test:plan_created",
           type: "plan_created",
-          occurredAt: 2000
+          occurredAt: 2000,
         }),
-        { now: () => 2100 }
+        { now: () => 2100 },
       );
       const impl = ingestEvidenceRecord(
         db,
@@ -271,9 +275,9 @@ describe("evidence record storage", () => {
           ingestKey: "agent-workflow:cwfp-test:implementation_complete",
           type: "implementation_complete",
           summary: "Implementation complete",
-          occurredAt: 2500
+          occurredAt: 2500,
         }),
-        { now: () => 2600 }
+        { now: () => 2600 },
       );
 
       expect(plan.created).toBe(true);
@@ -299,33 +303,33 @@ describe("evidence record storage", () => {
         baseInput({
           ingestKey: "agent-workflow:cwfp-a:plan_created",
           externalId: "cwfp-a",
-          goalId: "goal-a"
+          goalId: "goal-a",
         }),
-        { now: () => 2100 }
+        { now: () => 2100 },
       );
       const otherGoal = ingestEvidenceRecord(
         db,
         baseInput({
           ingestKey: "agent-workflow:cwfp-b:plan_created",
           externalId: "cwfp-b",
-          goalId: "goal-b"
+          goalId: "goal-b",
         }),
-        { now: () => 2200 }
+        { now: () => 2200 },
       );
       const unlinked = ingestEvidenceRecord(
         db,
         baseInput({
           ingestKey: "agent-workflow:cwfp-c:plan_created",
-          externalId: "cwfp-c"
+          externalId: "cwfp-c",
         }),
-        { now: () => 2300 }
+        { now: () => 2300 },
       );
 
       expect(listEvidenceRecords(db, { goalId: "goal-a" })).toEqual([
-        linked.record
+        linked.record,
       ]);
       expect(listEvidenceRecords(db, { goalId: null })).toEqual([
-        unlinked.record
+        unlinked.record,
       ]);
       expect(listEvidenceRecords(db)).toHaveLength(3);
       expect(otherGoal.record.goalId).toBe("goal-b");
@@ -344,9 +348,9 @@ describe("evidence record storage", () => {
           ingestKey: "agent-workflow:cwfp-order:plan_created",
           type: "plan_created",
           occurredAt: 1000,
-          goalId: "goal-order"
+          goalId: "goal-order",
         }),
-        { now: () => 1100 }
+        { now: () => 1100 },
       );
       const middle = ingestEvidenceRecord(
         db,
@@ -354,9 +358,9 @@ describe("evidence record storage", () => {
           ingestKey: "agent-workflow:cwfp-order:implementation_complete",
           type: "implementation_complete",
           occurredAt: 2000,
-          goalId: "goal-order"
+          goalId: "goal-order",
         }),
-        { now: () => 2100 }
+        { now: () => 2100 },
       );
       const newest = ingestEvidenceRecord(
         db,
@@ -364,19 +368,19 @@ describe("evidence record storage", () => {
           ingestKey: "agent-workflow:cwfp-order:merge_complete",
           type: "merge_complete",
           occurredAt: 3000,
-          goalId: "goal-order"
+          goalId: "goal-order",
         }),
-        { now: () => 3100 }
+        { now: () => 3100 },
       );
 
       expect(
-        listEvidenceRecords(db, { goalId: "goal-order" }).map((r) => r.id)
+        listEvidenceRecords(db, { goalId: "goal-order" }).map((r) => r.id),
       ).toEqual([oldest.record.id, middle.record.id, newest.record.id]);
 
       const latest = listLatestEvidenceRecordsForGoal(db, "goal-order", 2);
       expect(latest.map((r) => r.id)).toEqual([
         newest.record.id,
-        middle.record.id
+        middle.record.id,
       ]);
     } finally {
       db.close();
@@ -391,9 +395,9 @@ describe("evidence record storage", () => {
         baseInput({
           ingestKey: "agent-workflow:cwfp-x:plan_created",
           source: "agent-workflow",
-          type: "plan_created"
+          type: "plan_created",
         }),
-        { now: () => 1 }
+        { now: () => 1 },
       );
       ingestEvidenceRecord(
         db,
@@ -402,9 +406,9 @@ describe("evidence record storage", () => {
           source: "agent-workflow",
           type: "verification_passed",
           occurredAt: 4000,
-          summary: "verification passed"
+          summary: "verification passed",
         }),
-        { now: () => 2 }
+        { now: () => 2 },
       );
       ingestEvidenceRecord(
         db,
@@ -413,17 +417,20 @@ describe("evidence record storage", () => {
           source: "manual",
           type: "note",
           occurredAt: 5000,
-          summary: "manual note"
+          summary: "manual note",
         }),
-        { now: () => 3 }
+        { now: () => 3 },
       );
 
       expect(listEvidenceRecords(db, { source: "manual" })).toHaveLength(1);
       expect(
-        listEvidenceRecords(db, { type: "verification_passed" })
+        listEvidenceRecords(db, { type: "verification_passed" }),
       ).toHaveLength(1);
       expect(
-        listEvidenceRecords(db, { source: "agent-workflow", type: "plan_created" })
+        listEvidenceRecords(db, {
+          source: "agent-workflow",
+          type: "plan_created",
+        }),
       ).toHaveLength(1);
     } finally {
       db.close();
@@ -434,22 +441,22 @@ describe("evidence record storage", () => {
     const db = openDb(makeTempDir());
     try {
       expect(() =>
-        ingestEvidenceRecord(db, baseInput({ source: "" }))
+        ingestEvidenceRecord(db, baseInput({ source: "" })),
       ).toThrowError(/source/);
       expect(() =>
-        ingestEvidenceRecord(db, baseInput({ type: "" }))
+        ingestEvidenceRecord(db, baseInput({ type: "" })),
       ).toThrowError(/type/);
       expect(() =>
-        ingestEvidenceRecord(db, baseInput({ summary: "" }))
+        ingestEvidenceRecord(db, baseInput({ summary: "" })),
       ).toThrowError(/summary/);
       expect(() =>
-        ingestEvidenceRecord(db, baseInput({ ingestKey: "" }))
+        ingestEvidenceRecord(db, baseInput({ ingestKey: "" })),
       ).toThrowError(/ingestKey/);
       expect(() =>
-        ingestEvidenceRecord(db, baseInput({ occurredAt: 1.5 }))
+        ingestEvidenceRecord(db, baseInput({ occurredAt: 1.5 })),
       ).toThrowError(/occurredAt/);
       expect(() =>
-        ingestEvidenceRecord(db, baseInput({ formatVersion: 0 }))
+        ingestEvidenceRecord(db, baseInput({ formatVersion: 0 })),
       ).toThrowError(/formatVersion/);
     } finally {
       db.close();
@@ -474,8 +481,8 @@ describe("evidence record storage", () => {
         expect(summary).toEqual({
           totalRecords: 0,
           goalLinkedRecords: 0,
-          sourceItemLinkedRecords: 0,
-          lastRecord: null
+          trackerItemLinkedRecords: 0,
+          lastRecord: null,
         });
       } finally {
         db.close();
@@ -486,7 +493,7 @@ describe("evidence record storage", () => {
       const db = openDb(makeTempDir());
       try {
         insertGoal(db, "goal-sum-a");
-        insertSourceItem(db, "si-sum-a");
+        insertTrackerItem(db, "si-sum-a");
 
         ingestEvidenceRecord(
           db,
@@ -494,9 +501,9 @@ describe("evidence record storage", () => {
             ingestKey: "agent-workflow:cwfp-sum-1:plan_created",
             externalId: "cwfp-sum-1",
             type: "plan_created",
-            occurredAt: 1000
+            occurredAt: 1000,
           }),
-          { now: () => 1100 }
+          { now: () => 1100 },
         );
         ingestEvidenceRecord(
           db,
@@ -506,9 +513,9 @@ describe("evidence record storage", () => {
             type: "implementation_complete",
             summary: "Implementation complete",
             occurredAt: 2000,
-            goalId: "goal-sum-a"
+            goalId: "goal-sum-a",
           }),
-          { now: () => 2100 }
+          { now: () => 2100 },
         );
         const newest = ingestEvidenceRecord(
           db,
@@ -519,19 +526,19 @@ describe("evidence record storage", () => {
             summary: "Merge complete",
             occurredAt: 3000,
             goalId: "goal-sum-a",
-            sourceItemId: "si-sum-a"
+            trackerItemId: "si-sum-a",
           }),
-          { now: () => 3100 }
+          { now: () => 3100 },
         );
 
         const summary = summarizeEvidenceRecords(db);
         expect(summary.totalRecords).toBe(3);
         expect(summary.goalLinkedRecords).toBe(2);
-        expect(summary.sourceItemLinkedRecords).toBe(1);
+        expect(summary.trackerItemLinkedRecords).toBe(1);
         expect(summary.lastRecord?.id).toBe(newest.record.id);
         expect(summary.lastRecord?.type).toBe("merge_complete");
         expect(summary.lastRecord?.goalId).toBe("goal-sum-a");
-        expect(summary.lastRecord?.sourceItemId).toBe("si-sum-a");
+        expect(summary.lastRecord?.trackerItemId).toBe("si-sum-a");
       } finally {
         db.close();
       }

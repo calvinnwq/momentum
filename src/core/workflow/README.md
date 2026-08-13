@@ -129,7 +129,7 @@ The daemon-dispatchable `external-apply` adapter:
 `dispatch/external-apply-run.ts` runs the injected external write path and reconciles
 through the reconciliation seam, and `dispatch/external-apply-dispatch.ts` gates the producer by scaffold
 family after the base dispatcher creates the durable start rows.
-`dispatch/tracker-refresh-lifecycle.ts` adds the tail-owned preflight -> apply -> reconcile classifier for the built-in `tracker-refresh` step: it proves issue scope, auth, policy, source item, one pending `status_update` intent or deterministic seed evidence for the expected `Done` intent, valid one-of `state` / `stateId` payload, and stable idempotency marker before the external write path can run, and it turns already-applied successful audit evidence into terminal executor evidence without another Linear mutation.
+`dispatch/tracker-refresh-lifecycle.ts` adds the tail-owned preflight -> apply -> reconcile classifier for the built-in `tracker-refresh` step: it proves issue scope, auth, policy, tracker item, one pending `status_update` intent or deterministic seed evidence for the expected `Done` intent, valid one-of `state` / `stateId` payload, and stable idempotency marker before the external write path can run, and it turns already-applied successful audit evidence into terminal executor evidence without another Linear mutation.
 The Linear apply preflight helpers live in `src/core/intent/` so workflow code continues to consume the intent-owned apply path instead of importing policy or auth checks back from workflow modules.
 
 The `subworkflow` adapter mechanism landed first, and a follow-up

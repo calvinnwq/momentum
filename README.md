@@ -8,7 +8,7 @@ Momentum is a TypeScript CLI for durable autonomous repo-work orchestration. It 
 
 - **Durable by default** - state lives in SQLite plus per-run artifact evidence.
 - **Operator-first** - workflow status, logs, handoff, monitor, watch, doctor, daemon, and recovery commands are all inspectable.
-- **External writes stay gated** - tracker updates are durable intents first; the optional Linear apply path runs only through `intent apply --external-apply` or the approved built-in `tracker-refresh` workflow step, and `tracker-refresh` proves the run issue scope, a matching source item, one pending Linear `status_update` intent or deterministic evidence to seed the expected `Done` intent, a valid one-of `state` / `stateId` payload, a credentialed process environment, repo policy, and a stable idempotency marker before applying or reconciling from already-successful audit evidence without another Linear mutation.
+- **External writes stay gated** - tracker updates are durable intents first; the optional Linear apply path runs only through `intent apply --external-apply` or the approved built-in `tracker-refresh` workflow step, and `tracker-refresh` proves the run issue scope, a matching tracker item, one pending Linear `status_update` intent or deterministic evidence to seed the expected `Done` intent, a valid one-of `state` / `stateId` payload, a credentialed process environment, repo policy, and a stable idempotency marker before applying or reconciling from already-successful audit evidence without another Linear mutation.
 
 Full documentation: <https://calvinnwq.github.io/momentum/>
 
@@ -62,7 +62,7 @@ Commands:
 ```text
 momentum daemon start|stop|status [options]
 momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]
-momentum source list|get|link|unlink|reconcile linear [options]
+momentum tracker list|get|link|unlink|reconcile linear [options]
 momentum project status [options]
 momentum evidence ingest|list [options]
 momentum intent list|get|apply|skip|cancel [options]
@@ -97,7 +97,7 @@ node dist/index.js --help
 `pnpm test:integration` runs the heavier repo/git/process and smoke coverage, and `pnpm test:full` runs both lanes.
 `pnpm typecheck` runs the TypeScript test-project check, `pnpm lint` runs oxlint over `src/` and `test/`, and `pnpm format:check` runs Prettier against changed non-`docs/` files. `pnpm format` applies the same Prettier scope in write mode.
 The checked-in `.no-mistakes.yaml` is the authoritative no-mistakes gate configuration and composes these package-script lanes.
-The suite covers workflow runs and executors, daemon/recovery, source/evidence/intent commands, CLI import-boundary and renderer-output contracts, and a public-docs hygiene guard.
+The suite covers workflow runs and executors, daemon/recovery, tracker/evidence/intent commands, CLI import-boundary and renderer-output contracts, and a public-docs hygiene guard.
 
 Releases are managed by Release Please on pushes to `main` or manual workflow dispatch. It opens or updates the release PR, keeps `CHANGELOG.md` current, and creates the GitHub release when that PR is merged; Momentum is still not published to npm.
 

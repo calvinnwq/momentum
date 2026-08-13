@@ -4,7 +4,7 @@
  * Fetches a single Linear issue plus all of its comments without leaning on the
  * project-/milestone-wide reconciliation pipeline. The result feeds the
  * post-apply reconcile orchestrator, which decides whether the external write
- * is reflected in Linear and persists a fresh SourceItem snapshot.
+ * is reflected in Linear and persists a fresh TrackerItem snapshot.
  *
  * The client is intentionally narrow:
  *

@@ -24,12 +24,12 @@
 import { createHash } from "node:crypto";
 
 import type { EvidenceRecord } from "../core/evidence/records.js";
-import type { SourceItem } from "../core/source/items.js";
+import type { TrackerItem } from "../core/tracker/items.js";
 import type { UpdateIntentApplyPolicy } from "../core/intent/policy.js";
 import type { UpdateIntent } from "../core/intent/update-intents.js";
 
 export const BUILTIN_EXTERNAL_UPDATE_ADAPTER_KINDS = Object.freeze([
-  "linear"
+  "linear",
 ] as const);
 
 export type BuiltinExternalUpdateAdapterKind =
@@ -46,7 +46,7 @@ export const EXTERNAL_UPDATE_ADAPTER_ERROR_CODES = Object.freeze([
   "write_rejected",
   "write_timeout",
   "malformed_response",
-  "validation_failed"
+  "validation_failed",
 ] as const);
 
 export type ExternalUpdateAdapterErrorCode =
@@ -54,7 +54,7 @@ export type ExternalUpdateAdapterErrorCode =
 
 export const EXTERNAL_UPDATE_MUTATION_KINDS = Object.freeze([
   "comment",
-  "status_transition"
+  "status_transition",
 ] as const);
 
 export type ExternalUpdateMutationKind =
@@ -81,7 +81,7 @@ export type ExternalUpdateAdapterPolicy = {
 export type ExternalUpdateAdapterInput = {
   intent: UpdateIntent;
   target: ExternalUpdateAdapterTarget;
-  sourceItem?: SourceItem | null;
+  trackerItem?: TrackerItem | null;
   evidenceRecord?: EvidenceRecord | null;
   operator: ExternalUpdateAdapterOperator;
   policy: ExternalUpdateAdapterPolicy;
@@ -110,14 +110,13 @@ export type ExternalUpdateAdapterError = {
 };
 
 export type ExternalUpdateAdapterPreviewResult =
-  | ExternalUpdateAdapterPreviewSuccess
-  | ExternalUpdateAdapterError;
+  ExternalUpdateAdapterPreviewSuccess | ExternalUpdateAdapterError;
 
 export type ExternalUpdateAdapter = {
   kind: BuiltinExternalUpdateAdapterKind;
   supportedIntentTypes: readonly string[];
   preview: (
-    input: ExternalUpdateAdapterInput
+    input: ExternalUpdateAdapterInput,
   ) => ExternalUpdateAdapterPreviewResult;
 };
 
@@ -134,23 +133,22 @@ const EXTERNAL_UPDATE_ADAPTERS: ReadonlyMap<
   BuiltinExternalUpdateAdapterKind,
   ExternalUpdateAdapter
 > = new Map<BuiltinExternalUpdateAdapterKind, ExternalUpdateAdapter>([
-  ["linear", buildLinearExternalUpdateAdapter()]
+  ["linear", buildLinearExternalUpdateAdapter()],
 ]);
 
-export function listExternalUpdateAdapterKinds():
-  readonly BuiltinExternalUpdateAdapterKind[] {
+export function listExternalUpdateAdapterKinds(): readonly BuiltinExternalUpdateAdapterKind[] {
   return [...BUILTIN_EXTERNAL_UPDATE_ADAPTER_KINDS];
 }
 
 export function listExternalUpdateAdapters(
-  adapters?: ReadonlyMap<string, ExternalUpdateAdapter>
+  adapters?: ReadonlyMap<string, ExternalUpdateAdapter>,
 ): readonly ExternalUpdateAdapterSummary[] {
   const source = adapters ?? EXTERNAL_UPDATE_ADAPTERS;
   const out: ExternalUpdateAdapterSummary[] = [];
   for (const adapter of source.values()) {
     out.push({
       kind: adapter.kind,
-      supportedIntentTypes: adapter.supportedIntentTypes
+      supportedIntentTypes: adapter.supportedIntentTypes,
     });
   }
   return out;
@@ -158,7 +156,7 @@ export function listExternalUpdateAdapters(
 
 export function getExternalUpdateAdapter(
   kind: string,
-  adapters?: ReadonlyMap<string, ExternalUpdateAdapter>
+  adapters?: ReadonlyMap<string, ExternalUpdateAdapter>,
 ): ExternalUpdateAdapter | undefined {
   if (adapters) return adapters.get(kind);
   if (!isBuiltinExternalUpdateAdapterKind(kind)) return undefined;
@@ -174,11 +172,12 @@ export function getExternalUpdateAdapter(
  */
 export function resolveExternalUpdateAdapterForIntent(
   intent: Pick<UpdateIntent, "adapterKind" | "intentType">,
-  adapters?: ReadonlyMap<string, ExternalUpdateAdapter>
+  adapters?: ReadonlyMap<string, ExternalUpdateAdapter>,
 ): ExternalUpdateAdapter | undefined {
   const adapter = getExternalUpdateAdapter(intent.adapterKind, adapters);
   if (!adapter) return undefined;
-  if (!adapter.supportedIntentTypes.includes(intent.intentType)) return undefined;
+  if (!adapter.supportedIntentTypes.includes(intent.intentType))
+    return undefined;
   return adapter;
 }
 
@@ -214,11 +213,11 @@ export function buildIdempotencyMarker(input: {
  */
 export function previewExternalUpdate(
   input: ExternalUpdateAdapterInput,
-  options: ExternalUpdateAdapterDispatchOptions = {}
+  options: ExternalUpdateAdapterDispatchOptions = {},
 ): ExternalUpdateAdapterPreviewResult {
   const adapter = getExternalUpdateAdapter(
     input.intent.adapterKind,
-    options.adapters
+    options.adapters,
   );
   if (!adapter) {
     return unsupportedAdapterError(input.intent.adapterKind);
@@ -239,12 +238,12 @@ function buildLinearExternalUpdateAdapter(): ExternalUpdateAdapter {
   return {
     kind: "linear",
     supportedIntentTypes: Object.freeze(["source_satisfied", "status_update"]),
-    preview: linearPreview
+    preview: linearPreview,
   };
 }
 
 function linearPreview(
-  input: ExternalUpdateAdapterInput
+  input: ExternalUpdateAdapterInput,
 ): ExternalUpdateAdapterPreviewResult {
   const policyError = validateExternalUpdatePolicy(input);
   if (policyError) return policyError;
@@ -255,21 +254,21 @@ function linearPreview(
     return {
       ok: false,
       code: "target_missing",
-      error: `Linear external update adapter requires a resolved targetExternalId for intent ${input.intent.id}.`
+      error: `Linear external update adapter requires a resolved targetExternalId for intent ${input.intent.id}.`,
     };
   }
   if (input.target.adapterKind !== "linear") {
     return {
       ok: false,
       code: "validation_failed",
-      error: `Linear external update adapter requires target.adapterKind="linear" (got "${input.target.adapterKind}").`
+      error: `Linear external update adapter requires target.adapterKind="linear" (got "${input.target.adapterKind}").`,
     };
   }
   if (input.target.externalId !== targetExternalId) {
     return {
       ok: false,
       code: "validation_failed",
-      error: `Linear external update adapter requires target.externalId to match intent.targetExternalId ("${input.target.externalId}" vs "${targetExternalId}").`
+      error: `Linear external update adapter requires target.externalId to match intent.targetExternalId ("${input.target.externalId}" vs "${targetExternalId}").`,
     };
   }
   if (
@@ -279,7 +278,7 @@ function linearPreview(
     return {
       ok: false,
       code: "validation_failed",
-      error: "External update preview requires a non-empty operator reason."
+      error: "External update preview requires a non-empty operator reason.",
     };
   }
   const statusPayload =
@@ -291,7 +290,7 @@ function linearPreview(
   const idempotencyMarker = buildIdempotencyMarker({
     adapterKind: "linear",
     intentId: input.intent.id,
-    payload: input.intent.payload
+    payload: input.intent.payload,
   });
 
   const target: ExternalUpdateAdapterTarget = {
@@ -299,7 +298,7 @@ function linearPreview(
     externalId: targetExternalId,
     externalKey: input.target.externalKey,
     url: input.target.url,
-    title: input.target.title
+    title: input.target.title,
   };
 
   return {
@@ -318,16 +317,16 @@ function linearPreview(
         input,
         target,
         idempotencyMarker,
-        statusPayload?.ok === true ? statusPayload.comment : null
+        statusPayload?.ok === true ? statusPayload.comment : null,
       ),
-      idempotencyMarker
-    }
+      idempotencyMarker,
+    },
   };
 }
 
 function renderLinearSummary(
   input: ExternalUpdateAdapterInput,
-  target: ExternalUpdateAdapterTarget
+  target: ExternalUpdateAdapterTarget,
 ): string {
   const label = target.externalKey ?? target.externalId;
   if (input.intent.intentType === "status_update") {
@@ -345,7 +344,7 @@ function renderLinearCommentBody(
   input: ExternalUpdateAdapterInput,
   target: ExternalUpdateAdapterTarget,
   idempotencyMarker: string,
-  payloadComment: string | null = null
+  payloadComment: string | null = null,
 ): string {
   const actor = (input.operator.actor ?? "").trim();
   const actorLine = actor.length > 0 ? actor : "operator";
@@ -358,17 +357,22 @@ function renderLinearCommentBody(
     "",
     `Operator (${actorLine}): ${input.operator.reason.trim()}`,
     "",
-    `idempotency: ${idempotencyMarker}`
+    `idempotency: ${idempotencyMarker}`,
   ];
   return lines.join("\n");
 }
 
 type LinearStatusUpdatePayload =
-  | { ok: true; stateName: string | null; stateId: string | null; comment: string | null }
+  | {
+      ok: true;
+      stateName: string | null;
+      stateId: string | null;
+      comment: string | null;
+    }
   | { ok: false; error: ExternalUpdateAdapterError };
 
 function parseLinearStatusUpdatePayload(
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): LinearStatusUpdatePayload {
   const stateName = optionalNonEmptyString(payload["state"]);
   const stateId = optionalNonEmptyString(payload["stateId"]);
@@ -379,8 +383,8 @@ function parseLinearStatusUpdatePayload(
         ok: false,
         code: "validation_failed",
         error:
-          'Linear status_update payload requires a non-empty "state" or "stateId".'
-      }
+          'Linear status_update payload requires a non-empty "state" or "stateId".',
+      },
     };
   }
   if (stateName !== null && stateId !== null) {
@@ -390,15 +394,15 @@ function parseLinearStatusUpdatePayload(
         ok: false,
         code: "validation_failed",
         error:
-          'Linear status_update payload must not include both "state" and "stateId".'
-      }
+          'Linear status_update payload must not include both "state" and "stateId".',
+      },
     };
   }
   return {
     ok: true,
     stateName,
     stateId,
-    comment: optionalNonEmptyString(payload["comment"])
+    comment: optionalNonEmptyString(payload["comment"]),
   };
 }
 
@@ -409,15 +413,15 @@ function optionalNonEmptyString(value: unknown): string | null {
 }
 
 function isBuiltinExternalUpdateAdapterKind(
-  kind: string
+  kind: string,
 ): kind is BuiltinExternalUpdateAdapterKind {
   return (BUILTIN_EXTERNAL_UPDATE_ADAPTER_KINDS as readonly string[]).includes(
-    kind
+    kind,
   );
 }
 
 function validateExternalUpdatePolicy(
-  input: ExternalUpdateAdapterInput
+  input: ExternalUpdateAdapterInput,
 ): ExternalUpdateAdapterError | null {
   if (input.policy.intentApplyPolicy === "external_apply_allowed") {
     return null;
@@ -425,7 +429,7 @@ function validateExternalUpdatePolicy(
   return {
     ok: false,
     code: "policy_denied",
-    error: `External update preview for intent ${input.intent.id} requires intent_apply_policy=external_apply_allowed (got ${input.policy.intentApplyPolicy}).`
+    error: `External update preview for intent ${input.intent.id} requires intent_apply_policy=external_apply_allowed (got ${input.policy.intentApplyPolicy}).`,
   };
 }
 
@@ -434,30 +438,30 @@ function unsupportedAdapterError(kind: string): ExternalUpdateAdapterError {
   return {
     ok: false,
     code: "unsupported_adapter",
-    error: `External update adapter "${kind}" is not supported; supported adapters: ${supported}.`
+    error: `External update adapter "${kind}" is not supported; supported adapters: ${supported}.`,
   };
 }
 
 function unsupportedIntentTypeError(
   kind: string,
-  intentType: string
+  intentType: string,
 ): ExternalUpdateAdapterError {
   return {
     ok: false,
     code: "unsupported_intent_type",
-    error: `External update adapter "${kind}" does not support intent type "${intentType}".`
+    error: `External update adapter "${kind}" does not support intent type "${intentType}".`,
   };
 }
 
 function adapterThrewError(
   kind: string,
-  error: unknown
+  error: unknown,
 ): ExternalUpdateAdapterError {
   const detail = error instanceof Error ? error.message : String(error);
   return {
     ok: false,
     code: "adapter_threw",
-    error: `External update adapter "${kind}" threw: ${detail}`
+    error: `External update adapter "${kind}" threw: ${detail}`,
   };
 }
 

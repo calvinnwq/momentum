@@ -8,16 +8,16 @@ import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/defi
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
-  reconcileLinearSource,
+  reconcileLinearTracker,
   type LinearReconciliationClient,
   type LinearReconciliationFetchPageInput,
   type LinearReconciliationFetchPageResult,
-} from "../src/core/source/reconciliation.js";
+} from "../src/core/tracker/reconciliation.js";
 import {
-  listSourceItems,
-  listSourceSnapshotsForItem,
-} from "../src/core/source/items.js";
-import { listSourceReconciliationRuns } from "../src/core/source/reconciliation-runs.js";
+  listTrackerItems,
+  listTrackerSnapshotsForItem,
+} from "../src/core/tracker/items.js";
+import { listTrackerReconciliationRuns } from "../src/core/tracker/reconciliation-runs.js";
 import { claimRunnableWorkflowStep } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
@@ -152,7 +152,7 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
         },
       ]);
 
-      const reconciliation = await reconcileLinearSource(
+      const reconciliation = await reconcileLinearTracker(
         db,
         { client, filters: { projectId: "momentum-project" } },
         { now: () => NOW + 2 },
@@ -170,26 +170,26 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
         itemsErrored: 0,
       });
 
-      const sourceItems = listSourceItems(db, { adapterKind: "linear" });
-      expect(sourceItems).toHaveLength(1);
-      expect(sourceItems[0]).toMatchObject({
+      const trackerItems = listTrackerItems(db, { adapterKind: "linear" });
+      expect(trackerItems).toHaveLength(1);
+      expect(trackerItems[0]).toMatchObject({
         externalId: "issue-ngx-371",
         externalKey: "NGX-371",
         title: "Stubbed adapter integration smoke",
         status: "Todo",
       });
       expect(
-        listSourceSnapshotsForItem(db, sourceItems[0]?.id ?? ""),
+        listTrackerSnapshotsForItem(db, trackerItems[0]?.id ?? ""),
       ).toHaveLength(1);
       expect(
-        listSourceReconciliationRuns(db, { adapterKind: "linear" }),
+        listTrackerReconciliationRuns(db, { adapterKind: "linear" }),
       ).toHaveLength(1);
 
       const runId = "ngx-371-stubbed-happy-path";
       seedCodingWorkflowRun(db, {
         runId,
         repoPath: repoDir,
-        objective: `Dispatch workflow evidence for ${sourceItems[0]?.externalKey}`,
+        objective: `Dispatch workflow evidence for ${trackerItems[0]?.externalKey}`,
       });
       const claim = approveAndClaimPreflight(db, runId);
 
@@ -200,9 +200,9 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
       });
 
       expect(dispatch.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
-      expect(countRows(db, "source_items")).toBe(1);
-      expect(countRows(db, "source_snapshots")).toBe(1);
-      expect(countRows(db, "source_reconciliation_runs")).toBe(1);
+      expect(countRows(db, "tracker_items")).toBe(1);
+      expect(countRows(db, "tracker_snapshots")).toBe(1);
+      expect(countRows(db, "tracker_reconciliation_runs")).toBe(1);
       expect(countRows(db, "executor_attempts")).toBe(1);
       expect(countRows(db, "executor_rounds")).toBe(1);
 
@@ -261,12 +261,12 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
       const client = fakeLinearClient([
         {
           ok: false,
-          code: "source_auth_unavailable",
+          code: "tracker_auth_unavailable",
           error: "fake token expired",
         },
       ]);
 
-      const reconciliation = await reconcileLinearSource(
+      const reconciliation = await reconcileLinearTracker(
         db,
         { client, filters: { projectId: "momentum-project" } },
         { now: () => NOW + 10 },
@@ -274,8 +274,8 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
 
       expect(reconciliation.run.state).toBe("failed");
       expect(reconciliation.run.error).toContain("fake token expired");
-      expect(listSourceItems(db, { adapterKind: "linear" })).toEqual([]);
-      expect(countRows(db, "source_snapshots")).toBe(0);
+      expect(listTrackerItems(db, { adapterKind: "linear" })).toEqual([]);
+      expect(countRows(db, "tracker_snapshots")).toBe(0);
 
       const runId = "ngx-371-stubbed-failure-path";
       seedCodingWorkflowRun(db, {

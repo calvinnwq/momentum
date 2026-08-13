@@ -1,45 +1,48 @@
 /**
  * Project rollup.
  *
- * Computes an operator-facing summary of SourceItem / Goal / evidence /
- * reconciliation state from local durable records only. Never calls source
- * adapters or runs external API requests. Filter scope is source-centric:
+ * Computes an operator-facing summary of TrackerItem / Goal / evidence /
+ * reconciliation state from local durable records only. Never calls tracker
+ * adapters or runs external API requests. Filter scope is tracker-centric:
  * goals are included when they are linked to the effective rollup item after
  * Linear external-key dedupe and project / milestone filters.
  *
  * Duplicate Linear rows that share an externalKey collapse to one effective item
  * before project / milestone filters run. UUID-backed rows win over legacy
  * key-only rows, with freshest lastObservedAt used inside the chosen candidate
- * set. Goal links, source-item evidence, and source-item pending intents from
+ * set. Goal links, tracker-item evidence, and tracker-item pending intents from
  * every collapsed row remain in scope for rollup counts, mismatches, evidence,
  * and pending intents.
  *
  * Pending external update intents are read from local durable state and
- * scoped to the same SourceItem / Goal set so the rollup never widens past
+ * scoped to the same TrackerItem / Goal set so the rollup never widens past
  * the operator's filter context. Stale pending intents are flagged via a
  * configurable TTL (default 30 days); the rollup never auto-deletes intents.
  */
 
 import type { MomentumDb } from "../../adapters/db.js";
-import { listSourceItems, type SourceItem } from "../source/items.js";
+import { listTrackerItems, type TrackerItem } from "../tracker/items.js";
 import {
-  listSourceReconciliationRuns,
-  type SourceReconciliationRun
-} from "../source/reconciliation-runs.js";
-import { listUpdateIntents, type UpdateIntent } from "../intent/update-intents.js";
+  listTrackerReconciliationRuns,
+  type TrackerReconciliationRun,
+} from "../tracker/reconciliation-runs.js";
+import {
+  listUpdateIntents,
+  type UpdateIntent,
+} from "../intent/update-intents.js";
 import {
   summarizeIntentApplyAuditsForIntent,
   type IntentApplyAudit,
   type IntentApplyAuditCounts,
   type IntentApplyState,
-  type IntentApplyStateCounts
+  type IntentApplyStateCounts,
 } from "../intent/apply-audits.js";
 
 export const DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_INTENT_STALE_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000;
 export const PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT = 20;
 
-const TERMINAL_SOURCE_STATUSES = new Set(
+const TERMINAL_TRACKER_STATUSES = new Set(
   [
     "done",
     "completed",
@@ -50,14 +53,14 @@ const TERMINAL_SOURCE_STATUSES = new Set(
     "won't do",
     "wont do",
     "resolved",
-    "merged"
-  ].map((value) => value.toLowerCase())
+    "merged",
+  ].map((value) => value.toLowerCase()),
 );
 
 const TERMINAL_GOAL_STATES = new Set([
   "completed",
   "failed",
-  "max_iterations_reached"
+  "max_iterations_reached",
 ]);
 const COMPLETED_GOAL_STATE = "completed";
 
@@ -76,8 +79,8 @@ export type ProjectRollupOptions = {
   now?: number;
 };
 
-export type ProjectRollupSourceItemSummary = {
-  sourceItemId: string;
+export type ProjectRollupTrackerItemSummary = {
+  trackerItemId: string;
   adapterKind: string;
   externalId: string;
   externalKey: string | null;
@@ -90,25 +93,23 @@ export type ProjectRollupSourceItemSummary = {
 };
 
 export type ProjectRollupMismatchKind =
-  | "source_done_goal_not_terminal"
-  | "goal_done_source_not_done"
+  | "tracker_done_goal_not_terminal"
+  | "goal_done_tracker_not_done"
   | "evidence_missing_after_completion"
   | "manual_recovery_required";
 
 export type ProjectRollupMismatch = {
   kind: ProjectRollupMismatchKind;
-  sourceItemId: string;
+  trackerItemId: string;
   externalKey: string | null;
   title: string;
   goalId: string | null;
   goalState: string | null;
-  sourceStatus: string | null;
+  trackerStatus: string | null;
 };
 
 export type ProjectRollupReconciliationWarningReason =
-  | "never_run"
-  | "stale"
-  | "last_failed";
+  "never_run" | "stale" | "last_failed";
 
 export type ProjectRollupReconciliationWarning = {
   adapterKind: string;
@@ -122,7 +123,7 @@ export type ProjectRollupReconciliationWarning = {
 export type ProjectRollupNextActionKind =
   | "manual_recovery_required"
   | "reconcile_failed"
-  | "reconcile_stale_source"
+  | "reconcile_stale_tracker"
   | "address_mismatch"
   | "missing_evidence"
   | "review_pending_intents"
@@ -142,7 +143,7 @@ export type ProjectRollupPendingIntentSummary = {
   targetExternalId: string | null;
   reason: string;
   goalId: string | null;
-  sourceItemId: string | null;
+  trackerItemId: string | null;
   evidenceRecordId: string | null;
   createdAt: number;
   ageMs: number;
@@ -164,7 +165,7 @@ export type ProjectRollupNextAction = {
 };
 
 export type ProjectRollupCounts = {
-  sourceItems: {
+  trackerItems: {
     total: number;
     byStatus: Record<string, number>;
     linkedToGoal: number;
@@ -191,9 +192,9 @@ export type ProjectRollup = {
   reconciliationStaleThresholdMs: number;
   intentStaleThresholdMs: number;
   counts: ProjectRollupCounts;
-  sourceItems: ProjectRollupSourceItemSummary[];
-  totalSourceItemCount: number;
-  truncatedSourceItems: boolean;
+  trackerItems: ProjectRollupTrackerItemSummary[];
+  totalTrackerItemCount: number;
+  truncatedTrackerItems: boolean;
   mismatches: ProjectRollupMismatch[];
   totalMismatchCount: number;
   truncatedMismatches: boolean;
@@ -211,51 +212,57 @@ type GoalSnapshot = {
   needsManualRecovery: boolean;
 };
 
-type RollupSourceItemGoalLink = {
-  sourceItemId: string;
+type RollupTrackerItemGoalLink = {
+  trackerItemId: string;
   goalId: string;
 };
 
-type RollupSourceItem = SourceItem & {
-  rollupSourceItemIds: readonly string[];
+type RollupTrackerItem = TrackerItem & {
+  rollupTrackerItemIds: readonly string[];
   rollupGoalIds: readonly string[];
-  rollupSourceItemGoalLinks: readonly RollupSourceItemGoalLink[];
+  rollupTrackerItemGoalLinks: readonly RollupTrackerItemGoalLink[];
 };
 
 export function buildProjectRollup(
   db: MomentumDb,
-  options: ProjectRollupOptions = {}
+  options: ProjectRollupOptions = {},
 ): ProjectRollup {
   const filters = options.filters ?? {};
   const reconciliationStaleThresholdMs = resolveStaleThreshold(
     options.reconciliationStaleThresholdMs,
     "reconciliationStaleThresholdMs",
-    DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS
+    DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
   );
   const intentStaleThresholdMs = resolveStaleThreshold(
     options.intentStaleThresholdMs,
     "intentStaleThresholdMs",
-    DEFAULT_INTENT_STALE_THRESHOLD_MS
+    DEFAULT_INTENT_STALE_THRESHOLD_MS,
   );
   const generatedAt = options.now ?? Date.now();
 
-  const allItems = listSourceItems(
+  const allItems = listTrackerItems(
     db,
-    filters.adapterKind === undefined ? {} : { adapterKind: filters.adapterKind }
+    filters.adapterKind === undefined
+      ? {}
+      : { adapterKind: filters.adapterKind },
   );
-  const rollupItems = dedupeLinearSourceItemsForRollup(allItems).filter((item) =>
-    matchesProjectMilestoneFilters(item, filters)
+  const rollupItems = dedupeLinearTrackerItemsForRollup(allItems).filter(
+    (item) => matchesProjectMilestoneFilters(item, filters),
   );
 
   const linkedGoalIds = collectLinkedGoalIds(rollupItems);
-  const goals = linkedGoalIds.size === 0 ? new Map<string, GoalSnapshot>() : loadGoalSnapshots(db, linkedGoalIds);
-  const goalsWithEvidence = goals.size === 0
-    ? new Set<string>()
-    : loadGoalsWithEvidence(db, goals, rollupItems);
+  const goals =
+    linkedGoalIds.size === 0
+      ? new Map<string, GoalSnapshot>()
+      : loadGoalSnapshots(db, linkedGoalIds);
+  const goalsWithEvidence =
+    goals.size === 0
+      ? new Set<string>()
+      : loadGoalsWithEvidence(db, goals, rollupItems);
   const evidenceTotal =
     goals.size === 0 ? 0 : countEvidenceRecordsForGoals(db, goals, rollupItems);
 
-  const summaries = buildSourceItemSummaries(rollupItems, goals);
+  const summaries = buildTrackerItemSummaries(rollupItems, goals);
   const mismatches = buildMismatches(rollupItems, goals, goalsWithEvidence);
   const pendingIntents = buildPendingIntentSummaries(
     db,
@@ -263,7 +270,7 @@ export function buildProjectRollup(
     rollupItems,
     goals,
     generatedAt,
-    intentStaleThresholdMs
+    intentStaleThresholdMs,
   );
   const counts = computeCounts(
     rollupItems,
@@ -271,7 +278,7 @@ export function buildProjectRollup(
     goalsWithEvidence,
     mismatches,
     evidenceTotal,
-    pendingIntents
+    pendingIntents,
   );
   const reconciliationWarnings = buildReconciliationWarnings(
     db,
@@ -279,17 +286,19 @@ export function buildProjectRollup(
     filters,
     generatedAt,
     reconciliationStaleThresholdMs,
-    rollupItems
+    rollupItems,
   );
   const nextAction = pickNextAction(
     counts,
     mismatches,
     reconciliationWarnings,
-    pendingIntents
+    pendingIntents,
   );
 
-  const truncatedSourceItems = summaries.length > PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT;
-  const truncatedMismatches = mismatches.length > PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT;
+  const truncatedTrackerItems =
+    summaries.length > PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT;
+  const truncatedMismatches =
+    mismatches.length > PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT;
   const truncatedPendingIntents =
     pendingIntents.length > PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT;
 
@@ -301,38 +310,38 @@ export function buildProjectRollup(
     reconciliationStaleThresholdMs,
     intentStaleThresholdMs,
     counts,
-    sourceItems: summaries.slice(0, PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT),
-    totalSourceItemCount: summaries.length,
-    truncatedSourceItems,
+    trackerItems: summaries.slice(0, PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT),
+    totalTrackerItemCount: summaries.length,
+    truncatedTrackerItems,
     mismatches: mismatches.slice(0, PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT),
     totalMismatchCount: mismatches.length,
     truncatedMismatches,
     reconciliationWarnings,
     pendingUpdateIntents: pendingIntents.slice(
       0,
-      PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT
+      PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
     ),
     totalPendingUpdateIntentCount: pendingIntents.length,
     truncatedPendingUpdateIntents: truncatedPendingIntents,
     externalApply,
-    nextAction
+    nextAction,
   };
 }
 
 function buildExternalApplyRollup(
-  pendingIntents: readonly ProjectRollupPendingIntentSummary[]
+  pendingIntents: readonly ProjectRollupPendingIntentSummary[],
 ): ProjectRollupExternalApply {
   const intentApplyStateCounts: IntentApplyStateCounts = {
     idle: 0,
     in_flight: 0,
-    blocked: 0
+    blocked: 0,
   };
   const auditCounts: IntentApplyAuditCounts = {
     claimed: 0,
     succeeded: 0,
     failed: 0,
     blocked: 0,
-    audit_incomplete: 0
+    audit_incomplete: 0,
   };
   let totalAttempts = 0;
   let latestAttempt: IntentApplyAudit | null = null;
@@ -360,27 +369,27 @@ function buildExternalApplyRollup(
     pendingIntentApplyStateCounts: intentApplyStateCounts,
     pendingAuditCounts: auditCounts,
     totalAttempts,
-    latestAttempt
+    latestAttempt,
   };
 }
 
 function resolveStaleThreshold(
   value: number | undefined,
   name: string,
-  fallback: number
+  fallback: number,
 ): number {
   if (value === undefined) return fallback;
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(
-      `${name} must be a non-negative finite number, got ${value}`
+      `${name} must be a non-negative finite number, got ${value}`,
     );
   }
   return value;
 }
 
 function matchesProjectMilestoneFilters(
-  item: SourceItem,
-  filters: ProjectRollupFilters
+  item: TrackerItem,
+  filters: ProjectRollupFilters,
 ): boolean {
   if (
     filters.projectId === undefined &&
@@ -395,7 +404,7 @@ function matchesProjectMilestoneFilters(
       item.metadata,
       "project",
       filters.projectId,
-      filters.projectName
+      filters.projectName,
     )
   ) {
     return false;
@@ -405,7 +414,7 @@ function matchesProjectMilestoneFilters(
       item.metadata,
       "milestone",
       filters.milestoneId,
-      filters.milestoneName
+      filters.milestoneName,
     )
   ) {
     return false;
@@ -417,7 +426,7 @@ function matchesMetadataFilter(
   metadata: Record<string, unknown>,
   key: "project" | "milestone",
   idFilter: string | undefined,
-  nameFilter: string | undefined
+  nameFilter: string | undefined,
 ): boolean {
   if (idFilter === undefined && nameFilter === undefined) return true;
 
@@ -425,15 +434,12 @@ function matchesMetadataFilter(
   if (typeof value === "string" && value.length > 0) {
     return value === idFilter || value === nameFilter;
   }
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value)
-  ) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
   const record = value as Record<string, unknown>;
-  if (idFilter !== undefined && readString(record, "id") === idFilter) return true;
+  if (idFilter !== undefined && readString(record, "id") === idFilter)
+    return true;
   if (nameFilter !== undefined && readString(record, "name") === nameFilter) {
     return true;
   }
@@ -442,24 +448,26 @@ function matchesMetadataFilter(
 
 function readMetadataValues(
   metadata: Record<string, unknown>,
-  key: "project" | "milestone"
+  key: "project" | "milestone",
 ): string[] {
   const value = metadata[key];
   if (typeof value === "string") {
     return readCompactStringArray([value]);
   }
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value)
-  ) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return [];
   }
   const objectValue = value as Record<string, unknown>;
-  return readCompactStringArray([readString(objectValue, "id"), readString(objectValue, "name")]);
+  return readCompactStringArray([
+    readString(objectValue, "id"),
+    readString(objectValue, "name"),
+  ]);
 }
 
-function readNested(metadata: Record<string, unknown>, key: string): Record<string, unknown> | null {
+function readNested(
+  metadata: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | null {
   const value = metadata[key];
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -470,13 +478,18 @@ function readCompactStringArray(values: Array<string | null>): string[] {
   return [...new Set(compact)];
 }
 
-function readString(record: Record<string, unknown> | null, key: string): string | null {
+function readString(
+  record: Record<string, unknown> | null,
+  key: string,
+): string | null {
   if (!record) return null;
   const value = record[key];
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function collectLinkedGoalIds(items: readonly RollupSourceItem[]): Set<string> {
+function collectLinkedGoalIds(
+  items: readonly RollupTrackerItem[],
+): Set<string> {
   const ids = new Set<string>();
   for (const item of items) {
     for (const goalId of item.rollupGoalIds) {
@@ -494,7 +507,7 @@ type GoalRow = {
 
 function loadGoalSnapshots(
   db: MomentumDb,
-  goalIds: Set<string>
+  goalIds: Set<string>,
 ): Map<string, GoalSnapshot> {
   const ids = [...goalIds];
   const placeholders = ids.map(() => "?").join(", ");
@@ -502,7 +515,7 @@ function loadGoalSnapshots(
     .prepare(
       `SELECT id, state, needs_manual_recovery
          FROM goals
-        WHERE id IN (${placeholders})`
+        WHERE id IN (${placeholders})`,
     )
     .all(...ids) as GoalRow[];
   const map = new Map<string, GoalSnapshot>();
@@ -510,7 +523,7 @@ function loadGoalSnapshots(
     map.set(row.id, {
       id: row.id,
       state: row.state,
-      needsManualRecovery: row.needs_manual_recovery === 1
+      needsManualRecovery: row.needs_manual_recovery === 1,
     });
   }
   return map;
@@ -519,34 +532,39 @@ function loadGoalSnapshots(
 function loadGoalsWithEvidence(
   db: MomentumDb,
   goals: Map<string, GoalSnapshot>,
-  items: readonly RollupSourceItem[]
+  items: readonly RollupTrackerItem[],
 ): Set<string> {
   if (goals.size === 0) return new Set();
   const goalIds = [...goals.keys()];
-  const sourceItemGoalIds = collectLinkedSourceItemGoalIds(items, goals);
-  const sourceItemIds = [...sourceItemGoalIds.keys()];
+  const trackerItemGoalIds = collectLinkedTrackerItemGoalIds(items, goals);
+  const trackerItemIds = [...trackerItemGoalIds.keys()];
   const clauses: string[] = [];
   const params: string[] = [];
   if (goalIds.length > 0) {
     clauses.push(`goal_id IN (${goalIds.map(() => "?").join(", ")})`);
     params.push(...goalIds);
   }
-  if (sourceItemIds.length > 0) {
-    clauses.push(`source_item_id IN (${sourceItemIds.map(() => "?").join(", ")})`);
-    params.push(...sourceItemIds);
+  if (trackerItemIds.length > 0) {
+    clauses.push(
+      `tracker_item_id IN (${trackerItemIds.map(() => "?").join(", ")})`,
+    );
+    params.push(...trackerItemIds);
   }
   const rows = db
     .prepare(
-      `SELECT DISTINCT goal_id AS goal_id, source_item_id AS source_item_id
+      `SELECT DISTINCT goal_id AS goal_id, tracker_item_id AS tracker_item_id
          FROM evidence_records
-        WHERE ${clauses.join(" OR ")}`
+        WHERE ${clauses.join(" OR ")}`,
     )
-    .all(...params) as { goal_id: string | null; source_item_id: string | null }[];
+    .all(...params) as {
+    goal_id: string | null;
+    tracker_item_id: string | null;
+  }[];
   const ids = new Set<string>();
   for (const row of rows) {
     if (row.goal_id !== null && goals.has(row.goal_id)) ids.add(row.goal_id);
-    if (row.source_item_id !== null) {
-      const linkedGoalIds = sourceItemGoalIds.get(row.source_item_id) ?? [];
+    if (row.tracker_item_id !== null) {
+      const linkedGoalIds = trackerItemGoalIds.get(row.tracker_item_id) ?? [];
       for (const linkedGoalId of linkedGoalIds) {
         ids.add(linkedGoalId);
       }
@@ -558,59 +576,63 @@ function loadGoalsWithEvidence(
 function countEvidenceRecordsForGoals(
   db: MomentumDb,
   goals: Map<string, GoalSnapshot>,
-  items: readonly RollupSourceItem[]
+  items: readonly RollupTrackerItem[],
 ): number {
   if (goals.size === 0) return 0;
   const goalIds = [...goals.keys()];
-  const sourceItemIds = [...collectLinkedSourceItemGoalIds(items, goals).keys()];
+  const trackerItemIds = [
+    ...collectLinkedTrackerItemGoalIds(items, goals).keys(),
+  ];
   const clauses: string[] = [];
   const params: string[] = [];
   if (goalIds.length > 0) {
     clauses.push(`goal_id IN (${goalIds.map(() => "?").join(", ")})`);
     params.push(...goalIds);
   }
-  if (sourceItemIds.length > 0) {
-    clauses.push(`source_item_id IN (${sourceItemIds.map(() => "?").join(", ")})`);
-    params.push(...sourceItemIds);
+  if (trackerItemIds.length > 0) {
+    clauses.push(
+      `tracker_item_id IN (${trackerItemIds.map(() => "?").join(", ")})`,
+    );
+    params.push(...trackerItemIds);
   }
   const row = db
     .prepare(
       `SELECT COUNT(*) AS total
          FROM evidence_records
-        WHERE ${clauses.join(" OR ")}`
+        WHERE ${clauses.join(" OR ")}`,
     )
     .get(...params) as { total: number } | undefined;
   return row?.total ?? 0;
 }
 
-function collectLinkedSourceItemGoalIds(
-  items: readonly RollupSourceItem[],
-  goals: Map<string, GoalSnapshot>
+function collectLinkedTrackerItemGoalIds(
+  items: readonly RollupTrackerItem[],
+  goals: Map<string, GoalSnapshot>,
 ): Map<string, string[]> {
   const map = new Map<string, string[]>();
   for (const item of items) {
-    for (const link of item.rollupSourceItemGoalLinks) {
+    for (const link of item.rollupTrackerItemGoalLinks) {
       if (!goals.has(link.goalId)) continue;
-      const linkedGoalIds = map.get(link.sourceItemId) ?? [];
+      const linkedGoalIds = map.get(link.trackerItemId) ?? [];
       if (linkedGoalIds.includes(link.goalId)) continue;
       linkedGoalIds.push(link.goalId);
-      map.set(link.sourceItemId, linkedGoalIds);
+      map.set(link.trackerItemId, linkedGoalIds);
     }
   }
   return map;
 }
 
-function buildSourceItemSummaries(
-  items: readonly RollupSourceItem[],
-  goals: Map<string, GoalSnapshot>
-): ProjectRollupSourceItemSummary[] {
+function buildTrackerItemSummaries(
+  items: readonly RollupTrackerItem[],
+  goals: Map<string, GoalSnapshot>,
+): ProjectRollupTrackerItemSummary[] {
   return items
     .slice()
-    .sort(sourceItemOrder)
+    .sort(trackerItemOrder)
     .map((item) => {
-      const goal = item.goalId ? goals.get(item.goalId) ?? null : null;
+      const goal = item.goalId ? (goals.get(item.goalId) ?? null) : null;
       return {
-        sourceItemId: item.id,
+        trackerItemId: item.id,
         adapterKind: item.adapterKind,
         externalId: item.externalId,
         externalKey: item.externalKey,
@@ -619,18 +641,22 @@ function buildSourceItemSummaries(
         status: item.status,
         lastObservedAt: item.lastObservedAt,
         goalId: item.goalId,
-        goalState: goal?.state ?? null
+        goalState: goal?.state ?? null,
       };
     });
 }
 
-function dedupeLinearSourceItemsForRollup(items: readonly SourceItem[]): RollupSourceItem[] {
+function dedupeLinearTrackerItemsForRollup(
+  items: readonly TrackerItem[],
+): RollupTrackerItem[] {
   if (items.length <= 1) {
-    return items.map((item) => toRollupSourceItem(item)).sort(sourceItemOrder);
+    return items
+      .map((item) => toRollupTrackerItem(item))
+      .sort(trackerItemOrder);
   }
 
-  const groupedByAdapterAndKey = new Map<string, SourceItem[]>();
-  const passthroughItems: SourceItem[] = [];
+  const groupedByAdapterAndKey = new Map<string, TrackerItem[]>();
+  const passthroughItems: TrackerItem[] = [];
   for (const item of items) {
     if (item.adapterKind !== "linear" || item.externalKey === null) {
       passthroughItems.push(item);
@@ -645,58 +671,60 @@ function dedupeLinearSourceItemsForRollup(items: readonly SourceItem[]): RollupS
     }
   }
 
-  const deduped: RollupSourceItem[] = passthroughItems.map((item) =>
-    toRollupSourceItem(item)
+  const deduped: RollupTrackerItem[] = passthroughItems.map((item) =>
+    toRollupTrackerItem(item),
   );
   for (const bucket of groupedByAdapterAndKey.values()) {
     if (bucket.length === 1) {
-      deduped.push(toRollupSourceItem(bucket[0]!));
+      deduped.push(toRollupTrackerItem(bucket[0]!));
       continue;
     }
-    const canonicalCandidates = bucket.filter(
-      (item) => isCanonicalLinearUuidRow(item)
+    const canonicalCandidates = bucket.filter((item) =>
+      isCanonicalLinearUuidRow(item),
     );
     const candidates =
       canonicalCandidates.length > 0 ? canonicalCandidates : bucket;
-    deduped.push(toRollupSourceItem(selectPreferredSourceItem(candidates), bucket));
+    deduped.push(
+      toRollupTrackerItem(selectPreferredTrackerItem(candidates), bucket),
+    );
   }
 
-  return deduped.sort(sourceItemOrder);
+  return deduped.sort(trackerItemOrder);
 }
 
-function toRollupSourceItem(
-  item: SourceItem,
-  bucket: readonly SourceItem[] = [item]
-): RollupSourceItem {
-  const sourceItemGoalLinks = readRollupSourceItemGoalLinks(bucket);
-  const linkedGoalIds = readRollupGoalIds(sourceItemGoalLinks);
+function toRollupTrackerItem(
+  item: TrackerItem,
+  bucket: readonly TrackerItem[] = [item],
+): RollupTrackerItem {
+  const trackerItemGoalLinks = readRollupTrackerItemGoalLinks(bucket);
+  const linkedGoalIds = readRollupGoalIds(trackerItemGoalLinks);
   return {
     ...item,
     goalId: item.goalId,
-    rollupSourceItemIds: readRollupSourceItemIds(bucket),
+    rollupTrackerItemIds: readRollupTrackerItemIds(bucket),
     rollupGoalIds: linkedGoalIds,
-    rollupSourceItemGoalLinks: sourceItemGoalLinks
+    rollupTrackerItemGoalLinks: trackerItemGoalLinks,
   };
 }
 
-function readRollupSourceItemIds(items: readonly SourceItem[]): string[] {
+function readRollupTrackerItemIds(items: readonly TrackerItem[]): string[] {
   return [...new Set(items.map((item) => item.id))].sort();
 }
 
-function readRollupSourceItemGoalLinks(
-  items: readonly SourceItem[]
-): RollupSourceItemGoalLink[] {
-  const links = new Map<string, RollupSourceItemGoalLink>();
-  for (const item of items.slice().sort(sourceItemOrder)) {
+function readRollupTrackerItemGoalLinks(
+  items: readonly TrackerItem[],
+): RollupTrackerItemGoalLink[] {
+  const links = new Map<string, RollupTrackerItemGoalLink>();
+  for (const item of items.slice().sort(trackerItemOrder)) {
     if (item.goalId === null) continue;
     const key = `${item.id}\u0000${item.goalId}`;
-    links.set(key, { sourceItemId: item.id, goalId: item.goalId });
+    links.set(key, { trackerItemId: item.id, goalId: item.goalId });
   }
   return [...links.values()];
 }
 
 function readRollupGoalIds(
-  links: readonly RollupSourceItemGoalLink[]
+  links: readonly RollupTrackerItemGoalLink[],
 ): string[] {
   return [...new Set(links.map((link) => link.goalId))];
 }
@@ -704,7 +732,7 @@ function readRollupGoalIds(
 const LINEAR_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function isCanonicalLinearUuidRow(item: SourceItem): boolean {
+function isCanonicalLinearUuidRow(item: TrackerItem): boolean {
   return (
     item.adapterKind === "linear" &&
     item.externalKey !== null &&
@@ -713,10 +741,14 @@ function isCanonicalLinearUuidRow(item: SourceItem): boolean {
   );
 }
 
-function selectPreferredSourceItem(items: readonly SourceItem[]): SourceItem {
+function selectPreferredTrackerItem(
+  items: readonly TrackerItem[],
+): TrackerItem {
   let best = items[0];
   if (best === undefined) {
-    throw new Error("selectPreferredSourceItem requires at least one source item.");
+    throw new Error(
+      "selectPreferredTrackerItem requires at least one tracker item.",
+    );
   }
 
   for (const candidate of items.slice(1)) {
@@ -724,14 +756,14 @@ function selectPreferredSourceItem(items: readonly SourceItem[]): SourceItem {
       best = candidate.lastObservedAt > best.lastObservedAt ? candidate : best;
       continue;
     }
-    if (sourceItemOrder(candidate, best) < 0) {
+    if (trackerItemOrder(candidate, best) < 0) {
       best = candidate;
     }
   }
   return best;
 }
 
-function sourceItemOrder(a: SourceItem, b: SourceItem): number {
+function trackerItemOrder(a: TrackerItem, b: TrackerItem): number {
   if (a.adapterKind !== b.adapterKind) {
     return a.adapterKind < b.adapterKind ? -1 : 1;
   }
@@ -742,28 +774,38 @@ function sourceItemOrder(a: SourceItem, b: SourceItem): number {
 }
 
 function buildMismatches(
-  items: readonly RollupSourceItem[],
+  items: readonly RollupTrackerItem[],
   goals: Map<string, GoalSnapshot>,
-  goalsWithEvidence: Set<string>
+  goalsWithEvidence: Set<string>,
 ): ProjectRollupMismatch[] {
   const mismatches: ProjectRollupMismatch[] = [];
   const reportedManualRecovery = new Set<string>();
   const reportedMissingEvidence = new Set<string>();
-  for (const item of items.slice().sort(sourceItemOrder)) {
+  for (const item of items.slice().sort(trackerItemOrder)) {
     for (const goalId of item.rollupGoalIds) {
       const goal = goals.get(goalId) ?? null;
       if (!goal) continue;
-      const sourceDone = isSourceStatusTerminal(item.status);
+      const trackerDone = isTrackerStatusTerminal(item.status);
       const goalDone = goal.state === COMPLETED_GOAL_STATE;
       const goalTerminal = TERMINAL_GOAL_STATES.has(goal.state);
-      if (sourceDone && !goalTerminal) {
-        mismatches.push(buildMismatch("source_done_goal_not_terminal", item, goal));
+      if (trackerDone && !goalTerminal) {
+        mismatches.push(
+          buildMismatch("tracker_done_goal_not_terminal", item, goal),
+        );
       }
-      if (goalDone && !sourceDone) {
-        mismatches.push(buildMismatch("goal_done_source_not_done", item, goal));
+      if (goalDone && !trackerDone) {
+        mismatches.push(
+          buildMismatch("goal_done_tracker_not_done", item, goal),
+        );
       }
-      if (goalDone && !goalsWithEvidence.has(goal.id) && !reportedMissingEvidence.has(goal.id)) {
-        mismatches.push(buildMismatch("evidence_missing_after_completion", item, goal));
+      if (
+        goalDone &&
+        !goalsWithEvidence.has(goal.id) &&
+        !reportedMissingEvidence.has(goal.id)
+      ) {
+        mismatches.push(
+          buildMismatch("evidence_missing_after_completion", item, goal),
+        );
         reportedMissingEvidence.add(goal.id);
       }
       if (goal.needsManualRecovery && !reportedManualRecovery.has(goal.id)) {
@@ -777,32 +819,32 @@ function buildMismatches(
 
 function buildMismatch(
   kind: ProjectRollupMismatchKind,
-  item: RollupSourceItem,
-  goal: GoalSnapshot
+  item: RollupTrackerItem,
+  goal: GoalSnapshot,
 ): ProjectRollupMismatch {
   return {
     kind,
-    sourceItemId: item.id,
+    trackerItemId: item.id,
     externalKey: item.externalKey,
     title: item.title,
     goalId: goal.id,
     goalState: goal.state,
-    sourceStatus: item.status
+    trackerStatus: item.status,
   };
 }
 
-function isSourceStatusTerminal(status: string | null): boolean {
+function isTrackerStatusTerminal(status: string | null): boolean {
   if (!status) return false;
-  return TERMINAL_SOURCE_STATUSES.has(status.trim().toLowerCase());
+  return TERMINAL_TRACKER_STATUSES.has(status.trim().toLowerCase());
 }
 
 function computeCounts(
-  items: readonly RollupSourceItem[],
+  items: readonly RollupTrackerItem[],
   goals: Map<string, GoalSnapshot>,
   goalsWithEvidence: Set<string>,
   mismatches: readonly ProjectRollupMismatch[],
   evidenceTotal: number,
-  pendingIntents: readonly ProjectRollupPendingIntentSummary[]
+  pendingIntents: readonly ProjectRollupPendingIntentSummary[],
 ): ProjectRollupCounts {
   const byStatus: Record<string, number> = {};
   let linkedToGoal = 0;
@@ -820,38 +862,41 @@ function computeCounts(
     if (goal.needsManualRecovery) needingManualRecovery += 1;
   }
   const mismatchCounts: Record<ProjectRollupMismatchKind, number> = {
-    source_done_goal_not_terminal: 0,
-    goal_done_source_not_done: 0,
+    tracker_done_goal_not_terminal: 0,
+    goal_done_tracker_not_done: 0,
     evidence_missing_after_completion: 0,
-    manual_recovery_required: 0
+    manual_recovery_required: 0,
   };
   for (const mismatch of mismatches) {
     mismatchCounts[mismatch.kind] += 1;
   }
   const goalsWithoutEvidence = [...goals.values()].filter(
-    (goal) => goal.state === COMPLETED_GOAL_STATE && !goalsWithEvidence.has(goal.id)
+    (goal) =>
+      goal.state === COMPLETED_GOAL_STATE && !goalsWithEvidence.has(goal.id),
   ).length;
-  const stalePendingIntents = pendingIntents.filter((intent) => intent.stale).length;
+  const stalePendingIntents = pendingIntents.filter(
+    (intent) => intent.stale,
+  ).length;
   return {
-    sourceItems: {
+    trackerItems: {
       total: items.length,
       byStatus,
       linkedToGoal,
-      unlinked
+      unlinked,
     },
     goals: {
       total: goals.size,
       byState: byGoalState,
-      needingManualRecovery
+      needingManualRecovery,
     },
     evidence: {
       totalRecords: evidenceTotal,
       goalsWithEvidence: goalsWithEvidence.size,
-      goalsWithoutEvidence
+      goalsWithoutEvidence,
     },
     mismatches: mismatchCounts,
     pendingUpdateIntents: pendingIntents.length,
-    staleUpdateIntents: stalePendingIntents
+    staleUpdateIntents: stalePendingIntents,
   };
 }
 
@@ -861,39 +906,41 @@ function buildReconciliationWarnings(
   filters: ProjectRollupFilters,
   now: number,
   staleThresholdMs: number,
-  items: readonly SourceItem[]
+  items: readonly TrackerItem[],
 ): ProjectRollupReconciliationWarning[] {
   if (items.length === 0) {
     return [];
   }
 
-  const runs = listSourceReconciliationRuns(
+  const runs = listTrackerReconciliationRuns(
     db,
-    adapterKind === undefined ? {} : { adapterKind }
+    adapterKind === undefined ? {} : { adapterKind },
   );
   if (runs.length === 0) {
-    const adapters = adapterKind === undefined
-      ? [...new Set(items.map((item) => item.adapterKind))].sort()
-      : [adapterKind];
+    const adapters =
+      adapterKind === undefined
+        ? [...new Set(items.map((item) => item.adapterKind))].sort()
+        : [adapterKind];
     return adapters.map((adapter) => ({
       adapterKind: adapter,
       lastRunState: null,
       lastRunFinishedAt: null,
       ageMs: null,
       reason: "never_run",
-      error: null
+      error: null,
     }));
   }
   const byAdapter = new Map<string, ProjectRollupReconciliationWarning>();
-  const adapters = adapterKind === undefined
-    ? new Set(items.map((item) => item.adapterKind))
-    : new Set([adapterKind]);
+  const adapters =
+    adapterKind === undefined
+      ? new Set(items.map((item) => item.adapterKind))
+      : new Set([adapterKind]);
   for (const adapter of adapters) {
     const adapterItems = items.filter((item) => item.adapterKind === adapter);
     const adapterRuns = runs.filter(
       (run) =>
         run.adapterKind === adapter &&
-        runCoversFilteredRollup(run, filters, adapterItems)
+        runCoversFilteredRollup(run, filters, adapterItems),
     );
     if (adapterRuns.length === 0) {
       byAdapter.set(adapter, {
@@ -902,11 +949,15 @@ function buildReconciliationWarnings(
         lastRunFinishedAt: null,
         ageMs: null,
         reason: "never_run",
-        error: null
+        error: null,
       });
       continue;
     }
-    const last = selectReconciliationRunForWarning(adapterRuns, now, staleThresholdMs);
+    const last = selectReconciliationRunForWarning(
+      adapterRuns,
+      now,
+      staleThresholdMs,
+    );
     if (last === null) {
       continue;
     }
@@ -917,7 +968,7 @@ function buildReconciliationWarnings(
         lastRunFinishedAt: null,
         ageMs: null,
         reason: "never_run",
-        error: null
+        error: null,
       });
       continue;
     }
@@ -930,7 +981,7 @@ function buildReconciliationWarnings(
         lastRunFinishedAt: null,
         ageMs: age,
         reason: "stale",
-        error: null
+        error: null,
       });
       continue;
     }
@@ -941,7 +992,7 @@ function buildReconciliationWarnings(
         lastRunFinishedAt: last.finishedAt,
         ageMs: age,
         reason: "last_failed",
-        error: last.error
+        error: last.error,
       });
       continue;
     }
@@ -952,30 +1003,37 @@ function buildReconciliationWarnings(
         lastRunFinishedAt: last.finishedAt,
         ageMs: age,
         reason: "stale",
-        error: null
+        error: null,
       });
     }
   }
-  return [...byAdapter.values()].sort((a, b) => (a.adapterKind < b.adapterKind ? -1 : 1));
+  return [...byAdapter.values()].sort((a, b) =>
+    a.adapterKind < b.adapterKind ? -1 : 1,
+  );
 }
 
 function selectReconciliationRunForWarning(
-  runs: readonly SourceReconciliationRun[],
+  runs: readonly TrackerReconciliationRun[],
   now: number,
-  staleThresholdMs: number
-): SourceReconciliationRun | null | undefined {
+  staleThresholdMs: number,
+): TrackerReconciliationRun | null | undefined {
   const last = runs.at(-1);
   if (!last) return undefined;
   if (last.state !== "running") return last;
   const age = now - last.startedAt;
   if (age <= staleThresholdMs) return null;
-  return runs.slice(0, -1).reverse().find((run) => run.state !== "running") ?? last;
+  return (
+    runs
+      .slice(0, -1)
+      .reverse()
+      .find((run) => run.state !== "running") ?? last
+  );
 }
 
 function runCoversFilteredRollup(
-  run: SourceReconciliationRun,
+  run: TrackerReconciliationRun,
   rollupFilters: ProjectRollupFilters,
-  items: readonly SourceItem[]
+  items: readonly TrackerItem[],
 ): boolean {
   if (run.metadata["dryRun"] === true) return false;
   if (reconciliationStoppedBeforeComplete(run)) return false;
@@ -987,7 +1045,9 @@ function runCoversFilteredRollup(
   );
 }
 
-function reconciliationStoppedBeforeComplete(run: SourceReconciliationRun): boolean {
+function reconciliationStoppedBeforeComplete(
+  run: TrackerReconciliationRun,
+): boolean {
   const stop = readNested(run.metadata, "paginationStopped");
   return readString(stop, "reason") === "max_pages";
 }
@@ -1005,28 +1065,31 @@ function runDimensionCoversRollup(
   runFilters: Record<string, unknown>,
   rollupFilters: ProjectRollupFilters,
   dimension: "project" | "milestone",
-  items: readonly SourceItem[]
+  items: readonly TrackerItem[],
 ): boolean {
   const runValues = [
     readString(runFilters, `${dimension}Id`),
-    readString(runFilters, `${dimension}Name`)
+    readString(runFilters, `${dimension}Name`),
   ].filter((value): value is string => value !== null);
   if (runValues.length === 0) return true;
 
   const rollupValues = [
     rollupFilters[`${dimension}Id`],
-    rollupFilters[`${dimension}Name`]
+    rollupFilters[`${dimension}Name`],
   ].filter((value): value is string => value !== undefined);
   if (rollupValues.length === 0) return false;
-  if (runValues.some((runValue) => rollupValues.includes(runValue))) return true;
+  if (runValues.some((runValue) => rollupValues.includes(runValue)))
+    return true;
 
-  return items.every((item) => itemDimensionMatchesRunFilter(item, dimension, runValues));
+  return items.every((item) =>
+    itemDimensionMatchesRunFilter(item, dimension, runValues),
+  );
 }
 
 function itemDimensionMatchesRunFilter(
-  item: SourceItem,
+  item: TrackerItem,
   dimension: "project" | "milestone",
-  runValues: readonly string[]
+  runValues: readonly string[],
 ): boolean {
   const itemValues = readMetadataValues(item.metadata, dimension);
   return itemValues.some((itemValue) => runValues.includes(itemValue));
@@ -1035,22 +1098,25 @@ function itemDimensionMatchesRunFilter(
 function buildPendingIntentSummaries(
   db: MomentumDb,
   filters: ProjectRollupFilters,
-  items: readonly RollupSourceItem[],
+  items: readonly RollupTrackerItem[],
   goals: Map<string, GoalSnapshot>,
   now: number,
-  staleThresholdMs: number
+  staleThresholdMs: number,
 ): ProjectRollupPendingIntentSummary[] {
   const filtersScoped = isRollupScoped(filters);
-  const itemIds = new Set(items.flatMap((item) => item.rollupSourceItemIds));
+  const itemIds = new Set(items.flatMap((item) => item.rollupTrackerItemIds));
   const goalIds = new Set(goals.keys());
 
-  const listOptions: Parameters<typeof listUpdateIntents>[1] = { status: "pending" };
-  if (filters.adapterKind !== undefined) listOptions.adapterKind = filters.adapterKind;
+  const listOptions: Parameters<typeof listUpdateIntents>[1] = {
+    status: "pending",
+  };
+  if (filters.adapterKind !== undefined)
+    listOptions.adapterKind = filters.adapterKind;
 
   const intents = listUpdateIntents(db, listOptions);
   const scoped = intents.filter((intent) => {
     if (!filtersScoped) return true;
-    if (intent.sourceItemId) return itemIds.has(intent.sourceItemId);
+    if (intent.trackerItemId) return itemIds.has(intent.trackerItemId);
     if (intent.goalId && goalIds.has(intent.goalId)) return true;
     return false;
   });
@@ -1079,7 +1145,7 @@ function toPendingIntentSummary(
   db: MomentumDb,
   intent: UpdateIntent,
   now: number,
-  staleThresholdMs: number
+  staleThresholdMs: number,
 ): ProjectRollupPendingIntentSummary {
   const ageMs = Math.max(0, now - intent.createdAt);
   const summary = summarizeIntentApplyAuditsForIntent(db, intent.id);
@@ -1088,7 +1154,7 @@ function toPendingIntentSummary(
         applyState: summary.applyState,
         totalAttempts: summary.totalAttempts,
         counts: summary.counts,
-        latestAttempt: summary.latestAttempt
+        latestAttempt: summary.latestAttempt,
       }
     : {
         applyState: "idle",
@@ -1098,9 +1164,9 @@ function toPendingIntentSummary(
           succeeded: 0,
           failed: 0,
           blocked: 0,
-          audit_incomplete: 0
+          audit_incomplete: 0,
         },
-        latestAttempt: null
+        latestAttempt: null,
       };
   return {
     intentId: intent.id,
@@ -1109,12 +1175,12 @@ function toPendingIntentSummary(
     targetExternalId: intent.targetExternalId,
     reason: intent.reason,
     goalId: intent.goalId,
-    sourceItemId: intent.sourceItemId,
+    trackerItemId: intent.trackerItemId,
     evidenceRecordId: intent.evidenceRecordId,
     createdAt: intent.createdAt,
     ageMs,
     stale: ageMs > staleThresholdMs,
-    externalApply
+    externalApply,
   };
 }
 
@@ -1122,7 +1188,7 @@ function pickNextAction(
   counts: ProjectRollupCounts,
   mismatches: readonly ProjectRollupMismatch[],
   reconciliationWarnings: readonly ProjectRollupReconciliationWarning[],
-  pendingIntents: readonly ProjectRollupPendingIntentSummary[]
+  pendingIntents: readonly ProjectRollupPendingIntentSummary[],
 ): ProjectRollupNextAction {
   if (counts.goals.needingManualRecovery > 0) {
     const goalIds = mismatches
@@ -1132,71 +1198,73 @@ function pickNextAction(
     return {
       kind: "manual_recovery_required",
       message: `Clear manual recovery on ${counts.goals.needingManualRecovery} goal(s) with \`momentum recovery clear <goal-id>\`.`,
-      detail: { goalIds }
+      detail: { goalIds },
     };
   }
   const failedReconciliation = reconciliationWarnings.find(
-    (warning) => warning.reason === "last_failed"
+    (warning) => warning.reason === "last_failed",
   );
   if (failedReconciliation) {
     return {
       kind: "reconcile_failed",
-      message: `Last ${failedReconciliation.adapterKind} reconciliation failed; investigate and re-run \`momentum source reconcile ${failedReconciliation.adapterKind}\`.`,
+      message: `Last ${failedReconciliation.adapterKind} reconciliation failed; investigate and re-run \`momentum tracker reconcile ${failedReconciliation.adapterKind}\`.`,
       detail: {
         adapterKind: failedReconciliation.adapterKind,
-        error: failedReconciliation.error
-      }
+        error: failedReconciliation.error,
+      },
     };
   }
-  if (counts.mismatches.source_done_goal_not_terminal > 0) {
+  if (counts.mismatches.tracker_done_goal_not_terminal > 0) {
     return {
       kind: "address_mismatch",
-      message: `${counts.mismatches.source_done_goal_not_terminal} source-done/goal-not-terminal mismatch(es); reconcile Goal state or close source.`,
-      detail: { mismatchKind: "source_done_goal_not_terminal" }
+      message: `${counts.mismatches.tracker_done_goal_not_terminal} tracker-done/goal-not-terminal mismatch(es); reconcile Goal state or close the tracker item.`,
+      detail: { mismatchKind: "tracker_done_goal_not_terminal" },
     };
   }
   if (pendingIntents.length > 0) {
     const stale = pendingIntents.filter((intent) => intent.stale).length;
-    const intentIds = pendingIntents.slice(0, 5).map((intent) => intent.intentId);
+    const intentIds = pendingIntents
+      .slice(0, 5)
+      .map((intent) => intent.intentId);
     const staleSuffix = stale > 0 ? ` (${stale} stale)` : "";
     return {
       kind: "review_pending_intents",
       message:
         `${pendingIntents.length} pending external update intent(s)${staleSuffix}; ` +
         "review with `momentum intent list --status pending` and apply/skip/cancel with a reason.",
-      detail: { total: pendingIntents.length, stale, intentIds }
+      detail: { total: pendingIntents.length, stale, intentIds },
     };
   }
-  if (counts.mismatches.goal_done_source_not_done > 0) {
+  if (counts.mismatches.goal_done_tracker_not_done > 0) {
     return {
       kind: "address_mismatch",
-      message: `${counts.mismatches.goal_done_source_not_done} goal-done/source-not-done mismatch(es); queue external update intent or update source.`,
-      detail: { mismatchKind: "goal_done_source_not_done" }
+      message: `${counts.mismatches.goal_done_tracker_not_done} goal-done/tracker-not-done mismatch(es); queue external update intent or update the tracker item.`,
+      detail: { mismatchKind: "goal_done_tracker_not_done" },
     };
   }
   if (counts.mismatches.evidence_missing_after_completion > 0) {
     return {
       kind: "missing_evidence",
       message: `${counts.mismatches.evidence_missing_after_completion} completed goal(s) missing evidence; ingest workflow artifacts.`,
-      detail: { mismatchKind: "evidence_missing_after_completion" }
+      detail: { mismatchKind: "evidence_missing_after_completion" },
     };
   }
   const staleReconciliation = reconciliationWarnings.find(
-    (warning) => warning.reason === "stale" || warning.reason === "never_run"
+    (warning) => warning.reason === "stale" || warning.reason === "never_run",
   );
   if (staleReconciliation) {
     return {
-      kind: "reconcile_stale_source",
-      message: `Reconcile ${staleReconciliation.adapterKind} source (${staleReconciliation.reason}).`,
+      kind: "reconcile_stale_tracker",
+      message: `Reconcile ${staleReconciliation.adapterKind} tracker (${staleReconciliation.reason}).`,
       detail: {
         adapterKind: staleReconciliation.adapterKind,
-        reason: staleReconciliation.reason
-      }
+        reason: staleReconciliation.reason,
+      },
     };
   }
   return {
     kind: "no_action_required",
     message: "No project rollup issues detected.",
-    detail: {}
+    detail: {},
   };
 }

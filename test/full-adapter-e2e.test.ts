@@ -8,16 +8,16 @@ import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/defi
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
-  reconcileLinearSource,
+  reconcileLinearTracker,
   type LinearReconciliationClient,
   type LinearReconciliationFetchPageInput,
   type LinearReconciliationFetchPageResult,
-} from "../src/core/source/reconciliation.js";
+} from "../src/core/tracker/reconciliation.js";
 import {
-  listSourceItems,
-  listSourceSnapshotsForItem,
-} from "../src/core/source/items.js";
-import { listSourceReconciliationRuns } from "../src/core/source/reconciliation-runs.js";
+  listTrackerItems,
+  listTrackerSnapshotsForItem,
+} from "../src/core/tracker/items.js";
+import { listTrackerReconciliationRuns } from "../src/core/tracker/reconciliation-runs.js";
 import { claimRunnableWorkflowStep } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
@@ -78,7 +78,7 @@ import type { AgentResult } from "../src/core/executors/agent-result/types.js";
  * source, local persistence, workflow/executor dispatch, recovery/finalization,
  * and verification gates"):
  *
- *   source adapter read -> local reconciliation/persistence (source_* tables)
+ *   tracker adapter read -> local reconciliation/persistence (tracker_* tables)
  *   -> workflow run start (built-in coding workflow definition)
  *   -> production dispatch seam -> phase-1 executor start scaffold
  *   -> landed executor adapter -> terminal finalization + passing verification
@@ -370,7 +370,7 @@ describe("NGX-372 full adapter E2E proof", () => {
     const artifactRoot = makeTempDir("momentum-ngx-372-e2e-artifacts-");
     const db = openDb(dataDir);
     try {
-      // --- Layer 1: source adapter read -> local reconciliation / persistence ---
+      // --- Layer 1: tracker adapter read -> local reconciliation / persistence ---
       const client = fakeLinearClient([
         {
           ok: true,
@@ -387,7 +387,7 @@ describe("NGX-372 full adapter E2E proof", () => {
         },
       ]);
 
-      const reconciliation = await reconcileLinearSource(
+      const reconciliation = await reconcileLinearTracker(
         db,
         { client, filters: { projectId: "momentum-project" } },
         { now: () => NOW + 2 },
@@ -405,19 +405,19 @@ describe("NGX-372 full adapter E2E proof", () => {
         itemsErrored: 0,
       });
 
-      const sourceItems = listSourceItems(db, { adapterKind: "linear" });
-      expect(sourceItems).toHaveLength(1);
-      const sourceItem = sourceItems[0];
-      expect(sourceItem).toMatchObject({
+      const trackerItems = listTrackerItems(db, { adapterKind: "linear" });
+      expect(trackerItems).toHaveLength(1);
+      const trackerItem = trackerItems[0];
+      expect(trackerItem).toMatchObject({
         externalId: "issue-ngx-372",
         externalKey: "NGX-372",
         status: "Todo",
       });
-      expect(listSourceSnapshotsForItem(db, sourceItem?.id ?? "")).toHaveLength(
-        1,
-      );
       expect(
-        listSourceReconciliationRuns(db, { adapterKind: "linear" }),
+        listTrackerSnapshotsForItem(db, trackerItem?.id ?? ""),
+      ).toHaveLength(1);
+      expect(
+        listTrackerReconciliationRuns(db, { adapterKind: "linear" }),
       ).toHaveLength(1);
 
       // --- Layer 2: workflow run start, objective threaded from the source read ---
@@ -425,7 +425,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       seedCodingWorkflowRun(db, {
         runId,
         repoPath: repoDir,
-        objective: `Implement ${sourceItem?.externalKey} via the coding workflow`,
+        objective: `Implement ${trackerItem?.externalKey} via the coding workflow`,
       });
 
       // --- Layer 3: production dispatch seam -> phase-1 executor start scaffold ---
@@ -550,13 +550,16 @@ describe("NGX-372 full adapter E2E proof", () => {
         source: {
           runState: reconciliation.run.state,
           itemsObserved: reconciliation.counts.itemsObserved,
-          itemsPersisted: sourceItems.length,
-          externalKey: sourceItem?.externalKey ?? null,
+          itemsPersisted: trackerItems.length,
+          externalKey: trackerItem?.externalKey ?? null,
         },
         localPersistence: {
-          sourceItems: countRows(db, "source_items"),
-          sourceSnapshots: countRows(db, "source_snapshots"),
-          sourceReconciliationRuns: countRows(db, "source_reconciliation_runs"),
+          trackerItems: countRows(db, "tracker_items"),
+          trackerSnapshots: countRows(db, "tracker_snapshots"),
+          trackerReconciliationRuns: countRows(
+            db,
+            "tracker_reconciliation_runs",
+          ),
         },
         workflow: {
           runId,
@@ -598,7 +601,7 @@ describe("NGX-372 full adapter E2E proof", () => {
     const artifactRoot = makeTempDir("momentum-ngx-372-e2e-artifacts-");
     const db = openDb(dataDir);
     try {
-      // --- Layer 1: source adapter read -> local reconciliation / persistence ---
+      // --- Layer 1: tracker adapter read -> local reconciliation / persistence ---
       const client = fakeLinearClient([
         {
           ok: true,
@@ -609,22 +612,22 @@ describe("NGX-372 full adapter E2E proof", () => {
         },
       ]);
 
-      const reconciliation = await reconcileLinearSource(
+      const reconciliation = await reconcileLinearTracker(
         db,
         { client, filters: { projectId: "momentum-project" } },
         { now: () => NOW + 2 },
       );
       expect(reconciliation.run.state).toBe("succeeded");
-      const sourceItems = listSourceItems(db, { adapterKind: "linear" });
-      expect(sourceItems).toHaveLength(1);
-      const sourceItem = sourceItems[0];
+      const trackerItems = listTrackerItems(db, { adapterKind: "linear" });
+      expect(trackerItems).toHaveLength(1);
+      const trackerItem = trackerItems[0];
 
       // --- Layer 2: workflow run start, objective threaded from the source read ---
       const runId = "ngx-372-agent-loop-e2e";
       seedCodingWorkflowRun(db, {
         runId,
         repoPath: repoDir,
-        objective: `Implement ${sourceItem?.externalKey} via the coding workflow`,
+        objective: `Implement ${trackerItem?.externalKey} via the coding workflow`,
       });
 
       // --- Layer 3: agent-loop landed adapter -> terminal finalization ---
@@ -729,7 +732,7 @@ describe("NGX-372 full adapter E2E proof", () => {
         proof: "full-adapter-e2e-agent-loop",
         source: {
           runState: reconciliation.run.state,
-          externalKey: sourceItem?.externalKey ?? null,
+          externalKey: trackerItem?.externalKey ?? null,
         },
         workflow: { runId, definition: CODING_WORKFLOW_DEFINITION.key },
         goalLoopFinalization: {
@@ -765,7 +768,7 @@ describe("NGX-372 full adapter E2E proof", () => {
     const artifactRoot = makeTempDir("momentum-ngx-372-e2e-artifacts-");
     const db = openDb(dataDir);
     try {
-      // --- Layer 1: source adapter read -> local reconciliation / persistence ---
+      // --- Layer 1: tracker adapter read -> local reconciliation / persistence ---
       const client = fakeLinearClient([
         {
           ok: true,
@@ -776,22 +779,22 @@ describe("NGX-372 full adapter E2E proof", () => {
         },
       ]);
 
-      const reconciliation = await reconcileLinearSource(
+      const reconciliation = await reconcileLinearTracker(
         db,
         { client, filters: { projectId: "momentum-project" } },
         { now: () => NOW + 2 },
       );
       expect(reconciliation.run.state).toBe("succeeded");
-      const sourceItems = listSourceItems(db, { adapterKind: "linear" });
-      expect(sourceItems).toHaveLength(1);
-      const sourceItem = sourceItems[0];
+      const trackerItems = listTrackerItems(db, { adapterKind: "linear" });
+      expect(trackerItems).toHaveLength(1);
+      const trackerItem = trackerItems[0];
 
       // --- Layer 2: workflow run start, objective threaded from the source read ---
       const runId = "ngx-372-no-mistakes-e2e";
       seedCodingWorkflowRun(db, {
         runId,
         repoPath: repoDir,
-        objective: `Implement ${sourceItem?.externalKey} via the coding workflow`,
+        objective: `Implement ${trackerItem?.externalKey} via the coding workflow`,
       });
 
       // --- Layer 3: no-mistakes mirror landed adapter -> terminal finalization ---
@@ -862,7 +865,7 @@ describe("NGX-372 full adapter E2E proof", () => {
         proof: "full-adapter-e2e-no-mistakes",
         source: {
           runState: reconciliation.run.state,
-          externalKey: sourceItem?.externalKey ?? null,
+          externalKey: trackerItem?.externalKey ?? null,
         },
         workflow: { runId, definition: CODING_WORKFLOW_DEFINITION.key },
         noMistakesFinalization: {

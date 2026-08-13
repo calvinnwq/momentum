@@ -10,7 +10,7 @@ import {
   claimIntentApply,
   finalizeIntentApply,
   type ClaimIntentApplyInput,
-  type IntentApplyFinalLifecycleState
+  type IntentApplyFinalLifecycleState,
 } from "../src/core/intent/apply-audits.js";
 
 type RunResult = {
@@ -38,7 +38,7 @@ function makeTempDir(prefix = "momentum-cli-intent-"): string {
 
 async function run(
   argv: string[],
-  env: NodeJS.ProcessEnv = {}
+  env: NodeJS.ProcessEnv = {},
 ): Promise<RunResult> {
   let stdout = "";
   let stderr = "";
@@ -48,15 +48,15 @@ async function run(
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env
+    env,
   });
 
   return { code, stdout, stderr };
@@ -65,7 +65,7 @@ async function run(
 async function runWithDeps(
   argv: string[],
   env: NodeJS.ProcessEnv,
-  deps: Parameters<typeof runCli>[2]
+  deps: Parameters<typeof runCli>[2],
 ): Promise<RunResult> {
   let stdout = "";
   let stderr = "";
@@ -77,17 +77,17 @@ async function runWithDeps(
         write(chunk: string) {
           stdout += chunk;
           return true;
-        }
+        },
       },
       stderr: {
         write(chunk: string) {
           stderr += chunk;
           return true;
-        }
+        },
       },
-      env
+      env,
     },
-    deps
+    deps,
   );
 
   return { code, stdout, stderr };
@@ -99,35 +99,35 @@ function seedGoal(dataDir: string, goalId: string): void {
     db.prepare(
       `INSERT INTO goals
          (id, title, branch, artifact_dir, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?)`,
     ).run(goalId, "intent goal", "momentum/test", "/tmp/test", 1, 1);
   } finally {
     db.close();
   }
 }
 
-function seedSourceItem(dataDir: string, sourceItemId: string): void {
+function seedTrackerItem(dataDir: string, trackerItemId: string): void {
   const db = openDb(dataDir);
   try {
     db.prepare(
-      `INSERT INTO source_items
+      `INSERT INTO tracker_items
          (id, adapter_kind, external_id, external_key, url, title,
           status, metadata_json, last_observed_at, goal_id,
           created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      sourceItemId,
+      trackerItemId,
       "linear",
-      `ext-${sourceItemId}`,
-      `KEY-${sourceItemId}`,
-      `https://linear.app/example/issue/${sourceItemId}`,
+      `ext-${trackerItemId}`,
+      `KEY-${trackerItemId}`,
+      `https://linear.app/example/issue/${trackerItemId}`,
       "intent source item",
       "open",
       "{}",
       1,
       null,
       1,
-      1
+      1,
     );
   } finally {
     db.close();
@@ -140,9 +140,9 @@ function seedEvidenceRecord(dataDir: string, evidenceRecordId: string): void {
     db.prepare(
       `INSERT INTO evidence_records
          (id, source, type, format_version, artifact_path, external_id,
-          occurred_at, summary, metadata_json, goal_id, source_item_id,
+          occurred_at, summary, metadata_json, goal_id, tracker_item_id,
           ingest_key, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       evidenceRecordId,
       "agent-workflow",
@@ -157,7 +157,7 @@ function seedEvidenceRecord(dataDir: string, evidenceRecordId: string): void {
       null,
       `agent-workflow:${evidenceRecordId}:verification_passed`,
       1,
-      1
+      1,
     );
   } finally {
     db.close();
@@ -173,11 +173,11 @@ function seedIntent(
     reason: string;
     idempotencyKey: string;
     goalId?: string | null;
-    sourceItemId?: string | null;
+    trackerItemId?: string | null;
     evidenceRecordId?: string | null;
     payload?: Record<string, unknown>;
     now?: number;
-  }
+  },
 ): string {
   const db = openDb(dataDir);
   try {
@@ -185,7 +185,7 @@ function seedIntent(
     const result = createUpdateIntent(
       db,
       rest,
-      now !== undefined ? { now: () => now } : {}
+      now !== undefined ? { now: () => now } : {},
     );
     return result.intent.id;
   } finally {
@@ -202,11 +202,11 @@ describe("momentum intent list", () => {
       "extra",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      "Unexpected argument for intent list: extra"
+      "Unexpected argument for intent list: extra",
     );
   });
 
@@ -217,7 +217,7 @@ describe("momentum intent list", () => {
       "list",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -228,11 +228,11 @@ describe("momentum intent list", () => {
       adapter: null,
       intentType: null,
       goalId: null,
-      sourceItemId: null,
+      trackerItemId: null,
       evidenceRecordId: null,
       limit: null,
       count: 0,
-      intents: []
+      intents: [],
     });
   });
 
@@ -243,14 +243,14 @@ describe("momentum intent list", () => {
       intentType: "source_satisfied",
       reason: "first",
       idempotencyKey: "linear:ext-1:source_satisfied:goal-1",
-      now: 1000
+      now: 1000,
     });
     seedIntent(dataDir, {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "second",
       idempotencyKey: "linear:ext-2:source_satisfied:goal-2",
-      now: 2000
+      now: 2000,
     });
 
     const result = await run([
@@ -258,7 +258,7 @@ describe("momentum intent list", () => {
       "list",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -283,13 +283,13 @@ describe("momentum intent list", () => {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "pending one",
-      idempotencyKey: "linear:ext-1:source_satisfied:goal-1"
+      idempotencyKey: "linear:ext-1:source_satisfied:goal-1",
     });
     seedIntent(dataDir, {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "pending two",
-      idempotencyKey: "linear:ext-2:source_satisfied:goal-2"
+      idempotencyKey: "linear:ext-2:source_satisfied:goal-2",
     });
 
     const result = await run([
@@ -299,7 +299,7 @@ describe("momentum intent list", () => {
       "pending",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -321,7 +321,7 @@ describe("momentum intent list", () => {
       "bogus",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -329,7 +329,7 @@ describe("momentum intent list", () => {
       ok: false,
       command: "intent list",
       code: "invalid_status",
-      status: "bogus"
+      status: "bogus",
     });
   });
 
@@ -339,19 +339,19 @@ describe("momentum intent list", () => {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "linear satisfied",
-      idempotencyKey: "linear:ext-1:source_satisfied:goal-1"
+      idempotencyKey: "linear:ext-1:source_satisfied:goal-1",
     });
     seedIntent(dataDir, {
       adapterKind: "linear",
       intentType: "comment_requested",
       reason: "linear comment",
-      idempotencyKey: "linear:ext-1:comment_requested:goal-1"
+      idempotencyKey: "linear:ext-1:comment_requested:goal-1",
     });
     seedIntent(dataDir, {
       adapterKind: "github",
       intentType: "source_satisfied",
       reason: "github satisfied",
-      idempotencyKey: "github:ext-1:source_satisfied:goal-1"
+      idempotencyKey: "github:ext-1:source_satisfied:goal-1",
     });
 
     const byAdapter = await run([
@@ -361,7 +361,7 @@ describe("momentum intent list", () => {
       "linear",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(byAdapter.code).toBe(0);
     const byAdapterPayload = JSON.parse(byAdapter.stdout) as {
@@ -371,9 +371,9 @@ describe("momentum intent list", () => {
     };
     expect(byAdapterPayload.adapter).toBe("linear");
     expect(byAdapterPayload.count).toBe(2);
-    expect(byAdapterPayload.intents.every((i) => i.adapterKind === "linear")).toBe(
-      true
-    );
+    expect(
+      byAdapterPayload.intents.every((i) => i.adapterKind === "linear"),
+    ).toBe(true);
 
     const byType = await run([
       "intent",
@@ -382,7 +382,7 @@ describe("momentum intent list", () => {
       "source_satisfied",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(byType.code).toBe(0);
     const byTypePayload = JSON.parse(byType.stdout) as {
@@ -393,7 +393,7 @@ describe("momentum intent list", () => {
     expect(byTypePayload.intentType).toBe("source_satisfied");
     expect(byTypePayload.count).toBe(2);
     expect(
-      byTypePayload.intents.every((i) => i.intentType === "source_satisfied")
+      byTypePayload.intents.every((i) => i.intentType === "source_satisfied"),
     ).toBe(true);
   });
 
@@ -406,14 +406,14 @@ describe("momentum intent list", () => {
       intentType: "source_satisfied",
       reason: "goal-a",
       idempotencyKey: "linear:ext-1:source_satisfied:goal-a",
-      goalId: "goal-a"
+      goalId: "goal-a",
     });
     seedIntent(dataDir, {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "goal-b",
       idempotencyKey: "linear:ext-2:source_satisfied:goal-b",
-      goalId: "goal-b"
+      goalId: "goal-b",
     });
 
     const ok = await run([
@@ -423,7 +423,7 @@ describe("momentum intent list", () => {
       "goal-a",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(ok.code).toBe(0);
     const okPayload = JSON.parse(ok.stdout) as {
@@ -442,65 +442,71 @@ describe("momentum intent list", () => {
       "ghost",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(missing.code).toBe(1);
-    const missingPayload = JSON.parse(missing.stderr) as Record<string, unknown>;
+    const missingPayload = JSON.parse(missing.stderr) as Record<
+      string,
+      unknown
+    >;
     expect(missingPayload).toMatchObject({
       ok: false,
       command: "intent list",
       code: "goal_not_found",
-      goalId: "ghost"
+      goalId: "ghost",
     });
   });
 
-  it("filters by --source-item and rejects missing source items", async () => {
+  it("filters by --tracker-item and rejects missing source items", async () => {
     const dataDir = makeTempDir();
-    seedSourceItem(dataDir, "si-1");
-    seedSourceItem(dataDir, "si-2");
+    seedTrackerItem(dataDir, "si-1");
+    seedTrackerItem(dataDir, "si-2");
     seedIntent(dataDir, {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "for si-2",
       idempotencyKey: "linear:ext-si-2:source_satisfied:goal-1",
-      sourceItemId: "si-2"
+      trackerItemId: "si-2",
     });
 
     const ok = await run([
       "intent",
       "list",
-      "--source-item",
+      "--tracker-item",
       "si-2",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(ok.code).toBe(0);
     const okPayload = JSON.parse(ok.stdout) as {
-      sourceItemId: string | null;
+      trackerItemId: string | null;
       count: number;
-      intents: Array<{ sourceItemId: string | null }>;
+      intents: Array<{ trackerItemId: string | null }>;
     };
-    expect(okPayload.sourceItemId).toBe("si-2");
+    expect(okPayload.trackerItemId).toBe("si-2");
     expect(okPayload.count).toBe(1);
-    expect(okPayload.intents[0]?.sourceItemId).toBe("si-2");
+    expect(okPayload.intents[0]?.trackerItemId).toBe("si-2");
 
     const missing = await run([
       "intent",
       "list",
-      "--source-item",
+      "--tracker-item",
       "si-missing",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(missing.code).toBe(1);
-    const missingPayload = JSON.parse(missing.stderr) as Record<string, unknown>;
+    const missingPayload = JSON.parse(missing.stderr) as Record<
+      string,
+      unknown
+    >;
     expect(missingPayload).toMatchObject({
       ok: false,
       command: "intent list",
-      code: "source_item_not_found",
-      sourceItemId: "si-missing"
+      code: "tracker_item_not_found",
+      trackerItemId: "si-missing",
     });
   });
 
@@ -512,7 +518,7 @@ describe("momentum intent list", () => {
       intentType: "source_satisfied",
       reason: "with evidence",
       idempotencyKey: "linear:ext-1:source_satisfied:goal-1",
-      evidenceRecordId: "ev-1"
+      evidenceRecordId: "ev-1",
     });
 
     const ok = await run([
@@ -522,7 +528,7 @@ describe("momentum intent list", () => {
       "ev-1",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(ok.code).toBe(0);
     const okPayload = JSON.parse(ok.stdout) as {
@@ -541,15 +547,18 @@ describe("momentum intent list", () => {
       "ev-missing",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(missing.code).toBe(1);
-    const missingPayload = JSON.parse(missing.stderr) as Record<string, unknown>;
+    const missingPayload = JSON.parse(missing.stderr) as Record<
+      string,
+      unknown
+    >;
     expect(missingPayload).toMatchObject({
       ok: false,
       command: "intent list",
       code: "evidence_record_not_found",
-      evidenceRecordId: "ev-missing"
+      evidenceRecordId: "ev-missing",
     });
   });
 
@@ -560,21 +569,21 @@ describe("momentum intent list", () => {
       intentType: "source_satisfied",
       reason: "first",
       idempotencyKey: "linear:ext-1:source_satisfied:goal-1",
-      now: 1000
+      now: 1000,
     });
     seedIntent(dataDir, {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "second",
       idempotencyKey: "linear:ext-2:source_satisfied:goal-2",
-      now: 2000
+      now: 2000,
     });
     seedIntent(dataDir, {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "third",
       idempotencyKey: "linear:ext-3:source_satisfied:goal-3",
-      now: 3000
+      now: 3000,
     });
 
     const result = await run([
@@ -584,7 +593,7 @@ describe("momentum intent list", () => {
       "2",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -604,7 +613,7 @@ describe("momentum intent list", () => {
       targetExternalId: "ext-1",
       intentType: "source_satisfied",
       reason: "wf reason",
-      idempotencyKey: "linear:ext-1:source_satisfied:goal-1"
+      idempotencyKey: "linear:ext-1:source_satisfied:goal-1",
     });
 
     const result = await run(["intent", "list", "--data-dir", dataDir]);
@@ -629,7 +638,7 @@ describe("momentum intent list", () => {
       targetExternalId: "ext-quiet",
       intentType: "source_satisfied",
       reason: "no attempts",
-      idempotencyKey: "linear:ext-quiet:source_satisfied:goal-1"
+      idempotencyKey: "linear:ext-quiet:source_satisfied:goal-1",
     });
 
     const result = await run([
@@ -637,7 +646,7 @@ describe("momentum intent list", () => {
       "list",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -667,9 +676,9 @@ describe("momentum intent list", () => {
         succeeded: 0,
         failed: 0,
         blocked: 0,
-        audit_incomplete: 0
+        audit_incomplete: 0,
       },
-      latestAttempt: null
+      latestAttempt: null,
     });
   });
 
@@ -681,7 +690,7 @@ describe("momentum intent list", () => {
       intentType: "source_satisfied",
       reason: "succeeded once",
       idempotencyKey: "linear:NGX-succeeded:source_satisfied:goal-1",
-      now: 1000
+      now: 1000,
     });
     const blockedId = seedIntent(dataDir, {
       adapterKind: "linear",
@@ -689,16 +698,16 @@ describe("momentum intent list", () => {
       intentType: "source_satisfied",
       reason: "blocked after write",
       idempotencyKey: "linear:NGX-blocked:source_satisfied:goal-1",
-      now: 2000
+      now: 2000,
     });
     runFinalizedAttempt(dataDir, succeededId, "succeeded", 1100, {
       resultCode: "comment_created",
       externalRefs: {
-        commentId: "linear_comment_55"
-      }
+        commentId: "linear_comment_55",
+      },
     });
     runFinalizedAttempt(dataDir, blockedId, "audit_incomplete", 2100, {
-      resultCode: "audit_finalize_failed"
+      resultCode: "audit_finalize_failed",
     });
 
     const result = await run([
@@ -706,7 +715,7 @@ describe("momentum intent list", () => {
       "list",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -730,28 +739,28 @@ describe("momentum intent list", () => {
     expect(succeeded?.externalApply.totalAttempts).toBe(1);
     expect(succeeded?.externalApply.counts.succeeded).toBe(1);
     expect(succeeded?.externalApply.latestAttempt?.lifecycleState).toBe(
-      "succeeded"
+      "succeeded",
     );
-    expect(
-      succeeded?.externalApply.latestAttempt?.externalRefs.commentId
-    ).toBe("linear_comment_55");
+    expect(succeeded?.externalApply.latestAttempt?.externalRefs.commentId).toBe(
+      "linear_comment_55",
+    );
     expect(blocked?.externalApply.applyState).toBe("blocked");
     expect(blocked?.externalApply.totalAttempts).toBe(1);
     expect(blocked?.externalApply.counts.audit_incomplete).toBe(1);
     expect(blocked?.externalApply.latestAttempt?.lifecycleState).toBe(
-      "audit_incomplete"
+      "audit_incomplete",
     );
     expect(blocked?.externalApply.latestAttempt?.resultCode).toBe(
-      "audit_finalize_failed"
+      "audit_finalize_failed",
     );
 
     const text = await run(["intent", "list", "--data-dir", dataDir]);
     expect(text.code).toBe(0);
     expect(text.stdout).toContain(
-      "apply=idle attempts=1 latest=succeeded/comment_created"
+      "apply=idle attempts=1 latest=succeeded/comment_created",
     );
     expect(text.stdout).toContain(
-      "apply=blocked attempts=1 latest=audit_incomplete/audit_finalize_failed"
+      "apply=blocked attempts=1 latest=audit_incomplete/audit_finalize_failed",
     );
   });
 
@@ -762,21 +771,21 @@ describe("momentum intent list", () => {
       intentType: "source_satisfied",
       reason: "first",
       idempotencyKey: "linear:ext-1:source_satisfied:goal-1",
-      now: 1000
+      now: 1000,
     });
     seedIntent(dataDir, {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "second",
       idempotencyKey: "linear:ext-2:source_satisfied:goal-2",
-      now: 2000
+      now: 2000,
     });
     seedIntent(dataDir, {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "third",
       idempotencyKey: "linear:ext-3:source_satisfied:goal-3",
-      now: 3000
+      now: 3000,
     });
 
     const result = await run([
@@ -786,7 +795,7 @@ describe("momentum intent list", () => {
       "2",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -806,7 +815,7 @@ describe("momentum intent list", () => {
       "--limit",
       "2",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(text.code).toBe(0);
     expect(text.stdout).toContain("Update intents: 2");
@@ -818,9 +827,17 @@ describe("momentum intent list", () => {
 describe("momentum intent get", () => {
   it("requires a positional <intent-id>", async () => {
     const dataDir = makeTempDir();
-    const result = await run(["intent", "get", "--data-dir", dataDir, "--json"]);
+    const result = await run([
+      "intent",
+      "get",
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
     expect(result.code).toBe(2);
-    expect(result.stderr).toContain("Missing required <intent-id> for intent get.");
+    expect(result.stderr).toContain(
+      "Missing required <intent-id> for intent get.",
+    );
   });
 
   it("rejects unexpected positional argument after the intent id", async () => {
@@ -832,11 +849,11 @@ describe("momentum intent get", () => {
       "extra",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      "Unexpected argument for intent get: extra"
+      "Unexpected argument for intent get: extra",
     );
   });
 
@@ -848,7 +865,7 @@ describe("momentum intent get", () => {
       "missing-intent",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -856,7 +873,7 @@ describe("momentum intent get", () => {
       ok: false,
       command: "intent get",
       code: "intent_not_found",
-      intentId: "missing-intent"
+      intentId: "missing-intent",
     });
   });
 
@@ -868,7 +885,7 @@ describe("momentum intent get", () => {
       intentType: "source_satisfied",
       reason: "satisfied reason",
       idempotencyKey: "linear:ext-42:source_satisfied:goal-1",
-      payload: { goalState: "completed" }
+      payload: { goalState: "completed" },
     });
 
     const result = await run([
@@ -877,7 +894,7 @@ describe("momentum intent get", () => {
       intentId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -896,7 +913,7 @@ describe("momentum intent get", () => {
     };
     expect(payload).toMatchObject({
       ok: true,
-      command: "intent get"
+      command: "intent get",
     });
     expect(payload.intent.id).toBe(intentId);
     expect(payload.intent.adapterKind).toBe("linear");
@@ -906,7 +923,7 @@ describe("momentum intent get", () => {
     expect(payload.intent.payload).toEqual({ goalState: "completed" });
     expect(payload.intent.reason).toBe("satisfied reason");
     expect(payload.intent.idempotencyKey).toBe(
-      "linear:ext-42:source_satisfied:goal-1"
+      "linear:ext-42:source_satisfied:goal-1",
     );
   });
 
@@ -917,10 +934,16 @@ describe("momentum intent get", () => {
       targetExternalId: "ext-77",
       intentType: "source_satisfied",
       reason: "satisfied",
-      idempotencyKey: "linear:ext-77:source_satisfied:goal-1"
+      idempotencyKey: "linear:ext-77:source_satisfied:goal-1",
     });
 
-    const result = await run(["intent", "get", intentId, "--data-dir", dataDir]);
+    const result = await run([
+      "intent",
+      "get",
+      intentId,
+      "--data-dir",
+      dataDir,
+    ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain(`Update intent: ${intentId}`);
     expect(result.stdout).toContain("Adapter: linear");
@@ -938,7 +961,7 @@ describe("momentum intent get", () => {
       targetExternalId: "ext-no-audits",
       intentType: "source_satisfied",
       reason: "no attempts yet",
-      idempotencyKey: "linear:ext-no-audits:source_satisfied:goal-1"
+      idempotencyKey: "linear:ext-no-audits:source_satisfied:goal-1",
     });
 
     const result = await run([
@@ -947,7 +970,7 @@ describe("momentum intent get", () => {
       intentId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -968,16 +991,16 @@ describe("momentum intent get", () => {
         succeeded: 0,
         failed: 0,
         blocked: 0,
-        audit_incomplete: 0
+        audit_incomplete: 0,
       },
-      latestAttempt: null
+      latestAttempt: null,
     });
 
     const text = await run(["intent", "get", intentId, "--data-dir", dataDir]);
     expect(text.code).toBe(0);
     expect(text.stdout).toContain("External apply state: idle");
     expect(text.stdout).toContain(
-      "External apply attempts: total=0 succeeded=0 failed=0 claimed=0 blocked=0 audit_incomplete=0"
+      "External apply attempts: total=0 succeeded=0 failed=0 claimed=0 blocked=0 audit_incomplete=0",
     );
     expect(text.stdout).toContain("External apply latest attempt: (none)");
   });
@@ -989,7 +1012,7 @@ describe("momentum intent get", () => {
       targetExternalId: "NGX-applied",
       intentType: "source_satisfied",
       reason: "verified done",
-      idempotencyKey: "linear:NGX-applied:source_satisfied:goal-1"
+      idempotencyKey: "linear:NGX-applied:source_satisfied:goal-1",
     });
     runFailedAttempt(dataDir, intentId, 10);
     runFinalizedAttempt(dataDir, intentId, "succeeded", 20, {
@@ -997,8 +1020,8 @@ describe("momentum intent get", () => {
       resultMessage: "linear comment created",
       externalRefs: {
         commentId: "linear_comment_99",
-        commentUrl: "https://linear.app/example/comment/99"
-      }
+        commentUrl: "https://linear.app/example/comment/99",
+      },
     });
 
     const result = await run([
@@ -1007,7 +1030,7 @@ describe("momentum intent get", () => {
       intentId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -1032,28 +1055,28 @@ describe("momentum intent get", () => {
     expect(payload.externalApply.totalAttempts).toBe(2);
     expect(payload.externalApply.counts).toMatchObject({
       succeeded: 1,
-      failed: 1
+      failed: 1,
     });
     expect(payload.externalApply.latestAttempt.lifecycleState).toBe(
-      "succeeded"
+      "succeeded",
     );
     expect(payload.externalApply.latestAttempt.resultStatus).toBe("succeeded");
     expect(payload.externalApply.latestAttempt.resultCode).toBe(
-      "comment_created"
+      "comment_created",
     );
     expect(payload.externalApply.latestAttempt.externalRefs.commentId).toBe(
-      "linear_comment_99"
+      "linear_comment_99",
     );
     expect(payload.externalApply.latestAttempt.externalRefs.commentUrl).toBe(
-      "https://linear.app/example/comment/99"
+      "https://linear.app/example/comment/99",
     );
     expect(
       payload.externalApply.latestAttempt.idempotencyMarker.startsWith(
-        "momentum-intent:"
-      )
+        "momentum-intent:",
+      ),
     ).toBe(true);
     expect(
-      payload.externalApply.latestAttempt.idempotencyMarker.toLowerCase()
+      payload.externalApply.latestAttempt.idempotencyMarker.toLowerCase(),
     ).not.toContain("token");
 
     const text = await run(["intent", "get", intentId, "--data-dir", dataDir]);
@@ -1062,7 +1085,7 @@ describe("momentum intent get", () => {
     expect(text.stdout).toContain("succeeded=1 failed=1");
     expect(text.stdout).toContain(" succeeded (result=succeeded");
     expect(text.stdout).toContain(
-      "External apply refs: comment=linear_comment_99"
+      "External apply refs: comment=linear_comment_99",
     );
   });
 
@@ -1073,11 +1096,11 @@ describe("momentum intent get", () => {
       targetExternalId: "NGX-failed",
       intentType: "source_satisfied",
       reason: "failed once",
-      idempotencyKey: "linear:NGX-failed:source_satisfied:goal-1"
+      idempotencyKey: "linear:NGX-failed:source_satisfied:goal-1",
     });
     runFinalizedAttempt(dataDir, intentId, "failed", 30, {
       resultCode: "write_rejected",
-      resultMessage: "Linear rejected the mutation"
+      resultMessage: "Linear rejected the mutation",
     });
 
     const result = await run([
@@ -1086,7 +1109,7 @@ describe("momentum intent get", () => {
       intentId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -1110,7 +1133,7 @@ describe("momentum intent get", () => {
     expect(payload.externalApply.latestAttempt.lifecycleState).toBe("failed");
     expect(payload.externalApply.latestAttempt.resultStatus).toBe("failed");
     expect(payload.externalApply.latestAttempt.resultCode).toBe(
-      "write_rejected"
+      "write_rejected",
     );
   });
 
@@ -1121,15 +1144,15 @@ describe("momentum intent get", () => {
       targetExternalId: "NGX-blocked",
       intentType: "source_satisfied",
       reason: "external write but audit finalize failed",
-      idempotencyKey: "linear:NGX-blocked:source_satisfied:goal-1"
+      idempotencyKey: "linear:NGX-blocked:source_satisfied:goal-1",
     });
     runFinalizedAttempt(dataDir, intentId, "audit_incomplete", 40, {
       resultCode: "audit_finalize_failed",
       resultMessage: "external write succeeded but audit finalize did not",
       externalRefs: {
         commentId: "linear_comment_late",
-        commentUrl: "https://linear.app/example/comment/late"
-      }
+        commentUrl: "https://linear.app/example/comment/late",
+      },
     });
 
     const result = await run([
@@ -1138,7 +1161,7 @@ describe("momentum intent get", () => {
       intentId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -1159,13 +1182,13 @@ describe("momentum intent get", () => {
     expect(payload.externalApply.totalAttempts).toBe(1);
     expect(payload.externalApply.counts.audit_incomplete).toBe(1);
     expect(payload.externalApply.latestAttempt.lifecycleState).toBe(
-      "audit_incomplete"
+      "audit_incomplete",
     );
     expect(payload.externalApply.latestAttempt.resultCode).toBe(
-      "audit_finalize_failed"
+      "audit_finalize_failed",
     );
     expect(payload.externalApply.latestAttempt.externalRefs.commentId).toBe(
-      "linear_comment_late"
+      "linear_comment_late",
     );
 
     const text = await run(["intent", "get", intentId, "--data-dir", dataDir]);
@@ -1173,7 +1196,7 @@ describe("momentum intent get", () => {
     expect(text.stdout).toContain("External apply state: blocked");
     expect(text.stdout).toContain("audit_incomplete=1");
     expect(text.stdout).toContain(
-      "External apply refs: comment=linear_comment_late"
+      "External apply refs: comment=linear_comment_late",
     );
   });
 });
@@ -1181,7 +1204,7 @@ describe("momentum intent get", () => {
 function baseClaim(
   intentId: string,
   now: number,
-  overrides: Partial<ClaimIntentApplyInput> = {}
+  overrides: Partial<ClaimIntentApplyInput> = {},
 ): ClaimIntentApplyInput {
   return {
     intentId,
@@ -1191,7 +1214,7 @@ function baseClaim(
       externalId: `NGX-${intentId}`,
       externalKey: `NGX-${intentId}`,
       url: `https://linear.app/example/issue/${intentId}`,
-      title: "Example issue"
+      title: "Example issue",
     },
     operatorReason: "verified done",
     operatorActor: "operator@example.com",
@@ -1201,18 +1224,18 @@ function baseClaim(
     previewSummary: `Linear comment on ${intentId}: source_satisfied`,
     idempotencyMarker: `momentum-intent:linear:${intentId}:deadbeef-${now}`,
     now,
-    ...overrides
+    ...overrides,
   };
 }
 
 function runFailedAttempt(
   dataDir: string,
   intentId: string,
-  now: number
+  now: number,
 ): void {
   runFinalizedAttempt(dataDir, intentId, "failed", now, {
     resultCode: "write_rejected",
-    resultMessage: "linear rejected"
+    resultMessage: "linear rejected",
   });
 }
 
@@ -1229,14 +1252,14 @@ function runFinalizedAttempt(
       commentUrl?: string | null;
       stateTransitionId?: string | null;
     };
-  } = {}
+  } = {},
 ): void {
   const db = openDb(dataDir);
   try {
     const claim = claimIntentApply(db, baseClaim(intentId, now));
     if (!claim.ok) {
       throw new Error(
-        `seed: expected claim to succeed for ${intentId}, got ${claim.code}`
+        `seed: expected claim to succeed for ${intentId}, got ${claim.code}`,
       );
     }
     const finalizeInput: Parameters<typeof finalizeIntentApply>[1] = {
@@ -1244,13 +1267,13 @@ function runFinalizedAttempt(
       lifecycleState,
       resultCode: options.resultCode ?? null,
       resultMessage: options.resultMessage ?? null,
-      now: now + 1
+      now: now + 1,
     };
     if (options.externalRefs) finalizeInput.externalRefs = options.externalRefs;
     const finalize = finalizeIntentApply(db, finalizeInput);
     if (!finalize.ok) {
       throw new Error(
-        `seed: expected finalize to succeed for ${intentId}, got ${finalize.code}`
+        `seed: expected finalize to succeed for ${intentId}, got ${finalize.code}`,
       );
     }
   } finally {
@@ -1263,20 +1286,20 @@ describe.each([
     action: "apply" as const,
     command: "intent apply",
     expectedStatus: "applied",
-    timestampKey: "appliedAt" as const
+    timestampKey: "appliedAt" as const,
   },
   {
     action: "skip" as const,
     command: "intent skip",
     expectedStatus: "skipped",
-    timestampKey: "skippedAt" as const
+    timestampKey: "skippedAt" as const,
   },
   {
     action: "cancel" as const,
     command: "intent cancel",
     expectedStatus: "canceled",
-    timestampKey: "canceledAt" as const
-  }
+    timestampKey: "canceledAt" as const,
+  },
 ])("momentum $command", ({ action, command, expectedStatus, timestampKey }) => {
   it("requires a positional <intent-id>", async () => {
     const dataDir = makeTempDir();
@@ -1287,11 +1310,11 @@ describe.each([
       "needed",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      `Missing required <intent-id> for ${command}.`
+      `Missing required <intent-id> for ${command}.`,
     );
   });
 
@@ -1306,11 +1329,11 @@ describe.each([
       "needed",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      `Unexpected argument for ${command}: extra`
+      `Unexpected argument for ${command}: extra`,
     );
   });
 
@@ -1320,7 +1343,7 @@ describe.each([
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "satisfied",
-      idempotencyKey: `linear:ext-${action}-no-reason:source_satisfied:g`
+      idempotencyKey: `linear:ext-${action}-no-reason:source_satisfied:g`,
     });
     const result = await run([
       "intent",
@@ -1328,7 +1351,7 @@ describe.each([
       intentId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -1336,7 +1359,7 @@ describe.each([
       ok: false,
       command,
       code: "reason_required",
-      intentId
+      intentId,
     });
   });
 
@@ -1346,7 +1369,7 @@ describe.each([
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "satisfied",
-      idempotencyKey: `linear:ext-${action}-ws-reason:source_satisfied:g`
+      idempotencyKey: `linear:ext-${action}-ws-reason:source_satisfied:g`,
     });
     const result = await run([
       "intent",
@@ -1356,7 +1379,7 @@ describe.each([
       "   ",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -1364,7 +1387,7 @@ describe.each([
       ok: false,
       command,
       code: "reason_required",
-      intentId
+      intentId,
     });
   });
 
@@ -1378,7 +1401,7 @@ describe.each([
       "operator decision",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -1386,7 +1409,7 @@ describe.each([
       ok: false,
       command,
       code: "intent_not_found",
-      intentId: "missing-intent"
+      intentId: "missing-intent",
     });
   });
 
@@ -1398,7 +1421,7 @@ describe.each([
       intentType: "source_satisfied",
       reason: "satisfied",
       idempotencyKey: `linear:ext-42:source_satisfied:goal-${action}`,
-      payload: { foo: "bar" }
+      payload: { foo: "bar" },
     });
 
     const result = await run([
@@ -1409,7 +1432,7 @@ describe.each([
       `operator decided to ${action}`,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -1429,7 +1452,7 @@ describe.each([
     expect(payload).toMatchObject({
       ok: true,
       command,
-      previousStatus: "pending"
+      previousStatus: "pending",
     });
     expect(payload.intent.id).toBe(intentId);
     expect(payload.intent.status).toBe(expectedStatus);
@@ -1437,7 +1460,7 @@ describe.each([
     expect(payload.intent[timestampKey]).toBeTypeOf("number");
     // Only the matching timestamp is stamped; the other two stay null.
     const others = (["appliedAt", "skippedAt", "canceledAt"] as const).filter(
-      (key) => key !== timestampKey
+      (key) => key !== timestampKey,
     );
     for (const key of others) {
       expect(payload.intent[key]).toBeNull();
@@ -1450,7 +1473,7 @@ describe.each([
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "satisfied",
-      idempotencyKey: `linear:ext-replay:source_satisfied:goal-${action}`
+      idempotencyKey: `linear:ext-replay:source_satisfied:goal-${action}`,
     });
 
     const first = await run([
@@ -1461,7 +1484,7 @@ describe.each([
       "first decision",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(first.code).toBe(0);
 
@@ -1473,7 +1496,7 @@ describe.each([
       "second decision",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(second.code).toBe(1);
     const payload = JSON.parse(second.stderr) as Record<string, unknown>;
@@ -1482,7 +1505,7 @@ describe.each([
       command,
       code: "intent_already_terminal",
       intentId,
-      currentStatus: expectedStatus
+      currentStatus: expectedStatus,
     });
   });
 
@@ -1493,7 +1516,7 @@ describe.each([
       targetExternalId: "ext-99",
       intentType: "source_satisfied",
       reason: "satisfied",
-      idempotencyKey: `linear:ext-99:source_satisfied:goal-${action}`
+      idempotencyKey: `linear:ext-99:source_satisfied:goal-${action}`,
     });
     const result = await run([
       "intent",
@@ -1502,10 +1525,12 @@ describe.each([
       "--reason",
       "operator decision",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain(`Update intent ${intentId} ${expectedStatus}`);
+    expect(result.stdout).toContain(
+      `Update intent ${intentId} ${expectedStatus}`,
+    );
     expect(result.stdout).toContain("Previous status: pending");
     expect(result.stdout).toContain(`Status: ${expectedStatus}`);
     expect(result.stdout).toContain("Decision reason: operator decision");
@@ -1526,7 +1551,7 @@ describe("momentum intent apply policy gating", () => {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "satisfied",
-      idempotencyKey: "linear:ext-policy-refuse:source_satisfied:goal-policy"
+      idempotencyKey: "linear:ext-policy-refuse:source_satisfied:goal-policy",
     });
 
     const result = await run([
@@ -1538,7 +1563,7 @@ describe("momentum intent apply policy gating", () => {
       "--external-apply",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as {
@@ -1587,11 +1612,11 @@ describe("momentum intent apply policy gating", () => {
       "--external-apply",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      "--external-apply is only supported by `momentum intent apply`."
+      "--external-apply is only supported by `momentum intent apply`.",
     );
   });
 
@@ -1601,7 +1626,7 @@ describe("momentum intent apply policy gating", () => {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "satisfied",
-      idempotencyKey: "linear:ext-policy-default:source_satisfied:goal-policy"
+      idempotencyKey: "linear:ext-policy-default:source_satisfied:goal-policy",
     });
 
     const result = await run([
@@ -1612,7 +1637,7 @@ describe("momentum intent apply policy gating", () => {
       "operator decision",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -1636,13 +1661,13 @@ describe("momentum intent apply policy gating", () => {
   it("surfaces source=momentum_policy when --repo points at a MOMENTUM.md that sets intent_apply_policy", async () => {
     const dataDir = makeTempDir();
     const repo = makeRepoWithPolicy(
-      `---\nintent_apply_policy: external_apply_allowed\n---\nrepo policy\n`
+      `---\nintent_apply_policy: external_apply_allowed\n---\nrepo policy\n`,
     );
     const intentId = seedIntent(dataDir, {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "satisfied",
-      idempotencyKey: "linear:ext-policy-repo:source_satisfied:goal-policy"
+      idempotencyKey: "linear:ext-policy-repo:source_satisfied:goal-policy",
     });
 
     const result = await run([
@@ -1655,7 +1680,7 @@ describe("momentum intent apply policy gating", () => {
       repo,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -1669,13 +1694,13 @@ describe("momentum intent apply policy gating", () => {
   it("fails intent apply when an explicit repo policy is invalid", async () => {
     const dataDir = makeTempDir();
     const repo = makeRepoWithPolicy(
-      `---\nintent_apply_policy: definitely_not_valid\n---\n`
+      `---\nintent_apply_policy: definitely_not_valid\n---\n`,
     );
     const intentId = seedIntent(dataDir, {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "satisfied",
-      idempotencyKey: "linear:invalid-policy:source_satisfied:goal-policy"
+      idempotencyKey: "linear:invalid-policy:source_satisfied:goal-policy",
     });
 
     const result = await run([
@@ -1688,7 +1713,7 @@ describe("momentum intent apply policy gating", () => {
       repo,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as {
@@ -1718,7 +1743,7 @@ describe("momentum intent apply policy gating", () => {
   it("refuses --external-apply with auth_unavailable when LINEAR_API_KEY is unset", async () => {
     const dataDir = makeTempDir();
     const repo = makeRepoWithPolicy(
-      `---\nintent_apply_policy: external_apply_allowed\n---\n`
+      `---\nintent_apply_policy: external_apply_allowed\n---\n`,
     );
     const intentId = seedIntent(dataDir, {
       adapterKind: "linear",
@@ -1726,7 +1751,7 @@ describe("momentum intent apply policy gating", () => {
       intentType: "source_satisfied",
       reason: "satisfied",
       idempotencyKey:
-        "linear:ext-policy-repo-refuse:source_satisfied:goal-policy"
+        "linear:ext-policy-repo-refuse:source_satisfied:goal-policy",
     });
 
     const result = await run(
@@ -1741,9 +1766,9 @@ describe("momentum intent apply policy gating", () => {
         repo,
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
-      { LINEAR_API_KEY: "" }
+      { LINEAR_API_KEY: "" },
     );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as {
@@ -1758,14 +1783,14 @@ describe("momentum intent apply policy gating", () => {
   it("surfaces policy_load_failed under --external-apply when the repo policy is invalid", async () => {
     const dataDir = makeTempDir();
     const repo = makeRepoWithPolicy(
-      `---\nintent_apply_policy: definitely_not_valid\n---\n`
+      `---\nintent_apply_policy: definitely_not_valid\n---\n`,
     );
     const intentId = seedIntent(dataDir, {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "satisfied",
       idempotencyKey:
-        "linear:invalid-policy-external:source_satisfied:goal-policy"
+        "linear:invalid-policy-external:source_satisfied:goal-policy",
     });
 
     const result = await run([
@@ -1779,7 +1804,7 @@ describe("momentum intent apply policy gating", () => {
       repo,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as {
@@ -1797,7 +1822,7 @@ describe("momentum intent apply policy gating", () => {
       adapterKind: "linear",
       intentType: "source_satisfied",
       reason: "satisfied",
-      idempotencyKey: "linear:ext-policy-text:source_satisfied:goal-policy"
+      idempotencyKey: "linear:ext-policy-text:source_satisfied:goal-policy",
     });
 
     const result = await run([
@@ -1807,11 +1832,11 @@ describe("momentum intent apply policy gating", () => {
       "--reason",
       "operator decision",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain(
-      "Apply policy: create_intents_only (builtin_default)"
+      "Apply policy: create_intents_only (builtin_default)",
     );
     expect(result.stdout).toContain("external_apply_allowed");
   });
@@ -1819,14 +1844,14 @@ describe("momentum intent apply policy gating", () => {
   it("performs --external-apply when policy and auth are present and renders external refs", async () => {
     const dataDir = makeTempDir();
     const repo = makeRepoWithPolicy(
-      `---\nintent_apply_policy: external_apply_allowed\n---\n`
+      `---\nintent_apply_policy: external_apply_allowed\n---\n`,
     );
     const intentId = seedIntent(dataDir, {
       adapterKind: "linear",
       targetExternalId: "linear_issue_ok",
       intentType: "source_satisfied",
       reason: "satisfied",
-      idempotencyKey: "linear:ext-policy-ok:source_satisfied:goal-policy"
+      idempotencyKey: "linear:ext-policy-ok:source_satisfied:goal-policy",
     });
 
     const factoryCalls: Array<{ apiKey: string | null }> = [];
@@ -1843,7 +1868,7 @@ describe("momentum intent apply policy gating", () => {
         repo,
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
       { LINEAR_API_KEY: "test-key" },
       {
@@ -1852,7 +1877,7 @@ describe("momentum intent apply policy gating", () => {
           return {
             apply: async (clientInput) => {
               applyCalls.push({
-                idempotencyMarker: clientInput.preview.idempotencyMarker
+                idempotencyMarker: clientInput.preview.idempotencyMarker,
               });
               return {
                 ok: true as const,
@@ -1860,22 +1885,22 @@ describe("momentum intent apply policy gating", () => {
                 issue: {
                   id: "linear_issue_ok",
                   key: "NGX-OK",
-                  url: "https://linear.app/example/issue/NGX-OK"
+                  url: "https://linear.app/example/issue/NGX-OK",
                 },
                 comment: {
                   id: "linear_comment_1",
-                  url: "https://linear.app/example/issue/NGX-OK#comment-1"
+                  url: "https://linear.app/example/issue/NGX-OK#comment-1",
                 },
                 status: {
                   transitioned: false,
                   previousStateId: null,
                   previousStateName: null,
                   nextStateId: null,
-                  nextStateName: null
+                  nextStateName: null,
                 },
-                idempotencyMarker: clientInput.preview.idempotencyMarker
+                idempotencyMarker: clientInput.preview.idempotencyMarker,
               };
-            }
+            },
           };
         },
         buildLinearIssueRefreshClient: () => ({
@@ -1887,26 +1912,26 @@ describe("momentum intent apply policy gating", () => {
               title: "External apply issue",
               url: "https://linear.app/example/issue/NGX-OK",
               updatedAt: "2026-05-21T00:00:00.000Z",
-              state: { id: "state-done", name: "Done" }
+              state: { id: "state-done", name: "Done" },
             },
             comments: [
               {
                 id: "linear_comment_1",
                 body: `Applied ${applyCalls[0]?.idempotencyMarker ?? ""}`,
-                url: "https://linear.app/example/issue/NGX-OK#comment-1"
-              }
-            ]
-          })
-        })
-      }
+                url: "https://linear.app/example/issue/NGX-OK#comment-1",
+              },
+            ],
+          }),
+        }),
+      },
     );
     expect(result.code).toBe(0);
     expect(factoryCalls).toHaveLength(1);
     expect(factoryCalls[0]?.apiKey).toBe("test-key");
     expect(applyCalls).toHaveLength(1);
-    expect(applyCalls[0]?.idempotencyMarker.startsWith("momentum-intent:")).toBe(
-      true
-    );
+    expect(
+      applyCalls[0]?.idempotencyMarker.startsWith("momentum-intent:"),
+    ).toBe(true);
 
     const payload = JSON.parse(result.stdout) as {
       ok: true;
@@ -1940,7 +1965,7 @@ describe("momentum intent apply policy gating", () => {
     expect(payload.applyPolicy.source).toBe("momentum_policy");
     expect(payload.applyPolicy.externalApplyPerformed).toBe(true);
     expect(payload.applyPolicy.note).toBe(
-      "External apply was performed through the configured tracker adapter."
+      "External apply was performed through the configured tracker adapter.",
     );
     expect(payload.applyPolicy.note).not.toContain("pass --external-apply");
     expect(payload.externalApply.adapterKind).toBe("linear");
@@ -1951,14 +1976,16 @@ describe("momentum intent apply policy gating", () => {
     expect(payload.externalApply.external?.commentId).toBe("linear_comment_1");
     expect(payload.externalApply.external?.alreadyApplied).toBe(false);
     expect(payload.externalApply.external?.idempotencyMarker).toMatch(
-      /^momentum-intent:linear:/
+      /^momentum-intent:linear:/,
     );
     expect(payload.externalApply.reconcile.status).toBe("success");
 
     const db = openDb(dataDir);
     try {
       const row = db
-        .prepare("SELECT status, decision_reason FROM update_intents WHERE id = ?")
+        .prepare(
+          "SELECT status, decision_reason FROM update_intents WHERE id = ?",
+        )
         .get(intentId) as { status: string; decision_reason: string };
       expect(row.status).toBe("applied");
       expect(row.decision_reason).toBe("external_apply: operator decision");
@@ -1970,14 +1997,14 @@ describe("momentum intent apply policy gating", () => {
   it("reports already-applied external apply success as no tracker write", async () => {
     const dataDir = makeTempDir();
     const repo = makeRepoWithPolicy(
-      `---\nintent_apply_policy: external_apply_allowed\n---\n`
+      `---\nintent_apply_policy: external_apply_allowed\n---\n`,
     );
     const intentId = seedIntent(dataDir, {
       adapterKind: "linear",
       targetExternalId: "linear_issue_replay",
       intentType: "source_satisfied",
       reason: "satisfied",
-      idempotencyKey: "linear:ext-policy-replay:source_satisfied:goal-policy"
+      idempotencyKey: "linear:ext-policy-replay:source_satisfied:goal-policy",
     });
 
     const applyCalls: Array<{ idempotencyMarker: string }> = [];
@@ -1993,14 +2020,14 @@ describe("momentum intent apply policy gating", () => {
         repo,
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
       { LINEAR_API_KEY: "test-key" },
       {
         buildLinearExternalUpdateClient: () => ({
           apply: async (clientInput) => {
             applyCalls.push({
-              idempotencyMarker: clientInput.preview.idempotencyMarker
+              idempotencyMarker: clientInput.preview.idempotencyMarker,
             });
             return {
               ok: true as const,
@@ -2008,22 +2035,22 @@ describe("momentum intent apply policy gating", () => {
               issue: {
                 id: "linear_issue_replay",
                 key: "NGX-REPLAY",
-                url: "https://linear.app/example/issue/NGX-REPLAY"
+                url: "https://linear.app/example/issue/NGX-REPLAY",
               },
               comment: {
                 id: "linear_comment_replay",
-                url: "https://linear.app/example/issue/NGX-REPLAY#comment-replay"
+                url: "https://linear.app/example/issue/NGX-REPLAY#comment-replay",
               },
               status: {
                 transitioned: false,
                 previousStateId: null,
                 previousStateName: null,
                 nextStateId: null,
-                nextStateName: null
+                nextStateName: null,
               },
-              idempotencyMarker: clientInput.preview.idempotencyMarker
+              idempotencyMarker: clientInput.preview.idempotencyMarker,
             };
-          }
+          },
         }),
         buildLinearIssueRefreshClient: () => ({
           refresh: async () => ({
@@ -2034,18 +2061,18 @@ describe("momentum intent apply policy gating", () => {
               title: "External apply replay issue",
               url: "https://linear.app/example/issue/NGX-REPLAY",
               updatedAt: "2026-05-21T00:00:00.000Z",
-              state: { id: "state-done", name: "Done" }
+              state: { id: "state-done", name: "Done" },
             },
             comments: [
               {
                 id: "linear_comment_replay",
                 body: `Applied ${applyCalls[0]?.idempotencyMarker ?? ""}`,
-                url: "https://linear.app/example/issue/NGX-REPLAY#comment-replay"
-              }
-            ]
-          })
-        })
-      }
+                url: "https://linear.app/example/issue/NGX-REPLAY#comment-replay",
+              },
+            ],
+          }),
+        }),
+      },
     );
 
     expect(result.code).toBe(0);
@@ -2066,7 +2093,7 @@ describe("momentum intent apply policy gating", () => {
     expect(payload.ok).toBe(true);
     expect(payload.applyPolicy.externalApplyPerformed).toBe(false);
     expect(payload.applyPolicy.note).toBe(
-      "External apply was already present; no tracker write was performed."
+      "External apply was already present; no tracker write was performed.",
     );
     expect(payload.externalApply.external?.alreadyApplied).toBe(true);
     expect(payload.externalApply.external?.statusTransitioned).toBe(false);
@@ -2076,7 +2103,7 @@ describe("momentum intent apply policy gating", () => {
   it("renders already-applied external apply text as no tracker write", async () => {
     const dataDir = makeTempDir();
     const repo = makeRepoWithPolicy(
-      `---\nintent_apply_policy: external_apply_allowed\n---\n`
+      `---\nintent_apply_policy: external_apply_allowed\n---\n`,
     );
     const intentId = seedIntent(dataDir, {
       adapterKind: "linear",
@@ -2084,7 +2111,7 @@ describe("momentum intent apply policy gating", () => {
       intentType: "source_satisfied",
       reason: "satisfied",
       idempotencyKey:
-        "linear:ext-policy-text-replay:source_satisfied:goal-policy"
+        "linear:ext-policy-text-replay:source_satisfied:goal-policy",
     });
 
     const applyCalls: Array<{ idempotencyMarker: string }> = [];
@@ -2099,14 +2126,14 @@ describe("momentum intent apply policy gating", () => {
         "--repo",
         repo,
         "--data-dir",
-        dataDir
+        dataDir,
       ],
       { LINEAR_API_KEY: "test-key" },
       {
         buildLinearExternalUpdateClient: () => ({
           apply: async (clientInput) => {
             applyCalls.push({
-              idempotencyMarker: clientInput.preview.idempotencyMarker
+              idempotencyMarker: clientInput.preview.idempotencyMarker,
             });
             return {
               ok: true as const,
@@ -2114,22 +2141,22 @@ describe("momentum intent apply policy gating", () => {
               issue: {
                 id: "linear_issue_text_replay",
                 key: "NGX-TEXT",
-                url: "https://linear.app/example/issue/NGX-TEXT"
+                url: "https://linear.app/example/issue/NGX-TEXT",
               },
               comment: {
                 id: "linear_comment_text_replay",
-                url: "https://linear.app/example/issue/NGX-TEXT#comment-replay"
+                url: "https://linear.app/example/issue/NGX-TEXT#comment-replay",
               },
               status: {
                 transitioned: false,
                 previousStateId: null,
                 previousStateName: null,
                 nextStateId: null,
-                nextStateName: null
+                nextStateName: null,
               },
-              idempotencyMarker: clientInput.preview.idempotencyMarker
+              idempotencyMarker: clientInput.preview.idempotencyMarker,
             };
-          }
+          },
         }),
         buildLinearIssueRefreshClient: () => ({
           refresh: async () => ({
@@ -2140,23 +2167,23 @@ describe("momentum intent apply policy gating", () => {
               title: "External apply replay issue",
               url: "https://linear.app/example/issue/NGX-TEXT",
               updatedAt: "2026-05-21T00:00:00.000Z",
-              state: { id: "state-done", name: "Done" }
+              state: { id: "state-done", name: "Done" },
             },
             comments: [
               {
                 id: "linear_comment_text_replay",
                 body: `Applied ${applyCalls[0]?.idempotencyMarker ?? ""}`,
-                url: "https://linear.app/example/issue/NGX-TEXT#comment-replay"
-              }
-            ]
-          })
-        })
-      }
+                url: "https://linear.app/example/issue/NGX-TEXT#comment-replay",
+              },
+            ],
+          }),
+        }),
+      },
     );
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain(
-      "External apply was already present; no tracker write was performed."
+      "External apply was already present; no tracker write was performed.",
     );
     expect(result.stdout).toContain("External apply: already present");
     expect(result.stdout).not.toContain("External apply: performed");
@@ -2167,14 +2194,14 @@ describe("momentum intent apply policy gating", () => {
   it("surfaces write_rejected from the linear client and leaves the intent pending", async () => {
     const dataDir = makeTempDir();
     const repo = makeRepoWithPolicy(
-      `---\nintent_apply_policy: external_apply_allowed\n---\n`
+      `---\nintent_apply_policy: external_apply_allowed\n---\n`,
     );
     const intentId = seedIntent(dataDir, {
       adapterKind: "linear",
       targetExternalId: "linear_issue_reject",
       intentType: "source_satisfied",
       reason: "satisfied",
-      idempotencyKey: "linear:ext-policy-reject:source_satisfied:goal-policy"
+      idempotencyKey: "linear:ext-policy-reject:source_satisfied:goal-policy",
     });
 
     const result = await runWithDeps(
@@ -2189,7 +2216,7 @@ describe("momentum intent apply policy gating", () => {
         repo,
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
       { LINEAR_API_KEY: "test-key" },
       {
@@ -2197,10 +2224,10 @@ describe("momentum intent apply policy gating", () => {
           apply: async () => ({
             ok: false as const,
             code: "write_rejected" as const,
-            error: "linear server rejected the comment create"
-          })
-        })
-      }
+            error: "linear server rejected the comment create",
+          }),
+        }),
+      },
     );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as {
@@ -2211,7 +2238,7 @@ describe("momentum intent apply policy gating", () => {
     expect(payload.code).toBe("write_rejected");
     expect(payload.applyPolicy.externalApplyPerformed).toBe(false);
     expect(payload.applyPolicy.note).toContain(
-      "External apply was attempted and refused"
+      "External apply was attempted and refused",
     );
     expect(payload.applyPolicy.note).not.toContain("pass --external-apply");
     expect(payload.externalApply.auditId).toBeTruthy();
@@ -2236,7 +2263,7 @@ describe("momentum intent dispatch", () => {
       "bogus",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("Unknown intent subcommand: bogus");

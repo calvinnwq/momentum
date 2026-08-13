@@ -136,25 +136,25 @@ function seedGoal(
   }
 }
 
-function seedSourceItem(
+function seedTrackerItem(
   dataDir: string,
-  sourceItemId: string,
+  trackerItemId: string,
   goalId: string | null = null,
 ): void {
   const db = openDb(dataDir);
   try {
     db.prepare(
-      `INSERT INTO source_items
+      `INSERT INTO tracker_items
          (id, adapter_kind, external_id, external_key, url, title,
           status, metadata_json, last_observed_at, goal_id,
           created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      sourceItemId,
+      trackerItemId,
       "linear",
-      `ext-${sourceItemId}`,
-      `KEY-${sourceItemId}`,
-      `https://linear.app/example/issue/${sourceItemId}`,
+      `ext-${trackerItemId}`,
+      `KEY-${trackerItemId}`,
+      `https://linear.app/example/issue/${trackerItemId}`,
       "Workflow evidence ingestion",
       "open",
       "{}",
@@ -709,7 +709,7 @@ describe("momentum evidence ingest", () => {
     const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
     const runDir = buildWorkflowFixture(workflowRoot, "cwfp-intentgoal000");
     seedGoal(dataDir, "g-evidence-intent", "completed");
-    seedSourceItem(dataDir, "si-intent-goal", "g-evidence-intent");
+    seedTrackerItem(dataDir, "si-intent-goal", "g-evidence-intent");
 
     const result = await run([
       "evidence",
@@ -727,7 +727,7 @@ describe("momentum evidence ingest", () => {
       counts: { intentsCreated: number; intentsReplayed: number };
       intentEvaluations: Array<{
         outcome: string;
-        intent?: { status: string; sourceItemId: string | null };
+        intent?: { status: string; trackerItemId: string | null };
       }>;
     };
     expect(payload.counts.intentsCreated).toBe(1);
@@ -735,7 +735,7 @@ describe("momentum evidence ingest", () => {
     expect(payload.intentEvaluations[0]?.outcome).toBe("intent_created");
     expect(payload.intentEvaluations[0]?.intent).toMatchObject({
       status: "pending",
-      sourceItemId: "si-intent-goal",
+      trackerItemId: "si-intent-goal",
     });
 
     const db = openDb(dataDir);
@@ -745,7 +745,7 @@ describe("momentum evidence ingest", () => {
         goalId: "g-evidence-intent",
       });
       expect(intents).toHaveLength(1);
-      expect(intents[0]?.sourceItemId).toBe("si-intent-goal");
+      expect(intents[0]?.trackerItemId).toBe("si-intent-goal");
       expect(intents[0]?.intentType).toBe("source_satisfied");
     } finally {
       db.close();
@@ -757,8 +757,8 @@ describe("momentum evidence ingest", () => {
     const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
     const runDir = buildWorkflowFixture(workflowRoot, "cwfp-intentmulti00");
     seedGoal(dataDir, "g-evidence-multi", "completed");
-    seedSourceItem(dataDir, "si-intent-a", "g-evidence-multi");
-    seedSourceItem(dataDir, "si-intent-b", "g-evidence-multi");
+    seedTrackerItem(dataDir, "si-intent-a", "g-evidence-multi");
+    seedTrackerItem(dataDir, "si-intent-b", "g-evidence-multi");
 
     const result = await run([
       "evidence",
@@ -776,7 +776,7 @@ describe("momentum evidence ingest", () => {
       counts: { intentsCreated: number };
       intentEvaluations: Array<{
         outcome: string;
-        intent?: { sourceItemId: string | null };
+        intent?: { trackerItemId: string | null };
       }>;
     };
     expect(payload.counts.intentsCreated).toBe(2);
@@ -786,7 +786,7 @@ describe("momentum evidence ingest", () => {
     ]);
     expect(
       payload.intentEvaluations
-        .map((entry) => entry.intent?.sourceItemId)
+        .map((entry) => entry.intent?.trackerItemId)
         .sort(),
     ).toEqual(["si-intent-a", "si-intent-b"]);
   });
@@ -796,15 +796,15 @@ describe("momentum evidence ingest", () => {
     const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
     const runDir = buildWorkflowFixture(workflowRoot, "cwfp-intentpartial");
     seedGoal(dataDir, "g-evidence-partial", "completed");
-    seedSourceItem(dataDir, "si-covered", "g-evidence-partial");
-    seedSourceItem(dataDir, "si-uncovered", "g-evidence-partial");
+    seedTrackerItem(dataDir, "si-covered", "g-evidence-partial");
+    seedTrackerItem(dataDir, "si-uncovered", "g-evidence-partial");
 
     const result = await run([
       "evidence",
       "ingest",
       "--path",
       runDir,
-      "--source-item",
+      "--tracker-item",
       "si-covered",
       "--data-dir",
       dataDir,
@@ -815,7 +815,7 @@ describe("momentum evidence ingest", () => {
       counts: { intentsCreated: number; intentWarnings: number };
       intentEvaluations: Array<{
         outcome: string;
-        warning?: { sourceItemId: string };
+        warning?: { trackerItemId: string };
       }>;
     };
     expect(payload.counts.intentsCreated).toBe(1);
@@ -824,7 +824,7 @@ describe("momentum evidence ingest", () => {
       "intent_created",
       "evidence_insufficient",
     ]);
-    expect(payload.intentEvaluations[1]?.warning?.sourceItemId).toBe(
+    expect(payload.intentEvaluations[1]?.warning?.trackerItemId).toBe(
       "si-uncovered",
     );
   });
@@ -862,7 +862,7 @@ describe("momentum evidence ingest", () => {
     }
   });
 
-  it("rejects --source-item pointing at a missing source item before parsing", async () => {
+  it("rejects --tracker-item pointing at a missing source item before parsing", async () => {
     const dataDir = makeTempDir();
     const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
     const runDir = buildWorkflowFixture(workflowRoot, "cwfp-source0missing");
@@ -872,7 +872,7 @@ describe("momentum evidence ingest", () => {
       "ingest",
       "--path",
       runDir,
-      "--source-item",
+      "--tracker-item",
       "missing-item",
       "--data-dir",
       dataDir,
@@ -883,8 +883,8 @@ describe("momentum evidence ingest", () => {
     expect(payload).toMatchObject({
       ok: false,
       command: "evidence ingest",
-      code: "source_item_not_found",
-      sourceItemId: "missing-item",
+      code: "tracker_item_not_found",
+      trackerItemId: "missing-item",
     });
 
     const db = openDb(dataDir);
@@ -895,18 +895,18 @@ describe("momentum evidence ingest", () => {
     }
   });
 
-  it("links new records to a source item when --source-item is provided and exists", async () => {
+  it("links new records to a source item when --tracker-item is provided and exists", async () => {
     const dataDir = makeTempDir();
     const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
     const runDir = buildWorkflowFixture(workflowRoot, "cwfp-source0linked0");
-    seedSourceItem(dataDir, "si-1");
+    seedTrackerItem(dataDir, "si-1");
 
     const result = await run([
       "evidence",
       "ingest",
       "--path",
       runDir,
-      "--source-item",
+      "--tracker-item",
       "si-1",
       "--data-dir",
       dataDir,
@@ -914,15 +914,15 @@ describe("momentum evidence ingest", () => {
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
-      sourceItemId: string | null;
+      trackerItemId: string | null;
       counts: { created: number };
     };
-    expect(payload.sourceItemId).toBe("si-1");
+    expect(payload.trackerItemId).toBe("si-1");
     expect(payload.counts.created).toBe(5);
 
     const db = openDb(dataDir);
     try {
-      const records = listEvidenceRecords(db, { sourceItemId: "si-1" });
+      const records = listEvidenceRecords(db, { trackerItemId: "si-1" });
       expect(records.length).toBe(5);
     } finally {
       db.close();
@@ -934,14 +934,14 @@ describe("momentum evidence ingest", () => {
     const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
     const runDir = buildWorkflowFixture(workflowRoot, "cwfp-intentsource00");
     seedGoal(dataDir, "g-source-intent", "completed");
-    seedSourceItem(dataDir, "si-intent-source", "g-source-intent");
+    seedTrackerItem(dataDir, "si-intent-source", "g-source-intent");
 
     const result = await run([
       "evidence",
       "ingest",
       "--path",
       runDir,
-      "--source-item",
+      "--tracker-item",
       "si-intent-source",
       "--data-dir",
       dataDir,
@@ -952,13 +952,13 @@ describe("momentum evidence ingest", () => {
       counts: { intentsCreated: number };
       intentEvaluations: Array<{
         outcome: string;
-        verificationEvidence?: { sourceItemId: string | null };
+        verificationEvidence?: { trackerItemId: string | null };
       }>;
     };
     expect(payload.counts.intentsCreated).toBe(1);
     expect(payload.intentEvaluations[0]?.outcome).toBe("intent_created");
     expect(payload.intentEvaluations[0]?.verificationEvidence).toMatchObject({
-      sourceItemId: "si-intent-source",
+      trackerItemId: "si-intent-source",
     });
 
     const db = openDb(dataDir);
@@ -968,7 +968,7 @@ describe("momentum evidence ingest", () => {
         goalId: "g-source-intent",
       });
       expect(intents).toHaveLength(1);
-      expect(intents[0]?.sourceItemId).toBe("si-intent-source");
+      expect(intents[0]?.trackerItemId).toBe("si-intent-source");
     } finally {
       db.close();
     }

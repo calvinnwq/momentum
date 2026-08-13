@@ -9,11 +9,11 @@
  * options at construction time, and never emits a GraphQL mutation.
  *
  * The client maps:
- *   - missing/empty apiKey → `source_auth_unavailable`
- *   - missing fetch implementation → `source_config_invalid`
- *   - 401/403 and GraphQL auth-shaped responses → `source_auth_unavailable`
+ *   - missing/empty apiKey → `tracker_auth_unavailable`
+ *   - missing fetch implementation → `tracker_config_invalid`
+ *   - 401/403 and GraphQL auth-shaped responses → `tracker_auth_unavailable`
  *   - other transport, timeout, response body, GraphQL, parse, pagination, or
- *     response-shape failures → `source_adapter_threw`
+ *     response-shape failures → `tracker_adapter_threw`
  */
 
 import type {
@@ -21,7 +21,7 @@ import type {
   LinearReconciliationFetchPageInput,
   LinearReconciliationFetchPageResult,
   LinearReconciliationFilters,
-} from "../core/source/reconciliation.js";
+} from "../core/tracker/reconciliation.js";
 import {
   postLinearGraphql,
   type LinearGraphqlFetchLike,
@@ -79,7 +79,7 @@ export function buildLinearHttpReconciliationClient(
       if (apiKey.length === 0) {
         return {
           ok: false,
-          code: "source_auth_unavailable",
+          code: "tracker_auth_unavailable",
           error:
             "LINEAR_API_KEY is unset; linear reconciliation needs a credential.",
         };
@@ -87,7 +87,7 @@ export function buildLinearHttpReconciliationClient(
       if (!fetchImpl) {
         return {
           ok: false,
-          code: "source_config_invalid",
+          code: "tracker_config_invalid",
           error:
             "global fetch is unavailable; pass options.fetch to buildLinearHttpReconciliationClient.",
         };
@@ -112,38 +112,38 @@ export function buildLinearHttpReconciliationClient(
         case "timeout":
           return {
             ok: false,
-            code: "source_adapter_threw",
+            code: "tracker_adapter_threw",
             error: `linear http request timed out after ${transport.timeoutMs}ms`,
           };
         case "body_read_failed":
           return {
             ok: false,
-            code: "source_adapter_threw",
+            code: "tracker_adapter_threw",
             error: `linear http response body read failed: ${describeError(transport.error)}`,
           };
         case "request_failed":
           return {
             ok: false,
-            code: "source_adapter_threw",
+            code: "tracker_adapter_threw",
             error: `linear http transport failed: ${describeError(transport.error)}`,
           };
         case "http_error":
           if (transport.status === 401 || transport.status === 403) {
             return {
               ok: false,
-              code: "source_auth_unavailable",
+              code: "tracker_auth_unavailable",
               error: `Linear API rejected credentials (HTTP ${transport.status}).`,
             };
           }
           return {
             ok: false,
-            code: "source_adapter_threw",
+            code: "tracker_adapter_threw",
             error: `Linear API returned HTTP ${transport.status}.`,
           };
         case "invalid_json":
           return {
             ok: false,
-            code: "source_adapter_threw",
+            code: "tracker_adapter_threw",
             error: `linear http response was not JSON: ${describeError(transport.error)}`,
           };
         case "success":
@@ -176,7 +176,7 @@ function interpretLinearIssuesResponse(
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return {
       ok: false,
-      code: "source_adapter_threw",
+      code: "tracker_adapter_threw",
       error: "linear http response body was not a JSON object",
     };
   }
@@ -184,7 +184,7 @@ function interpretLinearIssuesResponse(
   if (Array.isArray(body["errors"]) && body["errors"].length > 0) {
     const code = detectErrorAuthCode(body["errors"]);
     const description = describeGraphqlErrors(body["errors"]);
-    if (code === "source_auth_unavailable") {
+    if (code === "tracker_auth_unavailable") {
       return {
         ok: false,
         code,
@@ -193,7 +193,7 @@ function interpretLinearIssuesResponse(
     }
     return {
       ok: false,
-      code: "source_adapter_threw",
+      code: "tracker_adapter_threw",
       error: `Linear GraphQL errors: ${description}`,
     };
   }
@@ -202,7 +202,7 @@ function interpretLinearIssuesResponse(
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     return {
       ok: false,
-      code: "source_adapter_threw",
+      code: "tracker_adapter_threw",
       error: "linear http response missing data.issues",
     };
   }
@@ -214,7 +214,7 @@ function interpretLinearIssuesResponse(
   ) {
     return {
       ok: false,
-      code: "source_adapter_threw",
+      code: "tracker_adapter_threw",
       error: "linear http response data.issues was not an object",
     };
   }
@@ -223,7 +223,7 @@ function interpretLinearIssuesResponse(
   if (!Array.isArray(nodes)) {
     return {
       ok: false,
-      code: "source_adapter_threw",
+      code: "tracker_adapter_threw",
       error: "linear http response data.issues.nodes was not an array",
     };
   }
@@ -252,7 +252,7 @@ function extractNextCursor(pageInfo: Record<string, unknown>): string | null {
 
 function detectErrorAuthCode(
   errors: unknown[],
-): "source_auth_unavailable" | null {
+): "tracker_auth_unavailable" | null {
   for (const entry of errors) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
     const record = entry as Record<string, unknown>;
@@ -262,14 +262,14 @@ function detectErrorAuthCode(
         ? (extensions as Record<string, unknown>)["code"]
         : undefined;
     if (typeof code === "string" && /AUTH/i.test(code)) {
-      return "source_auth_unavailable";
+      return "tracker_auth_unavailable";
     }
     const message = record["message"];
     if (
       typeof message === "string" &&
       /authentic|unauthor|forbid/i.test(message)
     ) {
-      return "source_auth_unavailable";
+      return "tracker_auth_unavailable";
     }
   }
   return null;

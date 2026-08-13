@@ -7,13 +7,13 @@ import { openDb } from "../src/adapters/db.js";
 import {
   POST_APPLY_RECONCILE_OUTCOME_CODES,
   reconcileAfterExternalApply,
-  type PostApplyReconcileClient
+  type PostApplyReconcileClient,
 } from "../src/core/intent/post-apply-reconcile.js";
 import {
-  getSourceItemByAdapterExternalId,
-  listSourceSnapshotsForItem,
-  upsertSourceItem
-} from "../src/core/source/items.js";
+  getTrackerItemByAdapterExternalId,
+  listTrackerSnapshotsForItem,
+  upsertTrackerItem,
+} from "../src/core/tracker/items.js";
 
 const tempRoots: string[] = [];
 
@@ -38,7 +38,7 @@ function buildIssueRaw(overrides: Record<string, unknown> = {}): unknown {
     title: "Example issue",
     updatedAt: "2025-06-01T12:00:00.000Z",
     state: { id: "state-done", name: "Done" },
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -47,7 +47,7 @@ type FakeClientCall = {
 };
 
 function buildFakeClient(
-  responses: Array<Awaited<ReturnType<PostApplyReconcileClient["refresh"]>>>
+  responses: Array<Awaited<ReturnType<PostApplyReconcileClient["refresh"]>>>,
 ): { client: PostApplyReconcileClient; calls: FakeClientCall[] } {
   const calls: FakeClientCall[] = [];
   let cursor = 0;
@@ -57,11 +57,11 @@ function buildFakeClient(
       const next = responses[cursor++];
       if (!next) {
         throw new Error(
-          `fake refresh client ran out of responses on call #${calls.length}`
+          `fake refresh client ran out of responses on call #${calls.length}`,
         );
       }
       return next;
-    }
+    },
   };
   return { client, calls };
 }
@@ -76,7 +76,7 @@ describe("POST_APPLY_RECONCILE_OUTCOME_CODES", () => {
       "mismatch_persists",
       "refresh_failed",
       "post_apply_reconcile_failed",
-      "targeted_refresh_unsupported"
+      "targeted_refresh_unsupported",
     ]);
   });
 });
@@ -89,19 +89,19 @@ describe("reconcileAfterExternalApply — targeted single-issue scope", () => {
         {
           ok: true,
           issue: buildIssueRaw(),
-          comments: [{ id: "c-1", body: `Applied via ${MARKER}`, url: null }]
-        }
+          comments: [{ id: "c-1", body: `Applied via ${MARKER}`, url: null }],
+        },
       ]);
       const outcome = await reconcileAfterExternalApply({
         db,
         adapterKind: "linear",
         externalId: "linear-issue-1",
         idempotencyMarker: MARKER,
-        client
+        client,
       });
       expect(outcome.code).toBe("success");
       expect(calls).toEqual([
-        { target: { kind: "id", value: "linear-issue-1" } }
+        { target: { kind: "id", value: "linear-issue-1" } },
       ]);
     } finally {
       db.close();
@@ -110,12 +110,12 @@ describe("reconcileAfterExternalApply — targeted single-issue scope", () => {
 });
 
 describe("reconcileAfterExternalApply — success path", () => {
-  it("upserts the SourceItem, records a snapshot, and returns success", async () => {
+  it("upserts the TrackerItem, records a snapshot, and returns success", async () => {
     const db = openDb(makeTempDir());
     try {
       // Seed a stale source item with an old observedAt to verify the upsert
       // updates the row rather than creating a duplicate.
-      upsertSourceItem(db, {
+      upsertTrackerItem(db, {
         adapterKind: "linear",
         externalId: "linear-issue-1",
         externalKey: "NGX-1",
@@ -123,15 +123,15 @@ describe("reconcileAfterExternalApply — success path", () => {
         title: "Old title",
         status: "Todo",
         metadata: {},
-        observedAt: 1000
+        observedAt: 1000,
       });
 
       const { client } = buildFakeClient([
         {
           ok: true,
           issue: buildIssueRaw({ title: "Refreshed title" }),
-          comments: [{ id: "c-1", body: `Done ${MARKER}`, url: null }]
-        }
+          comments: [{ id: "c-1", body: `Done ${MARKER}`, url: null }],
+        },
       ]);
 
       const outcome = await reconcileAfterExternalApply({
@@ -139,22 +139,22 @@ describe("reconcileAfterExternalApply — success path", () => {
         adapterKind: "linear",
         externalId: "linear-issue-1",
         idempotencyMarker: MARKER,
-        client
+        client,
       });
 
       expect(outcome.code).toBe("success");
-      expect(outcome.sourceItemId).toBeTruthy();
+      expect(outcome.trackerItemId).toBeTruthy();
       expect(outcome.snapshotId).toBeTruthy();
 
-      const refreshed = getSourceItemByAdapterExternalId(
+      const refreshed = getTrackerItemByAdapterExternalId(
         db,
         "linear",
-        "linear-issue-1"
+        "linear-issue-1",
       );
       expect(refreshed?.title).toBe("Refreshed title");
       expect(refreshed?.status).toBe("Done");
 
-      const snapshots = listSourceSnapshotsForItem(db, refreshed!.id);
+      const snapshots = listTrackerSnapshotsForItem(db, refreshed!.id);
       expect(snapshots.length).toBeGreaterThanOrEqual(1);
     } finally {
       db.close();
@@ -170,15 +170,15 @@ describe("reconcileAfterExternalApply — mismatch outcomes", () => {
         {
           ok: true,
           issue: buildIssueRaw(),
-          comments: [{ id: "c-1", body: "unrelated comment", url: null }]
-        }
+          comments: [{ id: "c-1", body: "unrelated comment", url: null }],
+        },
       ]);
       const outcome = await reconcileAfterExternalApply({
         db,
         adapterKind: "linear",
         externalId: "linear-issue-1",
         idempotencyMarker: MARKER,
-        client
+        client,
       });
       expect(outcome.code).toBe("mismatch_persists");
     } finally {
@@ -193,15 +193,15 @@ describe("reconcileAfterExternalApply — mismatch outcomes", () => {
         {
           ok: false,
           code: "target_missing",
-          error: "Linear issue lookup returned no issue."
-        }
+          error: "Linear issue lookup returned no issue.",
+        },
       ]);
       const outcome = await reconcileAfterExternalApply({
         db,
         adapterKind: "linear",
         externalId: "linear-issue-1",
         idempotencyMarker: MARKER,
-        client
+        client,
       });
       expect(outcome.code).toBe("stale_source");
     } finally {
@@ -216,15 +216,15 @@ describe("reconcileAfterExternalApply — mismatch outcomes", () => {
         {
           ok: false,
           code: "adapter_threw",
-          error: "transient network error"
-        }
+          error: "transient network error",
+        },
       ]);
       const outcome = await reconcileAfterExternalApply({
         db,
         adapterKind: "linear",
         externalId: "linear-issue-1",
         idempotencyMarker: MARKER,
-        client
+        client,
       });
       expect(outcome.code).toBe("refresh_failed");
     } finally {
@@ -239,15 +239,15 @@ describe("reconcileAfterExternalApply — mismatch outcomes", () => {
         {
           ok: false,
           code: "auth_unavailable",
-          error: "LINEAR_API_KEY rejected by Linear API."
-        }
+          error: "LINEAR_API_KEY rejected by Linear API.",
+        },
       ]);
       const outcome = await reconcileAfterExternalApply({
         db,
         adapterKind: "linear",
         externalId: "linear-issue-1",
         idempotencyMarker: MARKER,
-        client
+        client,
       });
       expect(outcome.code).toBe("refresh_failed");
     } finally {
@@ -263,15 +263,15 @@ describe("reconcileAfterExternalApply — mismatch outcomes", () => {
           ok: true,
           // Missing id/title/url -> normalization fails.
           issue: { id: "" } as unknown,
-          comments: [{ id: "c-1", body: `Done ${MARKER}`, url: null }]
-        }
+          comments: [{ id: "c-1", body: `Done ${MARKER}`, url: null }],
+        },
       ]);
       const outcome = await reconcileAfterExternalApply({
         db,
         adapterKind: "linear",
         externalId: "linear-issue-1",
         idempotencyMarker: MARKER,
-        client
+        client,
       });
       expect(outcome.code).toBe("post_apply_reconcile_failed");
     } finally {
@@ -285,14 +285,14 @@ describe("reconcileAfterExternalApply — mismatch outcomes", () => {
       const client: PostApplyReconcileClient = {
         async refresh() {
           throw new Error("boom");
-        }
+        },
       };
       const outcome = await reconcileAfterExternalApply({
         db,
         adapterKind: "linear",
         externalId: "linear-issue-1",
         idempotencyMarker: MARKER,
-        client
+        client,
       });
       expect(outcome.code).toBe("post_apply_reconcile_failed");
       expect(outcome.detail).toContain("boom");
@@ -312,7 +312,7 @@ describe("reconcileAfterExternalApply — adapter support", () => {
         adapterKind: "manual",
         externalId: "manual-1",
         idempotencyMarker: MARKER,
-        client
+        client,
       });
       expect(outcome.code).toBe("targeted_refresh_unsupported");
       expect(calls).toEqual([]);
@@ -329,7 +329,7 @@ describe("reconcileAfterExternalApply — adapter support", () => {
         adapterKind: "linear",
         externalId: "linear-issue-1",
         idempotencyMarker: MARKER,
-        client: null
+        client: null,
       });
       expect(outcome.code).toBe("targeted_refresh_unsupported");
     } finally {
@@ -339,38 +339,38 @@ describe("reconcileAfterExternalApply — adapter support", () => {
 });
 
 describe("reconcileAfterExternalApply — idempotency", () => {
-  it("a second reconcile call does not duplicate the SourceItem", async () => {
+  it("a second reconcile call does not duplicate the TrackerItem", async () => {
     const db = openDb(makeTempDir());
     try {
       const { client } = buildFakeClient([
         {
           ok: true,
           issue: buildIssueRaw(),
-          comments: [{ id: "c-1", body: `Done ${MARKER}`, url: null }]
+          comments: [{ id: "c-1", body: `Done ${MARKER}`, url: null }],
         },
         {
           ok: true,
           issue: buildIssueRaw(),
-          comments: [{ id: "c-1", body: `Done ${MARKER}`, url: null }]
-        }
+          comments: [{ id: "c-1", body: `Done ${MARKER}`, url: null }],
+        },
       ]);
       const first = await reconcileAfterExternalApply({
         db,
         adapterKind: "linear",
         externalId: "linear-issue-1",
         idempotencyMarker: MARKER,
-        client
+        client,
       });
       const second = await reconcileAfterExternalApply({
         db,
         adapterKind: "linear",
         externalId: "linear-issue-1",
         idempotencyMarker: MARKER,
-        client
+        client,
       });
       expect(first.code).toBe("success");
       expect(second.code).toBe("success");
-      expect(second.sourceItemId).toBe(first.sourceItemId);
+      expect(second.trackerItemId).toBe(first.trackerItemId);
     } finally {
       db.close();
     }

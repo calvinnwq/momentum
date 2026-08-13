@@ -1,7 +1,7 @@
 import { buildIdempotencyMarker } from "../../../adapters/external-update-adapter.js";
 import type { IntentApplyAudit } from "../../intent/apply-audits.js";
 import type { UpdateIntent } from "../../intent/update-intents.js";
-import type { SourceItem } from "../../source/items.js";
+import type { TrackerItem } from "../../tracker/items.js";
 import type { UpdateIntentApplyPolicy } from "../../intent/policy.js";
 
 export type TrackerRefreshLifecyclePhase = "preflight" | "apply" | "reconcile";
@@ -34,7 +34,7 @@ export type TrackerRefreshLifecyclePlan = {
   evidence: {
     issueScopeIdentifier: string | null;
     intentId: string | null;
-    sourceItemId: string | null;
+    trackerItemId: string | null;
     targetExternalId: string | null;
     idempotencyKey: string | null;
     idempotencyMarker: string | null;
@@ -48,7 +48,7 @@ export type TrackerRefreshLifecycleInput = {
   issueScopeIdentifier?: string | null;
   pendingIntents: readonly UpdateIntent[];
   appliedIntents?: readonly UpdateIntent[];
-  sourceItemsById: ReadonlyMap<string, SourceItem>;
+  trackerItemsById: ReadonlyMap<string, TrackerItem>;
   latestAuditsByIntentId?: ReadonlyMap<string, IntentApplyAudit>;
   expectedOperatorReason: string | null;
 };
@@ -58,7 +58,7 @@ export type TrackerRefreshAlreadyAppliedReconciliationInput = Pick<
   | "issueScopeIdentifier"
   | "pendingIntents"
   | "appliedIntents"
-  | "sourceItemsById"
+  | "trackerItemsById"
   | "latestAuditsByIntentId"
   | "expectedOperatorReason"
 >;
@@ -123,7 +123,7 @@ export function planTrackerRefreshLifecycle(
   }
 
   const intent = pendingStatusIntents[0]!;
-  const source = sourceForIntent(input.sourceItemsById, intent);
+  const source = sourceForIntent(input.trackerItemsById, intent);
   const validation = validateIntent(intent, source, issueScopeIdentifier);
   if (!validation.ok) {
     return plan(
@@ -166,7 +166,7 @@ function planAlreadyAppliedOrMissing(
   const applied = (input.appliedIntents ?? []).filter(isStatusUpdateIntent);
   if (applied.length === 1) {
     const intent = applied[0]!;
-    const source = sourceForIntent(input.sourceItemsById, intent);
+    const source = sourceForIntent(input.trackerItemsById, intent);
     const audit = input.latestAuditsByIntentId?.get(intent.id) ?? null;
     const marker = idempotencyMarker(intent);
     const validation = validateAppliedIntent(
@@ -201,7 +201,7 @@ function planAlreadyAppliedOrMissing(
       evidence(
         issueScopeIdentifier,
         intent,
-        sourceForIntent(input.sourceItemsById, intent),
+        sourceForIntent(input.trackerItemsById, intent),
         null,
       ),
     );
@@ -221,7 +221,7 @@ function planCurrentAppliedEvidence(
 ): TrackerRefreshLifecyclePlan | null {
   const applied = (input.appliedIntents ?? []).filter(isStatusUpdateIntent);
   const currentApplied = applied.flatMap((intent) => {
-    const source = sourceForIntent(input.sourceItemsById, intent);
+    const source = sourceForIntent(input.trackerItemsById, intent);
     const audit = input.latestAuditsByIntentId?.get(intent.id) ?? null;
     const marker = idempotencyMarker(intent);
     const validation = validateAppliedIntent(
@@ -275,7 +275,7 @@ function planCurrentAppliedEvidence(
 
 function validateIntent(
   intent: UpdateIntent,
-  source: SourceItem | null,
+  source: TrackerItem | null,
   issueScopeIdentifier: string,
 ):
   | { ok: true }
@@ -315,7 +315,7 @@ function validateIntent(
 
 function validateAppliedIntent(
   intent: UpdateIntent,
-  source: SourceItem | null,
+  source: TrackerItem | null,
   issueScopeIdentifier: string,
 ):
   | { ok: true }
@@ -358,7 +358,7 @@ function isStatusUpdateIntent(intent: UpdateIntent): boolean {
 }
 
 function sourceMatchesIssueScope(
-  source: SourceItem,
+  source: TrackerItem,
   issueScopeIdentifier: string,
 ): boolean {
   return (
@@ -369,7 +369,7 @@ function sourceMatchesIssueScope(
 
 function intentTargetMatchesSource(
   intent: UpdateIntent,
-  source: SourceItem,
+  source: TrackerItem,
 ): boolean {
   return (
     intent.targetExternalId === null ||
@@ -384,11 +384,11 @@ function statusUpdatePayloadValid(payload: Record<string, unknown>): boolean {
 }
 
 function sourceForIntent(
-  sourceItemsById: ReadonlyMap<string, SourceItem>,
+  trackerItemsById: ReadonlyMap<string, TrackerItem>,
   intent: UpdateIntent,
-): SourceItem | null {
-  if (intent.sourceItemId === null) return null;
-  return sourceItemsById.get(intent.sourceItemId) ?? null;
+): TrackerItem | null {
+  if (intent.trackerItemId === null) return null;
+  return trackerItemsById.get(intent.trackerItemId) ?? null;
 }
 
 function idempotencyMarker(intent: UpdateIntent): string {
@@ -423,14 +423,14 @@ function hasLinearAuth(env: Record<string, string | undefined>): boolean {
 function evidence(
   issueScopeIdentifier: string | null,
   intent: UpdateIntent | null,
-  source: SourceItem | null,
+  source: TrackerItem | null,
   marker: string | null,
   audit: IntentApplyAudit | null = null,
 ): TrackerRefreshLifecyclePlan["evidence"] {
   return {
     issueScopeIdentifier,
     intentId: intent?.id ?? null,
-    sourceItemId: source?.id ?? intent?.sourceItemId ?? null,
+    trackerItemId: source?.id ?? intent?.trackerItemId ?? null,
     targetExternalId: intent?.targetExternalId ?? source?.externalId ?? null,
     idempotencyKey: intent?.idempotencyKey ?? null,
     idempotencyMarker: marker,

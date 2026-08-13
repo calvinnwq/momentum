@@ -47,10 +47,10 @@ import {
   type UpdateIntent,
 } from "../intent/update-intents.js";
 import {
-  getSourceItemById,
-  listSourceItems,
-  type SourceItem,
-} from "../source/items.js";
+  getTrackerItemById,
+  listTrackerItems,
+  type TrackerItem,
+} from "../tracker/items.js";
 import { DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS } from "./loop.js";
 import {
   DAEMON_EXECUTOR_CONFIG_ENV_VAR,
@@ -3158,7 +3158,7 @@ function resolveDaemonExternalApplyContext(
     context.db,
     issueScopeIdentifier ?? "",
   );
-  let sourceItemsById = loadLinearRefreshSourceItems(context.db, [
+  let trackerItemsById = loadLinearRefreshTrackerItems(context.db, [
     ...pending,
     ...applied,
   ]);
@@ -3172,14 +3172,14 @@ function resolveDaemonExternalApplyContext(
       issueScopeIdentifier,
       pendingIntents: pending,
       appliedIntents: applied,
-      sourceItemsById,
+      trackerItemsById,
       latestAuditsByIntentId,
       expectedOperatorReason: operatorReason,
     });
   const alreadyAppliedContext = resolveLinearRefreshAlreadyAppliedContext(
     alreadyAppliedLifecycle,
     applied,
-    sourceItemsById,
+    trackerItemsById,
     latestAuditsByIntentId,
     resolved.exec.runDir,
   );
@@ -3197,7 +3197,7 @@ function resolveDaemonExternalApplyContext(
     issueScopeIdentifier,
     pendingIntents: pending,
     appliedIntents: applied,
-    sourceItemsById,
+    trackerItemsById,
     latestAuditsByIntentId,
     expectedOperatorReason: operatorReason,
   });
@@ -3212,9 +3212,9 @@ function resolveDaemonExternalApplyContext(
       return { ok: false, reason: seeded.reason };
     }
     pending = appendIntentIfMissing(pending, seeded.intent);
-    sourceItemsById = new Map(sourceItemsById).set(
-      seeded.sourceItem.id,
-      seeded.sourceItem,
+    trackerItemsById = new Map(trackerItemsById).set(
+      seeded.trackerItem.id,
+      seeded.trackerItem,
     );
     lifecycle = planTrackerRefreshLifecycle({
       env,
@@ -3222,7 +3222,7 @@ function resolveDaemonExternalApplyContext(
       issueScopeIdentifier,
       pendingIntents: pending,
       appliedIntents: applied,
-      sourceItemsById,
+      trackerItemsById,
       latestAuditsByIntentId,
       expectedOperatorReason: operatorReason,
     });
@@ -3231,7 +3231,7 @@ function resolveDaemonExternalApplyContext(
     resolveLinearRefreshAlreadyAppliedContext(
       lifecycle,
       applied,
-      sourceItemsById,
+      trackerItemsById,
       latestAuditsByIntentId,
       resolved.exec.runDir,
     );
@@ -3291,7 +3291,7 @@ function resolveDaemonExternalApplyContext(
 function resolveLinearRefreshAlreadyAppliedContext(
   lifecycle: TrackerRefreshLifecyclePlan | null,
   applied: readonly UpdateIntent[],
-  sourceItemsById: ReadonlyMap<string, SourceItem>,
+  trackerItemsById: ReadonlyMap<string, TrackerItem>,
   latestAuditsByIntentId: ReadonlyMap<
     string,
     NonNullable<ReturnType<typeof getLatestIntentApplyAudit>>
@@ -3304,9 +3304,9 @@ function resolveLinearRefreshAlreadyAppliedContext(
     (candidate) => candidate.id === lifecycle.evidence.intentId,
   );
   const source =
-    lifecycle.evidence.sourceItemId === null
+    lifecycle.evidence.trackerItemId === null
       ? null
-      : (sourceItemsById.get(lifecycle.evidence.sourceItemId) ?? null);
+      : (trackerItemsById.get(lifecycle.evidence.trackerItemId) ?? null);
   const audit =
     lifecycle.evidence.intentId === null
       ? null
@@ -3331,7 +3331,7 @@ function seedLinearRefreshStatusUpdateIntent(input: {
   issueScopeIdentifier: string | null;
   now: number;
 }):
-  | { ok: true; intent: UpdateIntent; sourceItem: SourceItem }
+  | { ok: true; intent: UpdateIntent; trackerItem: TrackerItem }
   | { ok: false; reason: string } {
   const issueScopeIdentifier = input.issueScopeIdentifier?.trim() || null;
   if (issueScopeIdentifier === null) {
@@ -3342,10 +3342,10 @@ function seedLinearRefreshStatusUpdateIntent(input: {
     };
   }
 
-  const matches = listSourceItems(input.db, { adapterKind: "linear" }).filter(
-    (sourceItem) =>
-      sourceItem.externalId === issueScopeIdentifier ||
-      sourceItem.externalKey === issueScopeIdentifier,
+  const matches = listTrackerItems(input.db, { adapterKind: "linear" }).filter(
+    (trackerItem) =>
+      trackerItem.externalId === issueScopeIdentifier ||
+      trackerItem.externalKey === issueScopeIdentifier,
   );
   if (matches.length === 0) {
     return {
@@ -3360,17 +3360,17 @@ function seedLinearRefreshStatusUpdateIntent(input: {
     };
   }
 
-  const sourceItem = matches[0]!;
+  const trackerItem = matches[0]!;
   const intent = createUpdateIntent(
     input.db,
     {
       adapterKind: "linear",
-      targetExternalId: sourceItem.externalId,
+      targetExternalId: trackerItem.externalId,
       intentType: "status_update",
       payload: { state: "Done" },
       reason: `Workflow ${input.runId} reached tracker-refresh for ${issueScopeIdentifier}; update Linear issue to Done.`,
-      sourceItemId: sourceItem.id,
-      idempotencyKey: `linear:${sourceItem.externalId}:status_update:done`,
+      trackerItemId: trackerItem.id,
+      idempotencyKey: `linear:${trackerItem.externalId}:status_update:done`,
     },
     { now: () => input.now },
   ).intent;
@@ -3381,7 +3381,7 @@ function seedLinearRefreshStatusUpdateIntent(input: {
       reason: `linear_refresh_intent_${intent.status}: seeded status_update intent ${intent.id} is ${intent.status}, not pending`,
     };
   }
-  return { ok: true, intent, sourceItem };
+  return { ok: true, intent, trackerItem };
 }
 
 function appendIntentIfMissing(
@@ -3425,24 +3425,26 @@ function pendingLinearIntentMatchesIssueScope(
 ): boolean {
   if (issueScopeIdentifier.trim().length === 0) return false;
   if (intent.targetExternalId === issueScopeIdentifier) return true;
-  if (intent.sourceItemId === null) return false;
+  if (intent.trackerItemId === null) return false;
 
-  const sourceItem = getSourceItemById(db, intent.sourceItemId);
-  if (sourceItem === null || sourceItem.adapterKind !== "linear") return false;
+  const trackerItem = getTrackerItemById(db, intent.trackerItemId);
+  if (trackerItem === null || trackerItem.adapterKind !== "linear")
+    return false;
   return (
-    sourceItem.externalId === issueScopeIdentifier ||
-    sourceItem.externalKey === issueScopeIdentifier
+    trackerItem.externalId === issueScopeIdentifier ||
+    trackerItem.externalKey === issueScopeIdentifier
   );
 }
 
-function loadLinearRefreshSourceItems(
+function loadLinearRefreshTrackerItems(
   db: MomentumDb,
   intents: readonly UpdateIntent[],
-): ReadonlyMap<string, SourceItem> {
-  const out = new Map<string, SourceItem>();
+): ReadonlyMap<string, TrackerItem> {
+  const out = new Map<string, TrackerItem>();
   for (const intent of intents) {
-    if (intent.sourceItemId === null || out.has(intent.sourceItemId)) continue;
-    const source = getSourceItemById(db, intent.sourceItemId);
+    if (intent.trackerItemId === null || out.has(intent.trackerItemId))
+      continue;
+    const source = getTrackerItemById(db, intent.trackerItemId);
     if (source !== null) out.set(source.id, source);
   }
   return out;
@@ -3508,7 +3510,7 @@ function linearRefreshRefusalReason(
 
 function linearRefreshAlreadyAppliedSuccess(
   intent: UpdateIntent,
-  source: SourceItem,
+  source: TrackerItem,
   audit: NonNullable<ReturnType<typeof getLatestIntentApplyAudit>>,
 ): ExecuteExternalApplySuccess {
   return {
