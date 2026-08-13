@@ -139,7 +139,7 @@ export type DoctorPolicyPayload = {
 export function emitDoctor(
   parsed: JsonFlags,
   io: CliIo,
-  payload: DoctorPayload
+  payload: DoctorPayload,
 ): number {
   if (parsed.json) {
     writeJson(io.stdout, payload);
@@ -156,7 +156,7 @@ export function emitDoctor(
     `version: ${payload.version}`,
     `node: ${payload.node}`,
     `platform: ${payload.platform}`,
-    `scope: ${payload.milestone}`
+    `scope: ${payload.milestone}`,
   ];
   if (daemonPayload.ok) {
     if (!daemonPayload.hasRun) {
@@ -173,49 +173,51 @@ export function emitDoctor(
     }
     if (daemonPayload.staleRepoLockCount > 0) {
       lines.push(
-        `daemon stale repo locks: ${daemonPayload.staleRepoLockCount}`
+        `daemon stale repo locks: ${daemonPayload.staleRepoLockCount}`,
       );
     }
     if (daemonPayload.staleClaimedJobCount > 0) {
       lines.push(
-        `daemon stale claimed jobs: ${daemonPayload.staleClaimedJobCount}`
+        `daemon stale claimed jobs: ${daemonPayload.staleClaimedJobCount}`,
       );
     }
     if (daemonPayload.goalsNeedingRecoveryCount > 0) {
       lines.push(
-        `goals needing manual recovery: ${daemonPayload.goalsNeedingRecoveryCount}`
+        `goals needing manual recovery: ${daemonPayload.goalsNeedingRecoveryCount}`,
       );
     }
   } else {
     lines.push(`daemon: error (${daemonPayload.code})`);
   }
   lines.push(
-    `runners: ${payload.runners.supported.join(", ")} (default ${payload.runners.default})`
+    `runners: ${payload.runners.supported.join(", ")} (default ${payload.runners.default})`,
   );
   if (policyPayload.repoConfigured) {
     if (policyPayload.error) {
       lines.push(
-        `policy (MOMENTUM.md): error ${policyPayload.error.code} at ${policyPayload.path ?? "(unresolved)"}`
+        `policy (MOMENTUM.md): error ${policyPayload.error.code} at ${policyPayload.path ?? "(unresolved)"}`,
       );
     } else if (policyPayload.present) {
       const fields = describePolicyFields(policyPayload);
       lines.push(
-        `policy (MOMENTUM.md): present at ${policyPayload.path}${fields ? ` (${fields})` : ""}`
+        `policy (MOMENTUM.md): present at ${policyPayload.path}${fields ? ` (${fields})` : ""}`,
       );
     } else {
       lines.push(
-        `policy (MOMENTUM.md): not present (expected at ${policyPayload.path ?? "(unresolved)"})`
+        `policy (MOMENTUM.md): not present (expected at ${policyPayload.path ?? "(unresolved)"})`,
       );
     }
   } else {
-    lines.push("policy (MOMENTUM.md): pass --repo <path> to inspect repo policy");
+    lines.push(
+      "policy (MOMENTUM.md): pass --repo <path> to inspect repo policy",
+    );
   }
   lines.push(
-    `intent_apply_policy: ${policyPayload.effectiveIntentApply.value} (${policyPayload.effectiveIntentApply.source})`
+    `intent_apply_policy: ${policyPayload.effectiveIntentApply.value} (${policyPayload.effectiveIntentApply.source})`,
   );
   if (trackersPayload.ok) {
     lines.push(
-      `trackers: total=${trackersPayload.totalTrackerItems} linked=${trackersPayload.linkedTrackerItems} unlinked=${trackersPayload.unlinkedTrackerItems}`
+      `trackers: total=${trackersPayload.totalTrackerItems} linked=${trackersPayload.linkedTrackerItems} unlinked=${trackersPayload.unlinkedTrackerItems}`,
     );
     const last = trackersPayload.lastReconciliation;
     if (last) {
@@ -224,7 +226,7 @@ export function emitDoctor(
         : "";
       lines.push(
         `trackers: last ${last.adapterKind} reconciliation ${last.state} (` +
-          `seen=${last.itemsSeen}, upserted=${last.itemsUpserted}${stoppedText}, finished_at=${last.finishedAt ?? "(running)"})`
+          `seen=${last.itemsSeen}, upserted=${last.itemsUpserted}${stoppedText}, finished_at=${last.finishedAt ?? "(running)"})`,
       );
     } else {
       lines.push("trackers: no reconciliation runs recorded yet");
@@ -234,13 +236,13 @@ export function emitDoctor(
   }
   if (evidencePayload.ok) {
     lines.push(
-      `evidence: total=${evidencePayload.totalRecords} goal_linked=${evidencePayload.goalLinkedRecords} tracker_item_linked=${evidencePayload.trackerItemLinkedRecords}`
+      `evidence: total=${evidencePayload.totalRecords} goal_linked=${evidencePayload.goalLinkedRecords} tracker_item_linked=${evidencePayload.trackerItemLinkedRecords}`,
     );
     const last = evidencePayload.lastRecord;
     if (last) {
       lines.push(
         `evidence: last ${last.source}/${last.type} at ${last.occurredAt}` +
-          ` (goal=${last.goalId ?? "(none)"}, tracker_item=${last.trackerItemId ?? "(none)"})`
+          ` (goal=${last.goalId ?? "(none)"}, tracker_item=${last.trackerItemId ?? "(none)"})`,
       );
     } else {
       lines.push("evidence: no records ingested yet");
@@ -252,19 +254,19 @@ export function emitDoctor(
     const intentCounts = externalApplyPayload.intentApplyStateCounts;
     const auditCounts = externalApplyPayload.auditCounts;
     lines.push(
-      `external apply: intents idle=${intentCounts.idle} in_flight=${intentCounts.in_flight} blocked=${intentCounts.blocked}`
+      `external apply: intents idle=${intentCounts.idle} in_flight=${intentCounts.in_flight} blocked=${intentCounts.blocked}`,
     );
     lines.push(
       `external apply: attempts total=${externalApplyPayload.totalAttempts} ` +
         `succeeded=${auditCounts.succeeded} failed=${auditCounts.failed} ` +
         `claimed=${auditCounts.claimed} blocked=${auditCounts.blocked} ` +
-        `audit_incomplete=${auditCounts.audit_incomplete}`
+        `audit_incomplete=${auditCounts.audit_incomplete}`,
     );
     const latest = externalApplyPayload.latestAttempt;
     if (latest) {
       lines.push(
         `external apply: latest ${latest.id} intent=${latest.intentId} ${latest.lifecycleState}` +
-          ` (result=${latest.resultStatus ?? "(none)"} code=${latest.resultCode ?? "(none)"})`
+          ` (result=${latest.resultStatus ?? "(none)"} code=${latest.resultCode ?? "(none)"})`,
       );
     } else {
       lines.push("external apply: no attempts recorded yet");

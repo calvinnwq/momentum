@@ -226,7 +226,13 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
         adapterKind: "linear",
         externalId: "NGX-LEGACY",
       });
-      insertEvidenceRecord(db, "ev-legacy", "verification_passed", "goal-legacy", 1000);
+      insertEvidenceRecord(
+        db,
+        "ev-legacy",
+        "verification_passed",
+        "goal-legacy",
+        1000,
+      );
       const legacy = createUpdateIntent(db, {
         adapterKind: "linear",
         targetExternalId: "NGX-LEGACY",
@@ -247,7 +253,9 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
       expect(result.outcome).toBe("intent_replayed");
       if (result.outcome !== "intent_replayed") return;
       expect(result.intent.id).toBe(legacy.id);
-      expect(result.intent.intentType).toBe(LEGACY_SOURCE_SATISFIED_INTENT_TYPE);
+      expect(result.intent.intentType).toBe(
+        LEGACY_SOURCE_SATISFIED_INTENT_TYPE,
+      );
       expect(listUpdateIntents(db)).toHaveLength(1);
     } finally {
       db.close();

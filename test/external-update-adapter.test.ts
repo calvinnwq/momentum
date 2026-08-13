@@ -102,7 +102,9 @@ describe("external update adapter registry", () => {
     const adapter = getExternalUpdateAdapter("linear");
     expect(adapter).toBeDefined();
     expect(adapter?.kind).toBe("linear");
-    expect(adapter?.supportedIntentTypes).toContain(TRACKER_SATISFIED_INTENT_TYPE);
+    expect(adapter?.supportedIntentTypes).toContain(
+      TRACKER_SATISFIED_INTENT_TYPE,
+    );
     expect(adapter?.supportedIntentTypes).toContain("status_update");
   });
 

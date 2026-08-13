@@ -180,8 +180,7 @@ export function resolveExternalUpdateAdapterForIntent(
 ): ExternalUpdateAdapter | undefined {
   const adapter = getExternalUpdateAdapter(intent.adapterKind, adapters);
   if (!adapter) return undefined;
-  if (!supportsIntentType(adapter, intent.intentType))
-    return undefined;
+  if (!supportsIntentType(adapter, intent.intentType)) return undefined;
   return adapter;
 }
 

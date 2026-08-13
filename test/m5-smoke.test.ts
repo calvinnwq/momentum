@@ -529,10 +529,9 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         linkedTrackerItems: 0,
         unlinkedTrackerItems: 1,
       });
-      const lastReconciliation = trackersPayload["lastReconciliation"] as Record<
-        string,
-        unknown
-      >;
+      const lastReconciliation = trackersPayload[
+        "lastReconciliation"
+      ] as Record<string, unknown>;
       expect(lastReconciliation).toMatchObject({
         adapterKind: "linear",
         state: "succeeded",

@@ -769,10 +769,10 @@ describe("M11 CLI import boundaries", () => {
     expect(architecture).toMatch(/src\/cli\.ts.*dispatch/s);
   });
 
-  it("documents how to add future source modules without creating root junk", () => {
+  it("documents how to add future runtime modules without creating root junk", () => {
     const standard = readFile("ARCHITECTURE.md");
 
-    expect(standard).toContain("## Adding Source Modules");
+    expect(standard).toContain("## Adding Runtime Modules");
     expect(standard).toMatch(/Do not add new root `src\/\*\.ts` modules/i);
     expect(standard).toMatch(/src\/core\/<domain>/);
     expect(standard).toMatch(/Transitional exceptions/i);
