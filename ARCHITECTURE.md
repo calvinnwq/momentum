@@ -80,7 +80,7 @@ The target source taxonomy is `src/commands/`, `src/renderers/`,
 ARCH-02 enforces this with root `src/*.ts` allowlists, transitional exceptions,
 placeholder-free pending homes, and import guards; ARCH-03 populated
 `src/core/workflow/`, ARCH-04 `src/core/executors/`, and ARCH-05 the remaining
-`src/core/<domain>/` (goal, source - since renamed to tracker - intent, daemon, repo, evidence) plus
+`src/core/<domain>/` (goal, tracker, intent, daemon, repo, evidence) plus
 `src/config/`. ARCH-06 drained the final root type modules into
 `src/shared/events.ts`, `src/core/goal/{spec,types}.ts`, and
 `src/core/executors/agent-result/{result,types}.ts`; transitional root exceptions are

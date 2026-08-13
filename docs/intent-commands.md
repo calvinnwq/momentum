@@ -23,6 +23,10 @@ Filters:
 - `--goal`, `--tracker-item`, and `--evidence-record` filter by their respective linked IDs; at least one of goal, tracker-item, or evidence-record must exist.
 - `--limit` caps the number of results.
 
+The durable `source_satisfied` intent type and `stale_source` reconcile status
+retain their historical spellings for compatibility; active command and link
+vocabulary uses `tracker`.
+
 JSON output includes `ok`, `command`, `dataDir`, active filter values, `count`, `totalAvailable`, `truncated`, and an `intents` array with full intent fields:
 
 - `id`

@@ -130,8 +130,11 @@ The `effectiveIntentApply` block in the policy payload reports the resolved
 
 ## Sources block
 
-The JSON `sources` block reports tracker-item counts and the most recent
-reconciliation run:
+The JSON `sources` block reports current tracker-item counts and the most recent
+reconciliation run.
+The `sources` block name and its `*SourceItems` field names are retained for
+doctor-envelope compatibility; they are backed by the current `tracker_items`
+and `tracker_reconciliation_runs` tables:
 
 ```json
 {
@@ -164,6 +167,8 @@ yet).
 
 The JSON `evidence` block reports evidence-record counts and the latest
 record:
+The `sourceItemLinkedRecords` and `sourceItemId` field names remain
+wire-compatible doctor fields and refer to current `tracker_item_id` links.
 
 ```json
 {

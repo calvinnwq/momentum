@@ -47,7 +47,11 @@ Momentum never modifies the data directory outside the resolved path. Each store
 
 A single `momentum.db` per data directory backs durable state across all goals:
 
-- `goals` — durable goal rows from the retired goal-first lane, including `state`, `reducer_decision`, `needs_manual_recovery`, and `linked_source_item_id`; `recovery clear`, daemon recovery surfaces, and `doctor` still read them.
+When an existing data directory is opened, the durable source-to-tracker migration renames `source_items`, `source_snapshots`, and `source_reconciliation_runs` to their `tracker_*` replacements in place.
+It also renames `source_item_id` to `tracker_item_id` in the snapshot, evidence, and update-intent tables while preserving rows, IDs, links, timestamps, and index behavior.
+If a database contains an ambiguous mixture of legacy and tracker-named objects, migration fails closed for operator inspection instead of creating parallel empty tables.
+
+- `goals` — durable goal rows from the retired goal-first lane, including `state`, `current_iteration`, `completion_reason`, `needs_manual_recovery`, and manual-recovery metadata; `recovery clear`, daemon recovery surfaces, and `doctor` still read them.
 - `jobs` — stored `goal_iteration` job rows from the retired goal-first lane; nothing claims them anymore, but daemon startup recovery and `daemon status` still read and reconcile stale rows.
 - `events` — append-only audit stream (`job.succeeded`, `job.failed`, `goal.reduced`, `goal.completed`, `goal.failed`, `goal.recovery_cleared`, etc.).
 - `repo_locks` - per-repo exclusion lease held across a goal iteration or a live-wrapper workflow dispatch that may mutate git.

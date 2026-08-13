@@ -7,7 +7,7 @@ See also:
 - [docs/tracker-commands.md](tracker-commands.md) — `tracker` and `project status` envelopes; evidence records may optionally link to a `tracker_items` row.
 - [docs/intent-commands.md](intent-commands.md) — `intent list` / `get` / `apply` / `skip` / `cancel` envelopes; the `intent list --evidence-record <id>` filter pivots from an evidence record to its derived intents.
 - [docs/workflow-commands.md](workflow-commands.md) — the `workflow status` / `workflow handoff` / `workflow run logs` surfaces that attach run- and step-linked evidence.
-- [docs/doctor.md](doctor.md) — the aggregate `evidence` block (`totalRecords`, `goalLinkedRecords`, `sourceItemLinkedRecords`, `lastRecord`).
+- [docs/doctor.md](doctor.md) — the aggregate `evidence` block and its wire-compatible tracker-link fields.
 
 ## `evidence ingest`
 
