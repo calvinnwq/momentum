@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import type { MomentumDb } from "../../adapters/db.js";
 
+export const TRACKER_SATISFIED_INTENT_TYPE = "tracker_satisfied" as const;
+export const LEGACY_SOURCE_SATISFIED_INTENT_TYPE = "source_satisfied" as const;
+
 export const UPDATE_INTENT_STATUSES = [
   "pending",
   "applied",

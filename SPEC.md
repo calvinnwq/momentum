@@ -396,7 +396,7 @@ External tracker writes are policy-gated and two-phase:
 4. finalize and reconcile the touched issue
 
 The default policy is local intent creation only. The Linear path supports
-comment-only `source_satisfied` intents and explicit `status_update` intents
+comment-only `tracker_satisfied` intents and explicit `status_update` intents
 whose payload supplies the target state (`state` or `stateId`), carries a stable
 idempotency marker, and must fail closed without losing the refusal reason.
 Before a workflow `tracker-refresh` external write is attempted, the tail

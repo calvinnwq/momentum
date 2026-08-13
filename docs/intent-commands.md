@@ -19,13 +19,14 @@ Filters:
 
 - `--status` filters by intent status (`pending`, `applied`, `skipped`, or `canceled`).
 - `--adapter` filters by adapter kind.
-- `--type` filters by intent type (e.g. `source_satisfied`).
+- `--type` filters by intent type (e.g. `tracker_satisfied`).
 - `--goal`, `--tracker-item`, and `--evidence-record` filter by their respective linked IDs; at least one of goal, tracker-item, or evidence-record must exist.
 - `--limit` caps the number of results.
 
-The durable `source_satisfied` intent type and `stale_source` reconcile status
-retain their historical spellings for compatibility; active command and link
-vocabulary uses `tracker`.
+Newly generated completion intents use `tracker_satisfied`, and post-apply
+reconciliation uses `stale_tracker`.
+Historical `source_satisfied` intent types and `stale_source` reconcile statuses
+remain readable and applicable.
 
 JSON output includes `ok`, `command`, `dataDir`, active filter values, `count`, `totalAvailable`, `truncated`, and an `intents` array with full intent fields:
 
@@ -81,7 +82,7 @@ The `latestAttempt` audit row (emitted by `intent list`, `intent get`, `momentum
 - `resultCode`
 - `resultMessage`
 - `externalRefs` — `{commentId, commentUrl, stateTransitionId}` for any external writes produced.
-- `reconcile` — `{status, warning}` from the post-apply reconcile step. `status` is one of `success`, `stale_source`, `mismatch_persists`, `refresh_failed`, `post_apply_reconcile_failed`, `targeted_refresh_unsupported`, `pending`, `deferred`, or `null`. `warning` is `null` on success; otherwise it carries a human-readable detail string.
+- `reconcile` - `{status, warning}` from the post-apply reconcile step. `status` is one of `success`, `stale_tracker`, `mismatch_persists`, `refresh_failed`, `post_apply_reconcile_failed`, `targeted_refresh_unsupported`, `pending`, `deferred`, or `null`. Historical `stale_source` values remain readable. `warning` is `null` on success; otherwise it carries a human-readable detail string.
 - `createdAt`
 - `updatedAt`
 
@@ -113,7 +114,7 @@ Policy resolution:
 
 - `--repo <path>` loads the repo's `MOMENTUM.md` policy file to resolve the effective `intent_apply_policy`.
 - When `--repo` is not provided, the effective policy falls back to the built-in default (`create_intents_only`).
-- `--external-apply` performs a policy-gated external tracker write through the adapter's external update client. It requires a `--repo` context whose `MOMENTUM.md` sets `intent_apply_policy: external_apply_allowed`, a resolved target issue, and the adapter's credential env var (`LINEAR_API_KEY` for the linear adapter). The write is a two-phase audit-before-write flow that is idempotent under replay; `source_satisfied` is comment-only, while Linear `status_update` intents must carry exactly one non-empty payload field, `state` or `stateId`, and perform a comment plus status transition.
+- `--external-apply` performs a policy-gated external tracker write through the adapter's external update client. It requires a `--repo` context whose `MOMENTUM.md` sets `intent_apply_policy: external_apply_allowed`, a resolved target issue, and the adapter's credential env var (`LINEAR_API_KEY` for the linear adapter). The write is a two-phase audit-before-write flow that is idempotent under replay; `tracker_satisfied` is comment-only, while Linear `status_update` intents must carry exactly one non-empty payload field, `state` or `stateId`, and perform a comment plus status transition.
 
 Without `--external-apply`, `intent apply` records the operator's manual mark only and does not contact the external tracker.
 
@@ -125,7 +126,7 @@ On success, JSON output includes `previousStatus` and the `intent` object. When 
 - `externalApplyPerformed` — `true` whenever this invocation wrote to the tracker, including the partial-apply `audit_incomplete` refusal where the write succeeded but post-write finalization did not; `false` on refusals that never wrote to the tracker and on `already_applied` success replays that only reconciled existing tracker evidence.
 - `note` — operator-facing explanation of the policy.
 
-When `--external-apply` is requested, JSON output also includes an `externalApply` block with the resolved adapter, target reference, audit id, reconcile status, and (on success) external refs (`issueId`, `issueKey`, `issueUrl`, `commentId`, `commentUrl`, `statusTransitioned`, `nextStateId`, `nextStateName`, `idempotencyMarker`, `alreadyApplied`). The `reconcile.status` field is `success` when the post-apply single-issue refresh confirmed the idempotency marker on Linear and updated the local tracker-item snapshot; `mismatch_persists` when the marker was not found in Linear comments; `stale_source` when Linear no longer recognizes the target; `refresh_failed` on transient refresh errors; `post_apply_reconcile_failed` on unexpected reconcile failures; `targeted_refresh_unsupported` for adapters that do not support targeted refresh; `pending` or `deferred` when reconcile was not attempted (early refusal or audit-incomplete paths); or `null` when no reconcile context applies. Text output prints `Reconcile: <status>` when a reconcile status is present and appends the reconcile warning in parentheses when one exists.
+When `--external-apply` is requested, JSON output also includes an `externalApply` block with the resolved adapter, target reference, audit id, reconcile status, and (on success) external refs (`issueId`, `issueKey`, `issueUrl`, `commentId`, `commentUrl`, `statusTransitioned`, `nextStateId`, `nextStateName`, `idempotencyMarker`, `alreadyApplied`). The `reconcile.status` field is `success` when the post-apply single-issue refresh confirmed the idempotency marker on Linear and updated the local tracker-item snapshot; `mismatch_persists` when the marker was not found in Linear comments; `stale_tracker` when Linear no longer recognizes the target; `refresh_failed` on transient refresh errors; `post_apply_reconcile_failed` on unexpected reconcile failures; `targeted_refresh_unsupported` for adapters that do not support targeted refresh; `pending` or `deferred` when reconcile was not attempted (early refusal or audit-incomplete paths); or `null` when no reconcile context applies. Historical `stale_source` statuses remain readable. Text output prints `Reconcile: <status>` when a reconcile status is present and appends the reconcile warning in parentheses when one exists.
 
 `--external-apply` refusal codes (intent stays pending unless otherwise noted):
 

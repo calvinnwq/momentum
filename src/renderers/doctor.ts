@@ -36,7 +36,7 @@ export type DoctorPayload = {
     profiles: readonly unknown[];
   };
   policy: DoctorPolicyPayload;
-  sources: DoctorSourcesPayload;
+  trackers: DoctorTrackersPayload;
   evidence: DoctorEvidencePayload;
   externalApply: DoctorExternalApplyPayload;
 };
@@ -46,7 +46,7 @@ export type DoctorEvidencePayload =
       ok: true;
       totalRecords: number;
       goalLinkedRecords: number;
-      sourceItemLinkedRecords: number;
+      trackerItemLinkedRecords: number;
       lastRecord: {
         id: string;
         source: string;
@@ -54,7 +54,7 @@ export type DoctorEvidencePayload =
         occurredAt: number;
         summary: string;
         goalId: string | null;
-        sourceItemId: string | null;
+        trackerItemId: string | null;
       } | null;
     }
   | {
@@ -93,12 +93,12 @@ export type DoctorExternalApplyPayload =
       message: string;
     };
 
-export type DoctorSourcesPayload =
+export type DoctorTrackersPayload =
   | {
       ok: true;
-      totalSourceItems: number;
-      linkedSourceItems: number;
-      unlinkedSourceItems: number;
+      totalTrackerItems: number;
+      linkedTrackerItems: number;
+      unlinkedTrackerItems: number;
       lastReconciliation: {
         id: string;
         adapterKind: string;
@@ -148,7 +148,7 @@ export function emitDoctor(
 
   const daemonPayload = payload.daemon;
   const policyPayload = payload.policy;
-  const sourcesPayload = payload.sources;
+  const trackersPayload = payload.trackers;
   const evidencePayload = payload.evidence;
   const externalApplyPayload = payload.externalApply;
   const lines: string[] = [
@@ -213,34 +213,34 @@ export function emitDoctor(
   lines.push(
     `intent_apply_policy: ${policyPayload.effectiveIntentApply.value} (${policyPayload.effectiveIntentApply.source})`
   );
-  if (sourcesPayload.ok) {
+  if (trackersPayload.ok) {
     lines.push(
-      `sources: total=${sourcesPayload.totalSourceItems} linked=${sourcesPayload.linkedSourceItems} unlinked=${sourcesPayload.unlinkedSourceItems}`
+      `trackers: total=${trackersPayload.totalTrackerItems} linked=${trackersPayload.linkedTrackerItems} unlinked=${trackersPayload.unlinkedTrackerItems}`
     );
-    const last = sourcesPayload.lastReconciliation;
+    const last = trackersPayload.lastReconciliation;
     if (last) {
       const stoppedText = last.paginationStopped
         ? `, stopped=${last.paginationStopped.reason}`
         : "";
       lines.push(
-        `sources: last ${last.adapterKind} reconciliation ${last.state} (` +
+        `trackers: last ${last.adapterKind} reconciliation ${last.state} (` +
           `seen=${last.itemsSeen}, upserted=${last.itemsUpserted}${stoppedText}, finished_at=${last.finishedAt ?? "(running)"})`
       );
     } else {
-      lines.push("sources: no reconciliation runs recorded yet");
+      lines.push("trackers: no reconciliation runs recorded yet");
     }
   } else {
-    lines.push(`sources: error (${sourcesPayload.code})`);
+    lines.push(`trackers: error (${trackersPayload.code})`);
   }
   if (evidencePayload.ok) {
     lines.push(
-      `evidence: total=${evidencePayload.totalRecords} goal_linked=${evidencePayload.goalLinkedRecords} source_item_linked=${evidencePayload.sourceItemLinkedRecords}`
+      `evidence: total=${evidencePayload.totalRecords} goal_linked=${evidencePayload.goalLinkedRecords} tracker_item_linked=${evidencePayload.trackerItemLinkedRecords}`
     );
     const last = evidencePayload.lastRecord;
     if (last) {
       lines.push(
         `evidence: last ${last.source}/${last.type} at ${last.occurredAt}` +
-          ` (goal=${last.goalId ?? "(none)"}, source_item=${last.sourceItemId ?? "(none)"})`
+          ` (goal=${last.goalId ?? "(none)"}, tracker_item=${last.trackerItemId ?? "(none)"})`
       );
     } else {
       lines.push("evidence: no records ingested yet");

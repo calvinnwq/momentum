@@ -35,7 +35,7 @@ import { recordTrackerSnapshot, upsertTrackerItem } from "../tracker/items.js";
 
 export const POST_APPLY_RECONCILE_OUTCOME_CODES = Object.freeze([
   "success",
-  "stale_source",
+  "stale_tracker",
   "mismatch_persists",
   "refresh_failed",
   "post_apply_reconcile_failed",
@@ -117,7 +117,7 @@ export async function reconcileAfterExternalApply(
   if (!refreshResult.ok) {
     if (refreshResult.code === "target_missing") {
       return outcome(
-        "stale_source",
+        "stale_tracker",
         `Linear no longer recognizes target ${input.externalId}: ${refreshResult.error}`,
       );
     }

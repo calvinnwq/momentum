@@ -14,27 +14,31 @@ import {
   type ExternalUpdateAdapterInput,
   type ExternalUpdateAdapterTarget,
 } from "../src/adapters/external-update-adapter.js";
-import type { UpdateIntent } from "../src/core/intent/update-intents.js";
+import {
+  LEGACY_SOURCE_SATISFIED_INTENT_TYPE,
+  TRACKER_SATISFIED_INTENT_TYPE,
+  type UpdateIntent,
+} from "../src/core/intent/update-intents.js";
 
 function buildIntent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {
   return {
     id: "update_intent_test_1",
     adapterKind: "linear",
     targetExternalId: "linear-issue-1",
-    intentType: "source_satisfied",
+    intentType: TRACKER_SATISFIED_INTENT_TYPE,
     payload: {
       goalState: "completed",
       evidenceType: "no_mistakes_complete",
-      sourceExternalId: "linear-issue-1",
-      sourceExternalKey: "NGX-1",
+      trackerExternalId: "linear-issue-1",
+      trackerExternalKey: "NGX-1",
     },
     reason:
-      "Goal completed with verification evidence (no_mistakes_complete); source item NGX-1 appears satisfied.",
+      "Goal completed with verification evidence (no_mistakes_complete); tracker item NGX-1 appears satisfied.",
     goalId: "goal_test_1",
     trackerItemId: "source_item_test_1",
     evidenceRecordId: "evidence_record_test_1",
     status: "pending",
-    idempotencyKey: "linear:linear-issue-1:source_satisfied:goal_test_1",
+    idempotencyKey: "linear:linear-issue-1:tracker_satisfied:goal_test_1",
     decisionReason: null,
     errorCode: null,
     errorMessage: null,
@@ -89,7 +93,7 @@ describe("external update adapter registry", () => {
     expect(summaries).toEqual([
       {
         kind: "linear",
-        supportedIntentTypes: ["source_satisfied", "status_update"],
+        supportedIntentTypes: [TRACKER_SATISFIED_INTENT_TYPE, "status_update"],
       },
     ]);
   });
@@ -98,7 +102,7 @@ describe("external update adapter registry", () => {
     const adapter = getExternalUpdateAdapter("linear");
     expect(adapter).toBeDefined();
     expect(adapter?.kind).toBe("linear");
-    expect(adapter?.supportedIntentTypes).toContain("source_satisfied");
+    expect(adapter?.supportedIntentTypes).toContain(TRACKER_SATISFIED_INTENT_TYPE);
     expect(adapter?.supportedIntentTypes).toContain("status_update");
   });
 
@@ -106,10 +110,18 @@ describe("external update adapter registry", () => {
     expect(getExternalUpdateAdapter("github")).toBeUndefined();
   });
 
-  it("resolves the linear adapter for an eligible source_satisfied intent", () => {
+  it("resolves the linear adapter for an eligible tracker_satisfied intent", () => {
     const adapter = resolveExternalUpdateAdapterForIntent({
       adapterKind: "linear",
-      intentType: "source_satisfied",
+      intentType: TRACKER_SATISFIED_INTENT_TYPE,
+    });
+    expect(adapter?.kind).toBe("linear");
+  });
+
+  it("resolves historical source_satisfied intents for compatibility", () => {
+    const adapter = resolveExternalUpdateAdapterForIntent({
+      adapterKind: "linear",
+      intentType: LEGACY_SOURCE_SATISFIED_INTENT_TYPE,
     });
     expect(adapter?.kind).toBe("linear");
   });
@@ -135,7 +147,7 @@ describe("external update adapter registry", () => {
     expect(
       resolveExternalUpdateAdapterForIntent({
         adapterKind: "github",
-        intentType: "source_satisfied",
+        intentType: LEGACY_SOURCE_SATISFIED_INTENT_TYPE,
       }),
     ).toBeUndefined();
   });
@@ -225,7 +237,7 @@ describe("buildIdempotencyMarker", () => {
 });
 
 describe("previewExternalUpdate", () => {
-  it("returns a deterministic comment-only preview for an eligible source_satisfied intent", () => {
+  it("returns a deterministic comment-only preview for an eligible tracker_satisfied intent", () => {
     const result = previewExternalUpdate(buildInput());
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -239,7 +251,7 @@ describe("previewExternalUpdate", () => {
     expect(result.preview).toMatchObject({
       adapterKind: "linear",
       intentId: "update_intent_test_1",
-      intentType: "source_satisfied",
+      intentType: TRACKER_SATISFIED_INTENT_TYPE,
       mutationKind: "comment",
       idempotencyMarker: expectedMarker,
     });
@@ -249,7 +261,7 @@ describe("previewExternalUpdate", () => {
       externalKey: "NGX-1",
     });
     expect(result.preview.summary).toContain("NGX-1");
-    expect(result.preview.summary).toContain("source_satisfied");
+    expect(result.preview.summary).toContain(TRACKER_SATISFIED_INTENT_TYPE);
     expect(result.preview.commentBody).toContain(expectedMarker);
     expect(result.preview.commentBody).toContain("Operator (calvin)");
     expect(result.preview.commentBody).toContain(
@@ -417,7 +429,7 @@ describe("previewExternalUpdate", () => {
   it("wraps adapter exceptions as adapter_threw instead of leaking implementation detail", () => {
     const throwingAdapter: ExternalUpdateAdapter = {
       kind: "linear",
-      supportedIntentTypes: ["source_satisfied"],
+      supportedIntentTypes: [TRACKER_SATISFIED_INTENT_TYPE],
       preview: () => {
         throw new Error("write client exploded");
       },

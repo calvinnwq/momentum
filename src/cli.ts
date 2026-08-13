@@ -37,7 +37,7 @@ import {
   type DoctorEvidencePayload,
   type DoctorExternalApplyPayload,
   type DoctorPolicyPayload,
-  type DoctorSourcesPayload,
+  type DoctorTrackersPayload,
 } from "./renderers/doctor.js";
 import {
   configuredExecutorNames,
@@ -761,7 +761,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
       };
 
   const policyPayload = buildDoctorPolicyPayload(parsed.repo);
-  const sourcesPayload = buildDoctorSourcesPayload(dataDirOptions);
+  const trackersPayload = buildDoctorTrackersPayload(dataDirOptions);
   const evidencePayload = buildDoctorEvidencePayload(dataDirOptions);
   const externalApplyPayload = buildDoctorExternalApplyPayload(dataDirOptions);
 
@@ -781,7 +781,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
       ),
     },
     policy: policyPayload,
-    sources: sourcesPayload,
+    trackers: trackersPayload,
     evidence: evidencePayload,
     externalApply: externalApplyPayload,
   } as const;
@@ -810,7 +810,7 @@ function buildDoctorEvidencePayload(
         ok: true,
         totalRecords: summary.totalRecords,
         goalLinkedRecords: summary.goalLinkedRecords,
-        sourceItemLinkedRecords: summary.trackerItemLinkedRecords,
+        trackerItemLinkedRecords: summary.trackerItemLinkedRecords,
         lastRecord: null,
       };
     }
@@ -818,7 +818,7 @@ function buildDoctorEvidencePayload(
       ok: true,
       totalRecords: summary.totalRecords,
       goalLinkedRecords: summary.goalLinkedRecords,
-      sourceItemLinkedRecords: summary.trackerItemLinkedRecords,
+      trackerItemLinkedRecords: summary.trackerItemLinkedRecords,
       lastRecord: {
         id: summary.lastRecord.id,
         source: summary.lastRecord.source,
@@ -826,7 +826,7 @@ function buildDoctorEvidencePayload(
         occurredAt: summary.lastRecord.occurredAt,
         summary: summary.lastRecord.summary,
         goalId: summary.lastRecord.goalId,
-        sourceItemId: summary.lastRecord.trackerItemId,
+        trackerItemId: summary.lastRecord.trackerItemId,
       },
     };
   } finally {
@@ -873,9 +873,9 @@ function buildDoctorExternalApplyPayload(
   }
 }
 
-function buildDoctorSourcesPayload(
+function buildDoctorTrackersPayload(
   dataDirOptions: DataDirOptions,
-): DoctorSourcesPayload {
+): DoctorTrackersPayload {
   let dataDir: string;
   try {
     dataDir = resolveDataDir(dataDirOptions);
@@ -896,26 +896,26 @@ function buildDoctorSourcesPayload(
            FROM tracker_items`,
       )
       .get() as { total: number; linked: number | null } | undefined;
-    const totalSourceItems = counts?.total ?? 0;
-    const linkedSourceItems = counts?.linked ?? 0;
-    const unlinkedSourceItems = totalSourceItems - linkedSourceItems;
+    const totalTrackerItems = counts?.total ?? 0;
+    const linkedTrackerItems = counts?.linked ?? 0;
+    const unlinkedTrackerItems = totalTrackerItems - linkedTrackerItems;
 
     const runs = listTrackerReconciliationRuns(db);
     if (runs.length === 0) {
       return {
         ok: true,
-        totalSourceItems,
-        linkedSourceItems,
-        unlinkedSourceItems,
+        totalTrackerItems,
+        linkedTrackerItems,
+        unlinkedTrackerItems,
         lastReconciliation: null,
       };
     }
     const last = runs[runs.length - 1] as TrackerReconciliationRun;
     return {
       ok: true,
-      totalSourceItems,
-      linkedSourceItems,
-      unlinkedSourceItems,
+      totalTrackerItems,
+      linkedTrackerItems,
+      unlinkedTrackerItems,
       lastReconciliation: {
         id: last.id,
         adapterKind: last.adapterKind,

@@ -3,6 +3,9 @@ import type { EvidenceRecord } from "../evidence/records.js";
 import { getTrackerItemById, type TrackerItem } from "./items.js";
 import {
   createUpdateIntent,
+  getUpdateIntentByIdempotencyKey,
+  LEGACY_SOURCE_SATISFIED_INTENT_TYPE,
+  TRACKER_SATISFIED_INTENT_TYPE,
   type UpdateIntent,
   type UpdateIntentClock,
 } from "../intent/update-intents.js";
@@ -106,7 +109,7 @@ type EvidenceRow = {
 
 /**
  * Inspect a Goal's terminal state, its linked TrackerItems, and the goal/source
- * evidence records, then create (or replay) durable `source_satisfied` update
+ * evidence records, then create (or replay) durable `tracker_satisfied` update
  * intents for every linked open TrackerItem with verification evidence. A
  * completed Goal can have multiple linked open TrackerItems and therefore
  * multiple pending intents.
@@ -197,7 +200,8 @@ export function evaluateGoalForTrackerSatisfiedIntents(
       continue;
     }
 
-    const idempotencyKey = `${trackerItem.adapterKind}:${trackerItem.externalId}:source_satisfied:${goal.id}`;
+    const idempotencyKey = `${trackerItem.adapterKind}:${trackerItem.externalId}:${TRACKER_SATISFIED_INTENT_TYPE}:${goal.id}`;
+    const legacyIdempotencyKey = `${trackerItem.adapterKind}:${trackerItem.externalId}:${LEGACY_SOURCE_SATISFIED_INTENT_TYPE}:${goal.id}`;
     const reason = `Goal completed with verification evidence (${evidence.type}); tracker item ${trackerItem.externalKey ?? trackerItem.externalId} appears satisfied.`;
     const payload: Record<string, unknown> = {
       goalState: goal.state,
@@ -210,12 +214,26 @@ export function evaluateGoalForTrackerSatisfiedIntents(
       trackerCurrentStatus: trackerItem.status,
     };
 
+    const legacyIntent = getUpdateIntentByIdempotencyKey(
+      db,
+      legacyIdempotencyKey,
+    );
+    if (legacyIntent) {
+      results.push({
+        outcome: "intent_replayed",
+        intent: legacyIntent,
+        trackerItem,
+        verificationEvidence: evidence,
+      });
+      continue;
+    }
+
     const created = createUpdateIntent(
       db,
       {
         adapterKind: trackerItem.adapterKind,
         targetExternalId: trackerItem.externalId,
-        intentType: "source_satisfied",
+        intentType: TRACKER_SATISFIED_INTENT_TYPE,
         payload,
         reason,
         goalId: goal.id,

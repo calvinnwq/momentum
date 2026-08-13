@@ -72,7 +72,7 @@ describe("POST_APPLY_RECONCILE_OUTCOME_CODES", () => {
   it("pins the stable outcome taxonomy for post-apply reconciliation", () => {
     expect(POST_APPLY_RECONCILE_OUTCOME_CODES).toEqual([
       "success",
-      "stale_source",
+      "stale_tracker",
       "mismatch_persists",
       "refresh_failed",
       "post_apply_reconcile_failed",
@@ -186,7 +186,7 @@ describe("reconcileAfterExternalApply — mismatch outcomes", () => {
     }
   });
 
-  it("returns stale_source when refresh reports target_missing", async () => {
+  it("returns stale_tracker when refresh reports target_missing", async () => {
     const db = openDb(makeTempDir());
     try {
       const { client } = buildFakeClient([
@@ -203,7 +203,7 @@ describe("reconcileAfterExternalApply — mismatch outcomes", () => {
         idempotencyMarker: MARKER,
         client,
       });
-      expect(outcome.code).toBe("stale_source");
+      expect(outcome.code).toBe("stale_tracker");
     } finally {
       db.close();
     }

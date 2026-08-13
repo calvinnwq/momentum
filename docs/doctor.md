@@ -128,20 +128,17 @@ The `effectiveIntentApply` block in the policy payload reports the resolved
 `policy (MOMENTUM.md):` line summarizing the repo policy load (including
 `intent_apply_policy` and its source).
 
-## Sources block
+## Trackers block
 
-The JSON `sources` block reports current tracker-item counts and the most recent
+The JSON `trackers` block reports current tracker-item counts and the most recent
 reconciliation run.
-The `sources` block name and its `*SourceItems` field names are retained for
-doctor-envelope compatibility; they are backed by the current `tracker_items`
-and `tracker_reconciliation_runs` tables:
 
 ```json
 {
   "ok": true,
-  "totalSourceItems": 0,
-  "linkedSourceItems": 0,
-  "unlinkedSourceItems": 0,
+  "totalTrackerItems": 0,
+  "linkedTrackerItems": 0,
+  "unlinkedTrackerItems": 0,
   "lastReconciliation": {
     "id": "...",
     "adapterKind": "linear",
@@ -158,7 +155,7 @@ and `tracker_reconciliation_runs` tables:
 
 `lastReconciliation` is `null` when no runs exist; on failure the block
 surfaces `ok: false` with `code` and `message`. Text output mirrors this
-with a `sources:` line showing total / linked / unlinked counts plus the
+with a `trackers:` line showing total / linked / unlinked counts plus the
 last reconciliation run's adapter kind, state, items seen/upserted, and
 stop reason (or reporting that no reconciliation runs have been recorded
 yet).
@@ -167,15 +164,13 @@ yet).
 
 The JSON `evidence` block reports evidence-record counts and the latest
 record:
-The `sourceItemLinkedRecords` and `sourceItemId` field names remain
-wire-compatible doctor fields and refer to current `tracker_item_id` links.
 
 ```json
 {
   "ok": true,
   "totalRecords": 0,
   "goalLinkedRecords": 0,
-  "sourceItemLinkedRecords": 0,
+  "trackerItemLinkedRecords": 0,
   "lastRecord": {
     "id": "...",
     "source": "linear",
@@ -183,7 +178,7 @@ wire-compatible doctor fields and refer to current `tracker_item_id` links.
     "occurredAt": "...",
     "summary": "...",
     "goalId": "...",
-    "sourceItemId": "..."
+    "trackerItemId": "..."
   }
 }
 ```

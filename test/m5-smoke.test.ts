@@ -301,7 +301,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       ok: true,
       totalRecords: 4,
       goalLinkedRecords: 0,
-      sourceItemLinkedRecords: 0,
+      trackerItemLinkedRecords: 0,
     });
   }, 60_000);
 
@@ -519,17 +519,17 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         string,
         unknown
       >;
-      const sourcesPayload = doctorPayload["sources"] as Record<
+      const trackersPayload = doctorPayload["trackers"] as Record<
         string,
         unknown
       >;
-      expect(sourcesPayload).toMatchObject({
+      expect(trackersPayload).toMatchObject({
         ok: true,
-        totalSourceItems: 1,
-        linkedSourceItems: 0,
-        unlinkedSourceItems: 1,
+        totalTrackerItems: 1,
+        linkedTrackerItems: 0,
+        unlinkedTrackerItems: 1,
       });
-      const lastReconciliation = sourcesPayload["lastReconciliation"] as Record<
+      const lastReconciliation = trackersPayload["lastReconciliation"] as Record<
         string,
         unknown
       >;
@@ -748,22 +748,22 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         string,
         unknown
       >;
-      const sourcesPayload = doctorPayload["sources"] as Record<
+      const trackersPayload = doctorPayload["trackers"] as Record<
         string,
         unknown
       >;
-      expect(sourcesPayload).toMatchObject({
+      expect(trackersPayload).toMatchObject({
         ok: true,
-        totalSourceItems: 1,
-        linkedSourceItems: 1,
-        unlinkedSourceItems: 0,
+        totalTrackerItems: 1,
+        linkedTrackerItems: 1,
+        unlinkedTrackerItems: 0,
       });
     } finally {
       await mock.close();
     }
   }, 60_000);
 
-  it("generates a source_satisfied update intent through tracker link for a completed goal and refuses --external-apply", async () => {
+  it("generates a tracker_satisfied update intent through tracker link for a completed goal and refuses --external-apply", async () => {
     const dataDir = makeTempDir("momentum-smoke-m5-intent-gen-data-");
 
     const issue = {
@@ -956,7 +956,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       const intent = listedIntents[0]!;
       expect(intent).toMatchObject({
         adapterKind: "linear",
-        intentType: "source_satisfied",
+        intentType: "tracker_satisfied",
         status: "pending",
         goalId,
         trackerItemId,
@@ -1377,7 +1377,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       expect(pendingIntents).toHaveLength(1);
       expect(pendingIntents[0]).toMatchObject({
         adapterKind: "linear",
-        intentType: "source_satisfied",
+        intentType: "tracker_satisfied",
         goalId,
         trackerItemId,
         targetExternalId: "issue-smoke-ngx-294-rollup",

@@ -26,7 +26,11 @@ import { createHash } from "node:crypto";
 import type { EvidenceRecord } from "../core/evidence/records.js";
 import type { TrackerItem } from "../core/tracker/items.js";
 import type { UpdateIntentApplyPolicy } from "../core/intent/policy.js";
-import type { UpdateIntent } from "../core/intent/update-intents.js";
+import {
+  LEGACY_SOURCE_SATISFIED_INTENT_TYPE,
+  TRACKER_SATISFIED_INTENT_TYPE,
+  type UpdateIntent,
+} from "../core/intent/update-intents.js";
 
 export const BUILTIN_EXTERNAL_UPDATE_ADAPTER_KINDS = Object.freeze([
   "linear",
@@ -167,8 +171,8 @@ export function getExternalUpdateAdapter(
  * Resolve the adapter that would handle the given intent, or undefined if the
  * intent's adapter kind is not registered or the intent type is not supported
  * by that adapter. The first eligible adapter wins; the only registered
- * external update adapter is Linear with `source_satisfied` and `status_update`
- * support.
+ * external update adapter is Linear with `tracker_satisfied` and
+ * `status_update` support.
  */
 export function resolveExternalUpdateAdapterForIntent(
   intent: Pick<UpdateIntent, "adapterKind" | "intentType">,
@@ -176,7 +180,7 @@ export function resolveExternalUpdateAdapterForIntent(
 ): ExternalUpdateAdapter | undefined {
   const adapter = getExternalUpdateAdapter(intent.adapterKind, adapters);
   if (!adapter) return undefined;
-  if (!adapter.supportedIntentTypes.includes(intent.intentType))
+  if (!supportsIntentType(adapter, intent.intentType))
     return undefined;
   return adapter;
 }
@@ -222,7 +226,7 @@ export function previewExternalUpdate(
   if (!adapter) {
     return unsupportedAdapterError(input.intent.adapterKind);
   }
-  if (!adapter.supportedIntentTypes.includes(input.intent.intentType)) {
+  if (!supportsIntentType(adapter, input.intent.intentType)) {
     return unsupportedIntentTypeError(adapter.kind, input.intent.intentType);
   }
   const policyError = validateExternalUpdatePolicy(input);
@@ -234,10 +238,24 @@ export function previewExternalUpdate(
   }
 }
 
+function supportsIntentType(
+  adapter: ExternalUpdateAdapter,
+  intentType: string,
+): boolean {
+  return (
+    adapter.supportedIntentTypes.includes(intentType) ||
+    (intentType === LEGACY_SOURCE_SATISFIED_INTENT_TYPE &&
+      adapter.supportedIntentTypes.includes(TRACKER_SATISFIED_INTENT_TYPE))
+  );
+}
+
 function buildLinearExternalUpdateAdapter(): ExternalUpdateAdapter {
   return {
     kind: "linear",
-    supportedIntentTypes: Object.freeze(["source_satisfied", "status_update"]),
+    supportedIntentTypes: Object.freeze([
+      TRACKER_SATISFIED_INTENT_TYPE,
+      "status_update",
+    ]),
     preview: linearPreview,
   };
 }
