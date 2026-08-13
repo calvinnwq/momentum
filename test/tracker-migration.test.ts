@@ -336,13 +336,11 @@ function seedLegacySourceGraph(dataDir: string): SeededGraph {
   ).run(intentId, goalId, linkedItemId, evidenceId);
 
   const workflowRunId = "wf_tracker_mig_1";
-  db
-    .prepare(
-      `INSERT INTO workflow_runs
+  db.prepare(
+    `INSERT INTO workflow_runs
          (id, state, source, source_artifact_path, created_at, updated_at)
        VALUES (?, 'succeeded', 'workflow-definition', '/tmp/wf-artifact.json', 6000, 6001)`,
-    )
-    .run(workflowRunId);
+  ).run(workflowRunId);
   db.close();
 
   return {

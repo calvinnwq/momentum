@@ -100,8 +100,7 @@ describe("shared renderer output contracts", () => {
     for (const spec of cases) {
       const result = await run(spec.args);
       expect(result.code, spec.args.join(" ")).toBe(spec.code);
-      const selected =
-        spec.stream === "stdout" ? result.stdout : result.stderr;
+      const selected = spec.stream === "stdout" ? result.stdout : result.stderr;
       const other = spec.stream === "stdout" ? result.stderr : result.stdout;
       expect(other, `${spec.args.join(" ")} other stream`).toBe("");
       expect(JSON.parse(selected), spec.args.join(" ")).toMatchObject(
