@@ -153,7 +153,14 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
       expect(result.intent.payload).toMatchObject({
         evidenceType: "validate_complete",
         goalState: "completed",
+        trackerItemId: "si-1",
+        trackerExternalId: "NGX-1",
+        trackerExternalKey: "SI-1",
+        trackerCurrentStatus: "in_progress",
       });
+      expect(result.intent.payload).not.toHaveProperty("sourceExternalId");
+      expect(result.intent.payload).not.toHaveProperty("sourceExternalKey");
+      expect(result.intent.payload).not.toHaveProperty("sourceCurrentStatus");
       expect(result.trackerItem.id).toBe("si-1");
       expect(result.verificationEvidence.id).toBe("ev-1");
 
@@ -458,7 +465,8 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
       if (result.outcome !== "evidence_insufficient") return;
       expect(result.warning.goalId).toBe("goal-2");
       expect(result.warning.trackerItemId).toBe("si-2");
-      expect(result.warning.sourceExternalId).toBe("NGX-2");
+      expect(result.warning.trackerExternalId).toBe("NGX-2");
+      expect(result.warning).not.toHaveProperty("sourceExternalId");
       expect(result.warning.acceptedEvidenceTypes).toEqual(
         DEFAULT_VERIFICATION_EVIDENCE_TYPES,
       );

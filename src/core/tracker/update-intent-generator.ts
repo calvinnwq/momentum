@@ -51,7 +51,7 @@ export type EvidenceInsufficientWarning = {
   goalId: string;
   goalState: string;
   trackerItemId: string;
-  sourceExternalId: string;
+  trackerExternalId: string;
   adapterKind: string;
   acceptedEvidenceTypes: readonly string[];
   reason: string;
@@ -188,7 +188,7 @@ export function evaluateGoalForTrackerSatisfiedIntents(
         goalId: goal.id,
         goalState: goal.state,
         trackerItemId: trackerItem.id,
-        sourceExternalId: trackerItem.externalId,
+        trackerExternalId: trackerItem.externalId,
         adapterKind: trackerItem.adapterKind,
         acceptedEvidenceTypes: acceptedTypes,
         reason: `Goal ${goal.id} is completed but has no verification evidence for tracker item ${trackerItem.externalKey ?? trackerItem.externalId} (accepted types: ${acceptedTypes.join(", ")}).`,
@@ -205,9 +205,9 @@ export function evaluateGoalForTrackerSatisfiedIntents(
       evidenceSource: evidence.source,
       evidenceOccurredAt: evidence.occurredAt,
       trackerItemId: trackerItem.id,
-      sourceExternalId: trackerItem.externalId,
-      sourceExternalKey: trackerItem.externalKey,
-      sourceCurrentStatus: trackerItem.status,
+      trackerExternalId: trackerItem.externalId,
+      trackerExternalKey: trackerItem.externalKey,
+      trackerCurrentStatus: trackerItem.status,
     };
 
     const created = createUpdateIntent(

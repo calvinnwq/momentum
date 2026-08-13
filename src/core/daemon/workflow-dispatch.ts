@@ -3350,13 +3350,13 @@ function seedLinearRefreshStatusUpdateIntent(input: {
   if (matches.length === 0) {
     return {
       ok: false,
-      reason: `linear_refresh_source_missing: no Linear source item matches workflow issue scope ${issueScopeIdentifier}`,
+      reason: `linear_refresh_tracker_item_missing: no Linear tracker item matches workflow issue scope ${issueScopeIdentifier}`,
     };
   }
   if (matches.length > 1) {
     return {
       ok: false,
-      reason: `linear_refresh_source_ambiguous: ${matches.length} Linear source items match workflow issue scope ${issueScopeIdentifier}`,
+      reason: `linear_refresh_tracker_item_ambiguous: ${matches.length} Linear tracker items match workflow issue scope ${issueScopeIdentifier}`,
     };
   }
 

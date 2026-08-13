@@ -186,12 +186,12 @@ describe("tracker-refresh lifecycle planner", () => {
     expect(plan.evidence.intentId).toBe(INTENT_ID);
   });
 
-  it("requires a matching Linear source item", () => {
+  it("requires a matching Linear tracker item", () => {
     expect(
       planTrackerRefreshLifecycle(baseInput({ trackerItemsById: sources() })),
     ).toMatchObject({
       phase: "preflight",
-      status: "source_missing",
+      status: "tracker_item_missing",
       action: "resolve_intent_evidence",
       safeToMutate: false,
     });

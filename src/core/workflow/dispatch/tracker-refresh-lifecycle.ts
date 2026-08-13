@@ -10,7 +10,7 @@ export type TrackerRefreshLifecycleStatus =
   | "auth_missing"
   | "policy_denied"
   | "issue_scope_missing"
-  | "source_missing"
+  | "tracker_item_missing"
   | "intent_missing"
   | "intent_duplicate"
   | "intent_stale"
@@ -281,13 +281,13 @@ function validateIntent(
   | { ok: true }
   | {
       ok: false;
-      status: "source_missing" | "intent_stale" | "payload_invalid";
+      status: "tracker_item_missing" | "intent_stale" | "payload_invalid";
       action: TrackerRefreshLifecycleAction;
     } {
   if (source === null || source.adapterKind !== "linear") {
     return {
       ok: false,
-      status: "source_missing",
+      status: "tracker_item_missing",
       action: "resolve_intent_evidence",
     };
   }
@@ -321,13 +321,13 @@ function validateAppliedIntent(
   | { ok: true }
   | {
       ok: false;
-      status: "source_missing" | "intent_stale" | "payload_invalid";
+      status: "tracker_item_missing" | "intent_stale" | "payload_invalid";
       action: TrackerRefreshLifecycleAction;
     } {
   if (source === null || source.adapterKind !== "linear") {
     return {
       ok: false,
-      status: "source_missing",
+      status: "tracker_item_missing",
       action: "resolve_intent_evidence",
     };
   }
