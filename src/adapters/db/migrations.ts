@@ -2225,13 +2225,23 @@ const TRACKER_INDEX_RENAME_DROPS: readonly string[] = [
   "idx_update_intents_source_item",
 ];
 
-const TRACKER_INDEX_RECREATE_DDL = `
-CREATE INDEX IF NOT EXISTS idx_evidence_records_tracker_item
-  ON evidence_records(tracker_item_id) WHERE tracker_item_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_update_intents_tracker_item
-  ON update_intents(tracker_item_id) WHERE tracker_item_id IS NOT NULL;
-`;
+// Recreated per table and guarded by table/column existence: a supported older
+// database can carry the source-named tracker tables without evidence_records
+// or update_intents yet. Those dependent tables (and these same tracker-item
+// indexes, via EVIDENCE_RECORDS_DDL / UPDATE_INTENTS_DDL) are created by the
+// later additive DDL pass, so a skipped index here is still created.
+const TRACKER_INDEX_RECREATES: ReadonlyArray<[string, string]> = [
+  [
+    "evidence_records",
+    `CREATE INDEX IF NOT EXISTS idx_evidence_records_tracker_item
+  ON evidence_records(tracker_item_id) WHERE tracker_item_id IS NOT NULL`,
+  ],
+  [
+    "update_intents",
+    `CREATE INDEX IF NOT EXISTS idx_update_intents_tracker_item
+  ON update_intents(tracker_item_id) WHERE tracker_item_id IS NOT NULL`,
+  ],
+];
 
 /**
  * Whether the durable tracker graph still carries pre-rename source-vocabulary
@@ -2304,7 +2314,11 @@ function migrateTrackerSchemaRename(db: MomentumDb): void {
       db.exec(`DROP INDEX IF EXISTS ${indexName}`);
     }
     db.exec(TRACKER_ITEMS_DDL);
-    db.exec(TRACKER_INDEX_RECREATE_DDL);
+    for (const [table, indexDdl] of TRACKER_INDEX_RECREATES) {
+      if (!tableExists(db, table)) continue;
+      if (!columnExists(db, table, "tracker_item_id")) continue;
+      db.exec(indexDdl);
+    }
 
     const violations = db.prepare("PRAGMA foreign_key_check").all();
     if (violations.length > 0) {

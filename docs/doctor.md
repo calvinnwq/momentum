@@ -128,17 +128,17 @@ The `effectiveIntentApply` block in the policy payload reports the resolved
 `policy (MOMENTUM.md):` line summarizing the repo policy load (including
 `intent_apply_policy` and its source).
 
-## Trackers block
+## Sources block
 
-The JSON `trackers` block reports current tracker-item counts and the most recent
+The JSON `sources` block reports current tracker-item counts and the most recent
 reconciliation run.
 
 ```json
 {
   "ok": true,
-  "totalTrackerItems": 0,
-  "linkedTrackerItems": 0,
-  "unlinkedTrackerItems": 0,
+  "totalSourceItems": 0,
+  "linkedSourceItems": 0,
+  "unlinkedSourceItems": 0,
   "lastReconciliation": {
     "id": "...",
     "adapterKind": "linear",
@@ -155,7 +155,7 @@ reconciliation run.
 
 `lastReconciliation` is `null` when no runs exist; on failure the block
 surfaces `ok: false` with `code` and `message`. Text output mirrors this
-with a `trackers:` line showing total / linked / unlinked counts plus the
+with a `sources:` line showing total / linked / unlinked counts plus the
 last reconciliation run's adapter kind, state, items seen/upserted, and
 stop reason (or reporting that no reconciliation runs have been recorded
 yet).
@@ -170,7 +170,7 @@ record:
   "ok": true,
   "totalRecords": 0,
   "goalLinkedRecords": 0,
-  "trackerItemLinkedRecords": 0,
+  "sourceItemLinkedRecords": 0,
   "lastRecord": {
     "id": "...",
     "source": "linear",
@@ -178,7 +178,7 @@ record:
     "occurredAt": "...",
     "summary": "...",
     "goalId": "...",
-    "trackerItemId": "..."
+    "sourceItemId": "..."
   }
 }
 ```

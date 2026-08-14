@@ -5,7 +5,7 @@ Operator-facing CLI envelopes for the `tracker list`, `tracker get`, `tracker li
 See also:
 
 - [docs/intent-commands.md](intent-commands.md) — the `intent list` / `get` / `apply` / `skip` / `cancel` envelopes that the project rollup surfaces.
-- [docs/doctor.md](doctor.md) - the `trackers` block and its tracker-named fields.
+- [docs/doctor.md](doctor.md) - the wire-stable `sources` block and its source-named fields.
 
 ## `tracker list`
 

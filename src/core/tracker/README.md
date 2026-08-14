@@ -7,10 +7,8 @@ update-intent generation.
 - `items.ts` - durable tracker items, snapshots, and goal links.
 - `reconciliation.ts` - Linear reconciliation over the tracker tables.
 - `reconciliation-runs.ts` - durable reconciliation run records.
-- `update-intent-generator.ts` - `tracker_satisfied` update-intent generation
-  from goal completion plus verification evidence. Historical
-  `source_satisfied` intent rows remain readable and applicable through the
-  external-update compatibility boundary.
+- `update-intent-generator.ts` - `source_satisfied` update-intent generation
+  from goal completion plus verification evidence.
 
 Tracker adapters are read-only with respect to external systems: they write
 only Momentum tracker tables, tracker snapshots, reconciliation runs, evidence,

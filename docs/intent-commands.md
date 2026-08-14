@@ -19,14 +19,12 @@ Filters:
 
 - `--status` filters by intent status (`pending`, `applied`, `skipped`, or `canceled`).
 - `--adapter` filters by adapter kind.
-- `--type` filters by intent type (e.g. `tracker_satisfied`).
+- `--type` filters by intent type (e.g. `source_satisfied`).
 - `--goal`, `--tracker-item`, and `--evidence-record` filter by their respective linked IDs; at least one of goal, tracker-item, or evidence-record must exist.
 - `--limit` caps the number of results.
 
-Newly generated completion intents use `tracker_satisfied`, and post-apply
-reconciliation uses `stale_tracker`.
-Historical `source_satisfied` intent types and `stale_source` reconcile statuses
-remain readable and applicable.
+Post-apply reconciliation uses `stale_tracker`.
+Historical `stale_source` reconcile statuses remain readable.
 
 JSON output includes `ok`, `command`, `dataDir`, active filter values, `count`, `totalAvailable`, `truncated`, and an `intents` array with full intent fields:
 
@@ -114,7 +112,7 @@ Policy resolution:
 
 - `--repo <path>` loads the repo's `MOMENTUM.md` policy file to resolve the effective `intent_apply_policy`.
 - When `--repo` is not provided, the effective policy falls back to the built-in default (`create_intents_only`).
-- `--external-apply` performs a policy-gated external tracker write through the adapter's external update client. It requires a `--repo` context whose `MOMENTUM.md` sets `intent_apply_policy: external_apply_allowed`, a resolved target issue, and the adapter's credential env var (`LINEAR_API_KEY` for the linear adapter). The write is a two-phase audit-before-write flow that is idempotent under replay; `tracker_satisfied` is comment-only, while Linear `status_update` intents must carry exactly one non-empty payload field, `state` or `stateId`, and perform a comment plus status transition.
+- `--external-apply` performs a policy-gated external tracker write through the adapter's external update client. It requires a `--repo` context whose `MOMENTUM.md` sets `intent_apply_policy: external_apply_allowed`, a resolved target issue, and the adapter's credential env var (`LINEAR_API_KEY` for the linear adapter). The write is a two-phase audit-before-write flow that is idempotent under replay; `source_satisfied` is comment-only, while Linear `status_update` intents must carry exactly one non-empty payload field, `state` or `stateId`, and perform a comment plus status transition.
 
 Without `--external-apply`, `intent apply` records the operator's manual mark only and does not contact the external tracker.
 

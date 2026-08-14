@@ -63,7 +63,7 @@ describe("momentum CLI scaffold", () => {
     expect(result.stdout).toContain(`scope: ${DOCTOR_SCOPE}`);
     expect(result.stdout).toContain("daemon: never started");
     expect(result.stdout).toContain(
-      "evidence: total=0 goal_linked=0 tracker_item_linked=0",
+      "evidence: total=0 goal_linked=0 source_item_linked=0",
     );
     expect(result.stdout).toContain("evidence: no records ingested yet");
     expect(result.stderr).toBe("");
@@ -125,7 +125,7 @@ describe("momentum CLI scaffold", () => {
       ok: true,
       totalRecords: 0,
       goalLinkedRecords: 0,
-      trackerItemLinkedRecords: 0,
+      sourceItemLinkedRecords: 0,
       lastRecord: null,
     });
     expect(result.stderr).toBe("");
@@ -338,14 +338,14 @@ describe("momentum CLI scaffold", () => {
       ok: true,
       totalRecords: 2,
       goalLinkedRecords: 1,
-      trackerItemLinkedRecords: 1,
+      sourceItemLinkedRecords: 1,
       lastRecord: {
         source: "agent-workflow",
         type: "merge_complete",
         occurredAt: 9_000,
         summary: "Merge complete",
         goalId: "goal-doctor",
-        trackerItemId: "si-doctor",
+        sourceItemId: "si-doctor",
       },
     });
     expect(
@@ -355,10 +355,10 @@ describe("momentum CLI scaffold", () => {
     const textResult = await run(["doctor", "--data-dir", dataDir]);
     expect(textResult.code).toBe(0);
     expect(textResult.stdout).toContain(
-      "evidence: total=2 goal_linked=1 tracker_item_linked=1",
+      "evidence: total=2 goal_linked=1 source_item_linked=1",
     );
     expect(textResult.stdout).toContain(
-      "evidence: last agent-workflow/merge_complete at 9000 (goal=goal-doctor, tracker_item=si-doctor)",
+      "evidence: last agent-workflow/merge_complete at 9000 (goal=goal-doctor, source_item=si-doctor)",
     );
   });
 
@@ -2720,7 +2720,7 @@ describe("momentum recovery clear", () => {
     });
   });
 
-  it("tracker link creates a pending tracker_satisfied intent when completed goal evidence already exists", async () => {
+  it("tracker link creates a pending source_satisfied intent when completed goal evidence already exists", async () => {
     const dataDir = makeTempDir("momentum-cli-source-link-intent-");
     const goalId = "goal-link-intent";
 
@@ -2798,7 +2798,7 @@ describe("momentum recovery clear", () => {
       expect(intents).toHaveLength(1);
       expect(intents[0]).toMatchObject({
         trackerItemId,
-        intentType: "tracker_satisfied",
+        intentType: "source_satisfied",
       });
     } finally {
       verifyDb.close();
@@ -3210,7 +3210,7 @@ describe("momentum recovery clear", () => {
       string,
       unknown
     >;
-    const trackers = doctorPayload["trackers"] as Record<string, unknown>;
+    const trackers = doctorPayload["sources"] as Record<string, unknown>;
     expect(trackers).toMatchObject({
       ok: true,
       lastReconciliation: { adapterKind: "linear", state: "succeeded" },
@@ -3321,7 +3321,7 @@ describe("momentum recovery clear", () => {
       unknown
     >;
     expect(doctorPayload).toMatchObject({
-      trackers: {
+      sources: {
         ok: true,
         lastReconciliation: {
           adapterKind: "linear",
@@ -3334,7 +3334,7 @@ describe("momentum recovery clear", () => {
     const doctorText = await run(["doctor", "--data-dir", dataDir]);
     expect(doctorText.code).toBe(0);
     expect(doctorText.stdout).toContain(
-      "trackers: last linear reconciliation succeeded",
+      "sources: last linear reconciliation succeeded",
     );
     expect(doctorText.stdout).toContain("stopped=max_pages");
   });

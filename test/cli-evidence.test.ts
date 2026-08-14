@@ -704,7 +704,7 @@ describe("momentum evidence ingest", () => {
     }
   });
 
-  it("creates a pending tracker_satisfied intent when ingesting completed goal evidence", async () => {
+  it("creates a pending source_satisfied intent when ingesting completed goal evidence", async () => {
     const dataDir = makeTempDir();
     const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
     const runDir = buildWorkflowFixture(workflowRoot, "cwfp-intentgoal000");
@@ -746,13 +746,13 @@ describe("momentum evidence ingest", () => {
       });
       expect(intents).toHaveLength(1);
       expect(intents[0]?.trackerItemId).toBe("si-intent-goal");
-      expect(intents[0]?.intentType).toBe("tracker_satisfied");
+      expect(intents[0]?.intentType).toBe("source_satisfied");
     } finally {
       db.close();
     }
   });
 
-  it("reports every pending tracker_satisfied intent created for a multi-tracker completed goal", async () => {
+  it("reports every pending source_satisfied intent created for a multi-tracker completed goal", async () => {
     const dataDir = makeTempDir();
     const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
     const runDir = buildWorkflowFixture(workflowRoot, "cwfp-intentmulti00");
@@ -929,7 +929,7 @@ describe("momentum evidence ingest", () => {
     }
   });
 
-  it("creates a pending tracker_satisfied intent from tracker-item-linked completed goal evidence", async () => {
+  it("creates a pending source_satisfied intent from tracker-item-linked completed goal evidence", async () => {
     const dataDir = makeTempDir();
     const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
     const runDir = buildWorkflowFixture(workflowRoot, "cwfp-intentsource00");

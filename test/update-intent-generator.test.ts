@@ -9,8 +9,6 @@ import {
   evaluateGoalForTrackerSatisfiedIntents,
 } from "../src/core/tracker/update-intent-generator.js";
 import {
-  LEGACY_SOURCE_SATISFIED_INTENT_TYPE,
-  createUpdateIntent,
   getUpdateIntentById,
   listUpdateIntents,
 } from "../src/core/intent/update-intents.js";
@@ -118,7 +116,7 @@ function insertEvidenceRecord(
 }
 
 describe("evaluateGoalForTrackerSatisfiedIntents", () => {
-  it("creates one tracker_satisfied intent for a completed Goal with verification evidence and a linked open tracker item", () => {
+  it("creates one source_satisfied intent for a completed Goal with verification evidence and a linked open tracker item", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-1", "completed");
@@ -142,7 +140,7 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
 
       expect(result.intent.adapterKind).toBe("linear");
       expect(result.intent.targetExternalId).toBe("NGX-1");
-      expect(result.intent.intentType).toBe("tracker_satisfied");
+      expect(result.intent.intentType).toBe("source_satisfied");
       expect(result.intent.status).toBe("pending");
       expect(result.intent.goalId).toBe("goal-1");
       expect(result.intent.trackerItemId).toBe("si-1");
@@ -150,7 +148,7 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
       expect(result.intent.reason).toContain("completed");
       expect(result.intent.reason).toContain("verification evidence");
       expect(result.intent.idempotencyKey).toBe(
-        "linear:NGX-1:tracker_satisfied:goal-1",
+        "linear:NGX-1:source_satisfied:goal-1",
       );
       expect(result.intent.payload).toMatchObject({
         evidenceType: "validate_complete",
@@ -210,53 +208,6 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
 
       expect(listUpdateIntents(db).map((i) => i.id)).toEqual([first.intent.id]);
       expect(getUpdateIntentById(db, first.intent.id)?.updatedAt).toBe(1000);
-    } finally {
-      db.close();
-    }
-  });
-
-  it("replays historical source_satisfied intents without creating a duplicate tracker intent", () => {
-    const db = openDb(makeTempDir());
-    try {
-      insertGoal(db, "goal-legacy", "completed");
-      insertTrackerItem(db, {
-        id: "si-legacy",
-        goalId: "goal-legacy",
-        status: "in_progress",
-        adapterKind: "linear",
-        externalId: "NGX-LEGACY",
-      });
-      insertEvidenceRecord(
-        db,
-        "ev-legacy",
-        "verification_passed",
-        "goal-legacy",
-        1000,
-      );
-      const legacy = createUpdateIntent(db, {
-        adapterKind: "linear",
-        targetExternalId: "NGX-LEGACY",
-        intentType: LEGACY_SOURCE_SATISFIED_INTENT_TYPE,
-        reason: "Historical completion intent",
-        goalId: "goal-legacy",
-        trackerItemId: "si-legacy",
-        evidenceRecordId: "ev-legacy",
-        idempotencyKey: "linear:NGX-LEGACY:source_satisfied:goal-legacy",
-      }).intent;
-
-      const result = evaluateGoalForTrackerSatisfiedIntents(
-        db,
-        { goalId: "goal-legacy" },
-        { now: () => 5000 },
-      )[0]!;
-
-      expect(result.outcome).toBe("intent_replayed");
-      if (result.outcome !== "intent_replayed") return;
-      expect(result.intent.id).toBe(legacy.id);
-      expect(result.intent.intentType).toBe(
-        LEGACY_SOURCE_SATISFIED_INTENT_TYPE,
-      );
-      expect(listUpdateIntents(db)).toHaveLength(1);
     } finally {
       db.close();
     }

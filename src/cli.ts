@@ -781,7 +781,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
       ),
     },
     policy: policyPayload,
-    trackers: trackersPayload,
+    sources: trackersPayload,
     evidence: evidencePayload,
     externalApply: externalApplyPayload,
   } as const;
@@ -810,7 +810,7 @@ function buildDoctorEvidencePayload(
         ok: true,
         totalRecords: summary.totalRecords,
         goalLinkedRecords: summary.goalLinkedRecords,
-        trackerItemLinkedRecords: summary.trackerItemLinkedRecords,
+        sourceItemLinkedRecords: summary.trackerItemLinkedRecords,
         lastRecord: null,
       };
     }
@@ -818,7 +818,7 @@ function buildDoctorEvidencePayload(
       ok: true,
       totalRecords: summary.totalRecords,
       goalLinkedRecords: summary.goalLinkedRecords,
-      trackerItemLinkedRecords: summary.trackerItemLinkedRecords,
+      sourceItemLinkedRecords: summary.trackerItemLinkedRecords,
       lastRecord: {
         id: summary.lastRecord.id,
         source: summary.lastRecord.source,
@@ -826,7 +826,7 @@ function buildDoctorEvidencePayload(
         occurredAt: summary.lastRecord.occurredAt,
         summary: summary.lastRecord.summary,
         goalId: summary.lastRecord.goalId,
-        trackerItemId: summary.lastRecord.trackerItemId,
+        sourceItemId: summary.lastRecord.trackerItemId,
       },
     };
   } finally {
@@ -896,26 +896,26 @@ function buildDoctorTrackersPayload(
            FROM tracker_items`,
       )
       .get() as { total: number; linked: number | null } | undefined;
-    const totalTrackerItems = counts?.total ?? 0;
-    const linkedTrackerItems = counts?.linked ?? 0;
-    const unlinkedTrackerItems = totalTrackerItems - linkedTrackerItems;
+    const totalSourceItems = counts?.total ?? 0;
+    const linkedSourceItems = counts?.linked ?? 0;
+    const unlinkedSourceItems = totalSourceItems - linkedSourceItems;
 
     const runs = listTrackerReconciliationRuns(db);
     if (runs.length === 0) {
       return {
         ok: true,
-        totalTrackerItems,
-        linkedTrackerItems,
-        unlinkedTrackerItems,
+        totalSourceItems,
+        linkedSourceItems,
+        unlinkedSourceItems,
         lastReconciliation: null,
       };
     }
     const last = runs[runs.length - 1] as TrackerReconciliationRun;
     return {
       ok: true,
-      totalTrackerItems,
-      linkedTrackerItems,
-      unlinkedTrackerItems,
+      totalSourceItems,
+      linkedSourceItems,
+      unlinkedSourceItems,
       lastReconciliation: {
         id: last.id,
         adapterKind: last.adapterKind,

@@ -51,7 +51,9 @@ function columnNames(db: DatabaseSync, table: string): string[] {
 
 // The exact pre-rename (source-vocabulary) durable schema for the tracker
 // graph, plus the unrelated-source tables the migration must not touch.
-const LEGACY_SOURCE_SCHEMA = `
+// Split in two: the core source graph existed before evidence_records and
+// update_intents, so an older supported database can carry the core alone.
+const LEGACY_SOURCE_CORE_SCHEMA = `
 PRAGMA foreign_keys = ON;
 CREATE TABLE goals (
   id TEXT PRIMARY KEY,
@@ -139,7 +141,9 @@ CREATE TABLE source_reconciliation_runs (
 
 CREATE INDEX idx_source_reconciliation_runs_adapter_started
   ON source_reconciliation_runs(adapter_kind, started_at);
+`;
 
+const LEGACY_SOURCE_DEPENDENTS_SCHEMA = `
 CREATE TABLE evidence_records (
   id TEXT PRIMARY KEY,
   source TEXT NOT NULL,
@@ -221,6 +225,9 @@ CREATE INDEX idx_update_intents_adapter_target
 CREATE INDEX idx_update_intents_created_at
   ON update_intents(created_at);
 `;
+
+const LEGACY_SOURCE_SCHEMA =
+  LEGACY_SOURCE_CORE_SCHEMA + LEGACY_SOURCE_DEPENDENTS_SCHEMA;
 
 type SeededGraph = {
   goalId: string;
@@ -506,6 +513,76 @@ describe("tracker schema rename migration", () => {
           .run(),
       ).toThrow(/FOREIGN KEY constraint failed/);
 
+      expect(db.prepare("PRAGMA foreign_key_check").all()).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("migrates an older database that has the source graph but no evidence_records or update_intents", () => {
+    const dataDir = makeTempDir();
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    raw.exec(LEGACY_SOURCE_CORE_SCHEMA);
+    raw
+      .prepare(
+        `INSERT INTO source_items
+           (id, adapter_kind, external_id, title, metadata_json,
+            last_observed_at, created_at, updated_at)
+         VALUES ('source_item_old_1', 'linear', 'ext-old-1', 'Old item', '{}', 1, 1, 1)`,
+      )
+      .run();
+    raw
+      .prepare(
+        `INSERT INTO source_snapshots
+           (id, source_item_id, adapter_kind, external_id, observed_at,
+            snapshot_json, created_at)
+         VALUES ('source_snapshot_old_1', 'source_item_old_1', 'linear',
+                 'ext-old-1', 1, '{}', 1)`,
+      )
+      .run();
+    raw
+      .prepare(
+        `INSERT INTO source_reconciliation_runs
+           (id, adapter_kind, state, started_at, created_at, updated_at)
+         VALUES ('source_reconciliation_run_old_1', 'linear', 'succeeded', 1, 1, 1)`,
+      )
+      .run();
+    raw.close();
+
+    const db = openDb(dataDir);
+    try {
+      const tables = tableNames(db);
+      expect(tables).toContain("tracker_items");
+      expect(tables).toContain("tracker_snapshots");
+      expect(tables).toContain("tracker_reconciliation_runs");
+      expect(tables).not.toContain("source_items");
+      // The dependent tables are created fresh by the additive pass, already
+      // tracker-named, together with their tracker-item indexes.
+      expect(tables).toContain("evidence_records");
+      expect(tables).toContain("update_intents");
+      expect(columnNames(db, "evidence_records")).toContain("tracker_item_id");
+      expect(columnNames(db, "update_intents")).toContain("tracker_item_id");
+      const indexes = indexNames(db);
+      expect(indexes).toContain("idx_evidence_records_tracker_item");
+      expect(indexes).toContain("idx_update_intents_tracker_item");
+
+      const items = db
+        .prepare("SELECT id, external_id FROM tracker_items")
+        .all() as Array<Record<string, unknown>>;
+      expect(items).toEqual([
+        { id: "source_item_old_1", external_id: "ext-old-1" },
+      ]);
+      const snapshots = db
+        .prepare("SELECT id, tracker_item_id FROM tracker_snapshots")
+        .all() as Array<Record<string, unknown>>;
+      expect(snapshots).toEqual([
+        { id: "source_snapshot_old_1", tracker_item_id: "source_item_old_1" },
+      ]);
+      expect(
+        db
+          .prepare("SELECT COUNT(*) AS n FROM tracker_reconciliation_runs")
+          .get(),
+      ).toEqual({ n: 1 });
       expect(db.prepare("PRAGMA foreign_key_check").all()).toHaveLength(0);
     } finally {
       db.close();
