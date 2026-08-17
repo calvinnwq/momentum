@@ -1466,11 +1466,35 @@ const PARTIAL_LEGACY_INVOCATION_REQUIRED_COLUMNS: readonly string[] = [
   "updated_at",
 ];
 
+// Every `executor_attempts` column the partial SDK-05 phase writes. The phase
+// builds its INSERT from this list and the preflight requires each column on a
+// pre-existing destination table, so the two can never drift. The list also
+// covers every column the phase reads back (`attempt_id`,
+// `legacy_invocation_id`, `attempt_number`).
+const PARTIAL_LEGACY_INVOCATION_ATTEMPT_COLUMNS: readonly string[] = [
+  "attempt_id",
+  "workflow_run_id",
+  "step_run_id",
+  "step_key",
+  "executor",
+  "state",
+  "attempt_number",
+  "started_at",
+  "heartbeat_at",
+  "finished_at",
+  "legacy_invocation_id",
+  "legacy_provenance",
+  "created_at",
+  "updated_at",
+];
+
 /**
  * Read-only preconditions of `migratePartialLegacyExecutorInvocationSchema`:
  * when that phase would run (a legacy invocation table with no legacy round
  * source), every deterministic refusal the phase can raise is replicated here
- * without mutating anything - the required-column contract, the collision
+ * without mutating anything - the required-column contract of the legacy
+ * source table, the destination-table contract (every `executor_attempts`
+ * column the phase's INSERT names, when that table pre-exists), the collision
  * with an unrelated current attempt, and the foreign-key parents of every
  * row the phase would insert. Shared with the migration itself so the
  * up-front refusal and the phase's own refusals can never drift, and hoisted
@@ -1496,6 +1520,23 @@ function assertPartialLegacyInvocationMigrationPreconditions(
     throw new Error(
       `partial SDK-05 invocation migration is missing required column ${missingColumn}`,
     );
+  }
+
+  // A pre-existing destination table must already carry every column the
+  // phase's INSERT names; the additive pass never repairs `executor_attempts`
+  // columns, and preparing any statement against a partial table would throw
+  // an unhelpful error here or - worse - only inside the phase, after the
+  // tracker rename committed. An absent table needs no check: the additive
+  // DDL pass creates it in full current shape before the phase runs.
+  if (tableExists(db, "executor_attempts")) {
+    const missingAttemptColumn = PARTIAL_LEGACY_INVOCATION_ATTEMPT_COLUMNS.find(
+      (column) => !columnExists(db, "executor_attempts", column),
+    );
+    if (missingAttemptColumn !== undefined) {
+      throw new Error(
+        `partial SDK-05 invocation migration target executor_attempts is missing required column ${missingAttemptColumn}`,
+      );
+    }
   }
 
   // Replicate the phase's remaining deterministic refusals read-only, in the
@@ -1607,12 +1648,12 @@ function migratePartialLegacyExecutorInvocationSchema(
            FROM executor_attempts
           WHERE attempt_id = ?`,
       );
+      // Column order matches the `insertAttempt.run(...)` argument order
+      // below; the preflight requires each of these on a pre-existing table.
       const insertAttempt = db.prepare(
         `INSERT INTO executor_attempts (
-           attempt_id, workflow_run_id, step_run_id, step_key, executor,
-           state, attempt_number, started_at, heartbeat_at, finished_at,
-           legacy_invocation_id, legacy_provenance, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ${PARTIAL_LEGACY_INVOCATION_ATTEMPT_COLUMNS.join(", ")}
+         ) VALUES (${PARTIAL_LEGACY_INVOCATION_ATTEMPT_COLUMNS.map(() => "?").join(", ")})`,
       );
       const attemptNumbersByStep = new Map<string, Set<number>>();
 

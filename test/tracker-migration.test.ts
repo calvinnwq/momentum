@@ -999,6 +999,124 @@ describe("tracker schema rename migration", () => {
     }
   });
 
+  it("refuses before the rename when a pre-existing executor_attempts table is missing an insert column, and retries cleanly after repair", () => {
+    const dataDir = makeTempDir();
+    const seededBefore = seedLegacySourceGraph(dataDir);
+
+    // Manufacture the destination-schema failure the partial SDK-05 phase hits
+    // late: a current-shaped executor_attempts table that omits only
+    // legacy_provenance, beside a valid partial invocation. The additive pass
+    // never repairs executor_attempts columns, so without the up-front
+    // preflight the phase's INSERT would throw only after the tracker rename
+    // committed.
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    raw.exec(`
+      CREATE TABLE executor_attempts (
+        attempt_id TEXT PRIMARY KEY,
+        workflow_run_id TEXT NOT NULL,
+        step_run_id TEXT NOT NULL,
+        step_key TEXT NOT NULL,
+        executor TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'pending',
+        attempt_number INTEGER NOT NULL DEFAULT 1,
+        started_at INTEGER,
+        heartbeat_at INTEGER,
+        finished_at INTEGER,
+        legacy_invocation_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE workflow_steps (
+        run_id TEXT NOT NULL REFERENCES workflow_runs(id),
+        step_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'pending',
+        step_order INTEGER NOT NULL,
+        required INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (run_id, step_id)
+      ) STRICT;
+
+      INSERT INTO workflow_steps
+        (run_id, step_id, kind, state, step_order, required,
+         created_at, updated_at)
+      VALUES ('wf_tracker_mig_1', 'implementation', 'implementation',
+              'succeeded', 1, 1, 1, 1);
+
+      CREATE TABLE executor_invocations (
+        invocation_id TEXT PRIMARY KEY,
+        workflow_run_id TEXT NOT NULL,
+        step_run_id TEXT NOT NULL,
+        step_key TEXT NOT NULL,
+        executor_family TEXT NOT NULL,
+        state TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      INSERT INTO executor_invocations
+        (invocation_id, workflow_run_id, step_run_id, step_key,
+         executor_family, state, attempt, created_at, updated_at)
+      VALUES ('inv-partial-1', 'wf_tracker_mig_1', 'implementation',
+              'implementation', 'agent-loop', 'running', 1, 1, 1);
+    `);
+    raw.close();
+
+    expect(() => openDb(dataDir)).toThrow(
+      /target executor_attempts is missing required column legacy_provenance/,
+    );
+
+    // Fail-closed and retryable: the tracker rename was not committed, so the
+    // source graph is still intact under its legacy names.
+    const inspect = new DatabaseSync(path.join(dataDir, "momentum.db"), {
+      readOnly: true,
+    });
+    try {
+      const tables = tableNames(inspect);
+      expect(tables).toContain("source_items");
+      expect(tables).not.toContain("tracker_items");
+      expect(tables).toContain("executor_invocations");
+      expect(
+        inspect.prepare("SELECT COUNT(*) AS n FROM source_items").get(),
+      ).toEqual({ n: 2 });
+    } finally {
+      inspect.close();
+    }
+
+    // Operator repair: add the missing destination column, then reopen. The
+    // retried migration chain completes the rename losslessly.
+    const repair = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    repair.exec(
+      "ALTER TABLE executor_attempts ADD COLUMN legacy_provenance TEXT;",
+    );
+    repair.close();
+
+    const db = openDb(dataDir);
+    try {
+      const tables = tableNames(db);
+      expect(tables).toContain("tracker_items");
+      expect(tables).not.toContain("source_items");
+      expect(tables).not.toContain("executor_invocations");
+      const items = db
+        .prepare("SELECT id FROM tracker_items ORDER BY id")
+        .all() as Array<{ id: string }>;
+      expect(items.map((row) => row.id).sort()).toEqual(
+        [seededBefore.linkedItemId, seededBefore.unlinkedItemId].sort(),
+      );
+      const migrated = db
+        .prepare(
+          "SELECT attempt_id, legacy_invocation_id FROM executor_attempts WHERE attempt_id = 'inv-partial-1'",
+        )
+        .get() as { attempt_id: string; legacy_invocation_id: string | null };
+      expect(migrated.legacy_invocation_id).toBe("inv-partial-1");
+    } finally {
+      db.close();
+    }
+  });
+
   it("refuses before the rename when a partial invocation references a missing foreign-key parent", () => {
     const dataDir = makeTempDir();
     seedLegacySourceGraph(dataDir);
