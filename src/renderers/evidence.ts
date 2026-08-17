@@ -2,7 +2,12 @@ import type { EvidenceRecord } from "../core/evidence/records.js";
 import type { WorkflowEvidenceDiagnostic } from "../core/evidence/workflow.js";
 import type { EvaluateGoalForTrackerSatisfiedIntentResult } from "../core/tracker/update-intent-generator.js";
 import { intentEvaluationToJsonShape } from "./tracker.js";
-import { write, writeJson, type CliIo } from "./cli-output.js";
+import {
+  TRACKER_CONTRACT_SCHEMA_VERSION,
+  write,
+  writeJson,
+  type CliIo,
+} from "./cli-output.js";
 
 type JsonFlags = {
   json: boolean;
@@ -76,6 +81,7 @@ export function emitEvidenceIngestSuccess(
     ok,
     command: "evidence ingest",
     dataDir: result.dataDir,
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     path: result.artifactPath,
     goalId: result.goalId,
     trackerItemId: result.trackerItemId,
@@ -130,6 +136,7 @@ export function emitEvidenceIngestFailure(
   const payload: Record<string, unknown> = {
     ok: false,
     command: "evidence ingest",
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     code: failure.code,
     message: failure.message,
   };
@@ -167,6 +174,7 @@ export function emitEvidenceList(
     ok: true,
     command: "evidence list",
     dataDir: data.dataDir,
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     goalId: data.filters.goalId ?? null,
     trackerItemId: data.filters.trackerItemId ?? null,
     source: data.filters.source ?? null,
@@ -219,6 +227,7 @@ export function emitEvidenceListFailure(
   const payload: Record<string, unknown> = {
     ok: false,
     command: "evidence list",
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     code: failure.code,
     message: failure.message,
   };

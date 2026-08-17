@@ -8,7 +8,12 @@ import {
   intentApplyAuditToJsonShape,
   type IntentApplyAuditJsonShape,
 } from "./intent.js";
-import { write, writeJson, type CliIo } from "./cli-output.js";
+import {
+  TRACKER_CONTRACT_SCHEMA_VERSION,
+  write,
+  writeJson,
+  type CliIo,
+} from "./cli-output.js";
 
 export function emitProjectStatusSuccess(
   parsed: { json: boolean },
@@ -57,6 +62,7 @@ export function projectStatusToJsonShape(
     ok: true,
     command: "project status",
     dataDir,
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     filters: {
       adapter: filters.adapterKind ?? null,
       projectId: filters.projectId ?? null,

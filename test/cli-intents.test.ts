@@ -224,6 +224,7 @@ describe("momentum intent list", () => {
     expect(payload).toMatchObject({
       ok: true,
       command: "intent list",
+      schemaVersion: 2,
       status: null,
       adapter: null,
       intentType: null,

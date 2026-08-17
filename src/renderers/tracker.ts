@@ -13,7 +13,12 @@ import type {
 import type { EvaluateGoalForTrackerSatisfiedIntentResult } from "../core/tracker/update-intent-generator.js";
 import { evidenceRecordToJsonShape } from "./evidence.js";
 import { updateIntentToJsonShape } from "./intent.js";
-import { write, writeJson, type CliIo } from "./cli-output.js";
+import {
+  TRACKER_CONTRACT_SCHEMA_VERSION,
+  write,
+  writeJson,
+  type CliIo,
+} from "./cli-output.js";
 
 type JsonFlags = {
   json: boolean;
@@ -52,6 +57,7 @@ export function emitTrackerList(
     ok: true,
     command: "tracker list",
     dataDir: data.dataDir,
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     adapter: data.adapter,
     count: data.items.length,
     items: data.items.map(trackerItemToJsonShape),
@@ -103,6 +109,7 @@ export function emitTrackerGet(
     ok: true,
     command: "tracker get",
     dataDir: data.dataDir,
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     item: trackerItemToJsonShape(data.item),
   };
 
@@ -154,6 +161,7 @@ export function emitTrackerLink(
     ok: true,
     command: "tracker link",
     dataDir: data.dataDir,
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     goalId: data.goalId,
     trackerItemId: data.result.trackerItem.id,
     changed: data.result.changed,
@@ -202,6 +210,7 @@ export function emitTrackerUnlink(
     ok: true,
     command: "tracker unlink",
     dataDir: data.dataDir,
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     trackerItemId: data.result.trackerItem.id,
     changed: data.result.changed,
     previousGoalId: data.result.previousGoalId,
@@ -249,6 +258,7 @@ export function emitTrackerReconcileResult(
     ok,
     command: "tracker reconcile linear",
     dataDir: data.dataDir,
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     adapter: data.adapter,
     filters: data.filters,
     dryRun: data.dryRun,
@@ -395,6 +405,7 @@ export function emitTrackerFailure(
   const payload: Record<string, unknown> = {
     ok: false,
     command,
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     code: failure.code,
     message: failure.message,
   };

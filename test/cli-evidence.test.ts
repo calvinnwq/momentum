@@ -242,6 +242,9 @@ describe("momentum evidence ingest", () => {
     };
     expect(payload.ok).toBe(true);
     expect(payload.command).toBe("evidence ingest");
+    expect(
+      (payload as unknown as Record<string, unknown>)["schemaVersion"],
+    ).toBe(2);
     expect(payload.counts.observed).toBe(5);
     expect(payload.counts.created).toBe(5);
     expect(payload.counts.skipped).toBe(0);

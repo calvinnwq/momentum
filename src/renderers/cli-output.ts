@@ -12,16 +12,27 @@ export type CliIo = {
 
 export type JsonPayload = Record<string, unknown>;
 
+/**
+ * Contract version for JSON envelopes that carry tracker-owned keys renamed
+ * in the source -> tracker rename (for example `trackerItemId`,
+ * `trackerItems`, and the `adapter` filter key).
+ *
+ * Version 1 is the legacy, unversioned source-keyed shape, which never
+ * carried this marker. Version 2 is the tracker-keyed shape, so machine
+ * consumers distinguish the two shapes by the marker's presence and value.
+ */
+export const TRACKER_CONTRACT_SCHEMA_VERSION = 2;
+
 export function usageError(
   message: string,
   parsed: { json: boolean },
-  io: CliIo
+  io: CliIo,
 ): number {
   const payload = {
     ok: false,
     code: "usage_error",
     message,
-    commands: COMMANDS
+    commands: COMMANDS,
   };
 
   if (parsed.json) {
@@ -44,7 +55,7 @@ export function renderHelp(): string {
     "",
     "Usage:",
     ...COMMANDS.map((command) => `  ${command}`),
-    ""
+    "",
   ].join("\n");
 }
 

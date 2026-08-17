@@ -8,7 +8,12 @@ import type {
   UpdateIntent,
   UpdateIntentStatus,
 } from "../core/intent/update-intents.js";
-import { write, writeJson, type CliIo } from "./cli-output.js";
+import {
+  TRACKER_CONTRACT_SCHEMA_VERSION,
+  write,
+  writeJson,
+  type CliIo,
+} from "./cli-output.js";
 
 export type IntentCommand =
   | "intent list"
@@ -256,6 +261,7 @@ export function emitIntentListSuccess(
     ok: true,
     command: "intent list",
     dataDir,
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     status: statusFilter,
     adapter: filters.adapterKind ?? null,
     intentType: filters.intentType ?? null,
@@ -326,6 +332,7 @@ export function emitIntentGetSuccess(
     ok: true,
     command: "intent get",
     dataDir,
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     intent: updateIntentToJsonShape(record),
     externalApply,
   };
@@ -375,6 +382,7 @@ export function emitIntentDecisionSuccess(
     ok: true,
     command: input.command,
     dataDir: input.dataDir,
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     previousStatus: input.previousStatus,
     intent: updateIntentToJsonShape(input.record),
   };
@@ -426,6 +434,7 @@ export function emitIntentExternalApplySuccess(
     ok: true,
     command: "intent apply",
     dataDir: input.dataDir,
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     previousStatus: "pending",
     intent: updateIntentToJsonShape(input.record),
     applyPolicy: input.applyPolicy,
@@ -491,6 +500,7 @@ export function emitIntentFailure(
   const payload: Record<string, unknown> = {
     ok: false,
     command: failure.command,
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     code: failure.code,
     message: failure.message,
   };

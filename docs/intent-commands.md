@@ -7,6 +7,8 @@ See also:
 - [docs/tracker-commands.md](tracker-commands.md) — tracker-adapter commands that produce update intents.
 - [docs/doctor.md](doctor.md) — the `effectiveIntentApply` block (built-in default `create_intents_only` vs `external_apply_allowed` from `MOMENTUM.md`) and the `externalApply` audit-ledger aggregate.
 
+All JSON envelopes on this page report `schemaVersion: 2`, marking the tracker-named key contract; the legacy source-keyed shape never carried the marker.
+
 ## `intent list`
 
 ```text
@@ -26,7 +28,7 @@ Filters:
 Post-apply reconciliation uses `stale_tracker`.
 Historical `stale_source` reconcile statuses remain readable.
 
-JSON output includes `ok`, `command`, `dataDir`, active filter values, `count`, `totalAvailable`, `truncated`, and an `intents` array with full intent fields:
+JSON output includes `ok`, `command`, `dataDir`, `schemaVersion`, active filter values, `count`, `totalAvailable`, `truncated`, and an `intents` array with full intent fields:
 
 - `id`
 - `adapterKind`
@@ -98,7 +100,7 @@ momentum intent get <intent-id> [--data-dir <path>] [--json]
 
 Retrieves a single update intent by ID.
 
-JSON output includes `ok`, `command`, `dataDir`, an `intent` object with all intent fields, and an `externalApply` block with the same shape as the per-intent `externalApply` in `intent list` — `intentId`, `applyState`, `totalAttempts`, `counts`, and `latestAttempt`. When the intent does not exist, exits non-zero with `code: "intent_not_found"` and includes `intentId` in the error payload. Text output shows the intent ID, adapter kind, target external ID, type, status, reason, linked goal/tracker-item/evidence-record IDs, timestamps, and the external apply state, attempt counts, and latest attempt details.
+JSON output includes `ok`, `command`, `dataDir`, `schemaVersion`, an `intent` object with all intent fields, and an `externalApply` block with the same shape as the per-intent `externalApply` in `intent list` — `intentId`, `applyState`, `totalAttempts`, `counts`, and `latestAttempt`. When the intent does not exist, exits non-zero with `code: "intent_not_found"` and includes `intentId` in the error payload. Text output shows the intent ID, adapter kind, target external ID, type, status, reason, linked goal/tracker-item/evidence-record IDs, timestamps, and the external apply state, attempt counts, and latest attempt details.
 
 ## `intent apply`
 

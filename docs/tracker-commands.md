@@ -7,6 +7,8 @@ See also:
 - [docs/intent-commands.md](intent-commands.md) — the `intent list` / `get` / `apply` / `skip` / `cancel` envelopes that the project rollup surfaces.
 - [docs/doctor.md](doctor.md) - the wire-stable `sources` block and its source-named fields.
 
+All JSON envelopes on this page report `schemaVersion: 2`, marking the tracker-named key contract; the legacy source-keyed shape never carried the marker, so machine consumers distinguish the two shapes by the marker's presence and value.
+
 ## `tracker list`
 
 ```text
@@ -15,7 +17,7 @@ momentum tracker list [--adapter <kind>] [--data-dir <path>] [--json]
 
 Lists tracker items stored in the data directory. When `--adapter` is provided, filters to items from that adapter kind only.
 
-JSON output includes `ok`, `command`, `dataDir`, `adapter`, `count`, an `items` array, and `lastReconciliation`. Each `items` element exposes:
+JSON output includes `ok`, `command`, `dataDir`, `schemaVersion`, `adapter`, `count`, an `items` array, and `lastReconciliation`. Each `items` element exposes:
 
 - `id`
 - `adapterKind`
@@ -40,7 +42,7 @@ Text output lists adapter kind, external key / id, title, and status for each it
 momentum tracker get <tracker-item-id> [--data-dir <path>] [--json]
 ```
 
-Retrieves a single tracker item by ID. JSON output includes `ok`, `command`, `dataDir`, and an `item` object with the full tracker item fields (`id`, `adapterKind`, `externalId`, `externalKey`, `url`, `title`, `status`, `metadata`, `lastObservedAt`, `goalId`, `createdAt`, `updatedAt`).
+Retrieves a single tracker item by ID. JSON output includes `ok`, `command`, `dataDir`, `schemaVersion`, and an `item` object with the full tracker item fields (`id`, `adapterKind`, `externalId`, `externalKey`, `url`, `title`, `status`, `metadata`, `lastObservedAt`, `goalId`, `createdAt`, `updatedAt`).
 
 When the tracker item does not exist, exits non-zero with `code: "tracker_item_not_found"` and includes `trackerItemId` in the error payload. Text output shows adapter, external id, external key, URL, title, status, linked goal, and last-observed timestamp.
 
@@ -54,7 +56,7 @@ Links a tracker item to a goal. A tracker item can be linked to at most one goal
 
 Linking to the same goal again is idempotent: `changed` is `false` and `skippedReason` is `"already_linked_to_target"`.
 
-JSON output includes `ok`, `command`, `dataDir`, `goalId`, `trackerItemId`, `changed`, `skippedReason`, `previousGoalId`, and `item` (the updated tracker item). Text output confirms the link and shows adapter, external key, title, and data dir.
+JSON output includes `ok`, `command`, `dataDir`, `schemaVersion`, `goalId`, `trackerItemId`, `changed`, `skippedReason`, `previousGoalId`, and `item` (the updated tracker item). Text output confirms the link and shows adapter, external key, title, and data dir.
 
 On failure, exits non-zero with `code: "data_dir_failed"`, `"goal_not_found"`, `"tracker_item_not_found"`, `"linked_to_other_goal"`, or `"link_changed"`.
 
@@ -66,7 +68,7 @@ momentum tracker unlink <tracker-item-id> [--data-dir <path>] [--json]
 
 Unlinks a tracker item from its goal. Unlinking an already-unlinked tracker item is idempotent: `changed` is `false` and `previousGoalId` is `null`.
 
-JSON output includes `ok`, `command`, `dataDir`, `trackerItemId`, `changed`, `previousGoalId`, and `item`. Text output confirms the unlink and shows adapter, title, and data dir.
+JSON output includes `ok`, `command`, `dataDir`, `schemaVersion`, `trackerItemId`, `changed`, `previousGoalId`, and `item`. Text output confirms the unlink and shows adapter, title, and data dir.
 
 On failure, exits non-zero with `code: "data_dir_failed"`, `"tracker_item_not_found"`, or `"link_changed"`.
 
@@ -87,6 +89,7 @@ JSON output includes:
 - `ok`
 - `command` (`tracker reconcile linear`)
 - `dataDir`
+- `schemaVersion`
 - `adapter` (`linear`)
 - `filters`
 - `dryRun`
@@ -119,6 +122,7 @@ Goal links, tracker-item evidence, and tracker-item pending intents from every c
 
 JSON output includes:
 
+- `schemaVersion`
 - `counts`
 - `trackerItems`
 - `mismatches`

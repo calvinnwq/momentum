@@ -155,6 +155,7 @@ describe("momentum evidence list", () => {
     expect(payload).toMatchObject({
       ok: true,
       command: "evidence list",
+      schemaVersion: 2,
       goalId: null,
       trackerItemId: null,
       source: null,

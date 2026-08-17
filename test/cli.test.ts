@@ -2566,6 +2566,7 @@ describe("momentum recovery clear", () => {
     expect(listPayload).toMatchObject({
       ok: true,
       command: "tracker list",
+      schemaVersion: 2,
       adapter: "local-fixture",
       count: 1,
     });
@@ -2603,6 +2604,7 @@ describe("momentum recovery clear", () => {
     expect(getPayload).toMatchObject({
       ok: true,
       command: "tracker get",
+      schemaVersion: 2,
       item: {
         id: sourceId,
         metadata: { opaque: { priority: "high" } },
@@ -2687,6 +2689,7 @@ describe("momentum recovery clear", () => {
     expect(firstPayload).toMatchObject({
       ok: true,
       command: "tracker link",
+      schemaVersion: 2,
       goalId,
       trackerItemId,
       changed: true,
@@ -2980,6 +2983,7 @@ describe("momentum recovery clear", () => {
     expect(firstPayload).toMatchObject({
       ok: true,
       command: "tracker unlink",
+      schemaVersion: 2,
       trackerItemId,
       changed: true,
       previousGoalId: goalId,
@@ -3096,6 +3100,7 @@ describe("momentum recovery clear", () => {
     expect(payload).toMatchObject({
       ok: true,
       command: "tracker reconcile linear",
+      schemaVersion: 2,
       adapter: "linear",
       dryRun: true,
       counts: { itemsObserved: 1, itemsCreated: 1 },
@@ -3572,6 +3577,7 @@ describe("momentum project status", () => {
       ok: true,
       command: "project status",
       dataDir,
+      schemaVersion: 2,
       filters: {
         adapter: null,
         projectId: null,
