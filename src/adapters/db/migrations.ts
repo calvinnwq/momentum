@@ -1467,16 +1467,21 @@ const PARTIAL_LEGACY_INVOCATION_REQUIRED_COLUMNS: readonly string[] = [
 ];
 
 /**
- * Read-only precondition of `migratePartialLegacyExecutorInvocationSchema`:
+ * Read-only preconditions of `migratePartialLegacyExecutorInvocationSchema`:
  * when that phase would run (a legacy invocation table with no legacy round
- * source), every required invocation column must be present. Shared with the
- * migration itself so the up-front refusal and the phase's own refusal can
- * never drift, and hoisted into the fail-closed block at the top of
- * `applyQueueMigrations` because the phase runs after the tracker rename and
- * the additive pass; without the preflight its refusal would strand a
- * committed rename beside the unmigrated legacy executor table.
+ * source), every deterministic refusal the phase can raise is replicated here
+ * without mutating anything - the required-column contract, the collision
+ * with an unrelated current attempt, and the foreign-key parents of every
+ * row the phase would insert. Shared with the migration itself so the
+ * up-front refusal and the phase's own refusals can never drift, and hoisted
+ * into the fail-closed block at the top of `applyQueueMigrations` because the
+ * phase runs after the tracker rename and the additive pass; without the
+ * preflight its refusal would strand a committed rename beside the
+ * unmigrated legacy executor table.
  */
-function assertPartialLegacyInvocationColumnContract(db: MomentumDb): void {
+function assertPartialLegacyInvocationMigrationPreconditions(
+  db: MomentumDb,
+): void {
   if (!tableExists(db, "executor_invocations")) return;
   if (
     tableExists(db, "executor_rounds") &&
@@ -1491,6 +1496,63 @@ function assertPartialLegacyInvocationColumnContract(db: MomentumDb): void {
     throw new Error(
       `partial SDK-05 invocation migration is missing required column ${missingColumn}`,
     );
+  }
+
+  // Replicate the phase's remaining deterministic refusals read-only, in the
+  // phase's own iteration order. A row whose existing attempt already records
+  // this invocation is the phase's idempotent skip; it is neither refused nor
+  // FK-checked. An absent parent table counts as a missing parent row: the
+  // additive pass creates the table empty, so the phase's post-insert
+  // foreign_key_check would still refuse. Both foreign-key columns of
+  // `executor_attempts` are NOT NULL, so every inserted row is FK-enforced.
+  const existingAttempt = tableExists(db, "executor_attempts")
+    ? db.prepare(
+        `SELECT attempt_id, legacy_invocation_id
+           FROM executor_attempts
+          WHERE attempt_id = ?`,
+      )
+    : undefined;
+  const workflowRunById = tableExists(db, "workflow_runs")
+    ? db.prepare("SELECT 1 FROM workflow_runs WHERE id = ?")
+    : undefined;
+  const workflowStepByIdentity = tableExists(db, "workflow_steps")
+    ? db.prepare(
+        "SELECT 1 FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+      )
+    : undefined;
+  const invocations = db
+    .prepare(
+      `SELECT invocation_id, workflow_run_id, step_run_id
+         FROM executor_invocations
+        ORDER BY workflow_run_id, step_run_id, created_at, invocation_id`,
+    )
+    .all() as Array<Record<string, unknown>>;
+  for (const invocation of invocations) {
+    const invocationId = String(invocation.invocation_id);
+    const existing = existingAttempt?.get(invocationId) as
+      { attempt_id: string; legacy_invocation_id: string | null } | undefined;
+    if (existing !== undefined) {
+      if (existing.legacy_invocation_id === invocationId) continue;
+      throw new Error(
+        `partial SDK-05 invocation migration collides with current attempt ${invocationId}`,
+      );
+    }
+    const workflowRunId = String(invocation.workflow_run_id);
+    const stepRunId = String(invocation.step_run_id);
+    if (workflowRunById?.get(workflowRunId) === undefined) {
+      throw new Error(
+        `partial SDK-05 invocation migration would produce foreign-key violations: ` +
+          `invocation ${invocationId} references missing workflow run ${workflowRunId}; ` +
+          "repair the parent row or remove the invocation before reopening this database",
+      );
+    }
+    if (workflowStepByIdentity?.get(workflowRunId, stepRunId) === undefined) {
+      throw new Error(
+        `partial SDK-05 invocation migration would produce foreign-key violations: ` +
+          `invocation ${invocationId} references missing workflow step ${stepRunId} in run ${workflowRunId}; ` +
+          "repair the parent row or remove the invocation before reopening this database",
+      );
+    }
   }
 }
 
@@ -1518,7 +1580,7 @@ function migratePartialLegacyExecutorInvocationSchema(
     return;
   }
 
-  assertPartialLegacyInvocationColumnContract(db);
+  assertPartialLegacyInvocationMigrationPreconditions(db);
   const requiredColumns = PARTIAL_LEGACY_INVOCATION_REQUIRED_COLUMNS;
 
   const optionalColumns = ["started_at", "heartbeat_at", "finished_at"].filter(
@@ -2428,14 +2490,17 @@ export function applyQueueMigrations(
     assertTrackerSchemaRenameUnambiguous(db);
   }
   // Fail closed before any mutation, part four: the partial SDK-05 invocation
-  // phase runs after the tracker rename and the additive pass, so its
-  // deterministic column refusal is checked up front when a rename is pending.
-  // The guard state it reads is not changed by the earlier phases: the legacy
-  // rebuild only runs when executor_rounds carries invocation_id, in which
-  // case the check short-circuits. Otherwise the late refusal would strand a
-  // committed rename beside the unmigrated legacy executor table.
+  // phase runs after the tracker rename and the additive pass, so its full
+  // deterministic refusal set - required columns, current-attempt collisions,
+  // and missing foreign-key parents of the rows it would insert - is checked
+  // up front when a rename is pending. The state it reads is not changed by
+  // the earlier phases: the legacy rebuild only runs when executor_rounds
+  // carries invocation_id, in which case the check short-circuits, and no
+  // phase before the partial migration inserts parent or attempt rows.
+  // Otherwise the late refusal would strand a committed rename beside the
+  // unmigrated legacy executor table.
   if (trackerSchemaMigrationNeeded(db)) {
-    assertPartialLegacyInvocationColumnContract(db);
+    assertPartialLegacyInvocationMigrationPreconditions(db);
   }
   // Runs before the tracker rename and the main additive pass because it must
   // rebuild tables with foreign keys disabled, which SQLite only allows

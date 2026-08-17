@@ -899,6 +899,157 @@ describe("tracker schema rename migration", () => {
     }
   });
 
+  it("refuses before the rename when a partial invocation collides with a current attempt, and retries cleanly after repair", () => {
+    const dataDir = makeTempDir();
+    const seededBefore = seedLegacySourceGraph(dataDir);
+
+    // Manufacture the collision the partial SDK-05 phase refuses late: a
+    // current-shaped executor_attempts row whose attempt_id matches a valid
+    // partial invocation but whose legacy_invocation_id does not record it.
+    // The attempts table is declared without foreign-key clauses so the
+    // fixture can hold the colliding row without the workflow_steps parent
+    // the legacy source schema never had. Without the up-front preflight the
+    // refusal would land only after the tracker rename committed.
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    raw.exec(`
+      CREATE TABLE executor_attempts (
+        attempt_id TEXT PRIMARY KEY,
+        workflow_run_id TEXT NOT NULL,
+        step_run_id TEXT NOT NULL,
+        step_key TEXT NOT NULL,
+        executor TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'pending',
+        attempt_number INTEGER NOT NULL DEFAULT 1,
+        started_at INTEGER,
+        heartbeat_at INTEGER,
+        finished_at INTEGER,
+        legacy_invocation_id TEXT,
+        legacy_provenance TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE executor_invocations (
+        invocation_id TEXT PRIMARY KEY,
+        workflow_run_id TEXT NOT NULL,
+        step_run_id TEXT NOT NULL,
+        step_key TEXT NOT NULL,
+        executor_family TEXT NOT NULL,
+        state TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      INSERT INTO executor_attempts
+        (attempt_id, workflow_run_id, step_run_id, step_key, executor,
+         state, attempt_number, legacy_invocation_id, created_at, updated_at)
+      VALUES ('inv-collision', 'wf_tracker_mig_1', 'implementation',
+              'implementation', 'agent-loop', 'running', 1, NULL, 1, 1);
+
+      INSERT INTO executor_invocations
+        (invocation_id, workflow_run_id, step_run_id, step_key,
+         executor_family, state, attempt, created_at, updated_at)
+      VALUES ('inv-collision', 'wf_tracker_mig_1', 'implementation',
+              'implementation', 'agent-loop', 'running', 1, 1, 1);
+    `);
+    raw.close();
+
+    expect(() => openDb(dataDir)).toThrow(
+      /collides with current attempt inv-collision/,
+    );
+
+    // Fail-closed and retryable: the tracker rename was not committed, so the
+    // source graph is still intact under its legacy names.
+    const inspect = new DatabaseSync(path.join(dataDir, "momentum.db"), {
+      readOnly: true,
+    });
+    try {
+      const tables = tableNames(inspect);
+      expect(tables).toContain("source_items");
+      expect(tables).not.toContain("tracker_items");
+      expect(
+        inspect.prepare("SELECT COUNT(*) AS n FROM source_items").get(),
+      ).toEqual({ n: 2 });
+    } finally {
+      inspect.close();
+    }
+
+    // Operator repair: remove the colliding invocation row, then reopen. The
+    // retried migration chain completes the rename losslessly.
+    const repair = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    repair.exec(
+      "DELETE FROM executor_invocations WHERE invocation_id = 'inv-collision';",
+    );
+    repair.close();
+
+    const db = openDb(dataDir);
+    try {
+      const tables = tableNames(db);
+      expect(tables).toContain("tracker_items");
+      expect(tables).not.toContain("source_items");
+      const items = db
+        .prepare("SELECT id FROM tracker_items ORDER BY id")
+        .all() as Array<{ id: string }>;
+      expect(items.map((row) => row.id).sort()).toEqual(
+        [seededBefore.linkedItemId, seededBefore.unlinkedItemId].sort(),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses before the rename when a partial invocation references a missing foreign-key parent", () => {
+    const dataDir = makeTempDir();
+    seedLegacySourceGraph(dataDir);
+
+    // Manufacture the orphaned partial SDK-05 shape: a valid invocation whose
+    // workflow_runs parent row does not exist. The phase's own refusal is the
+    // post-insert foreign_key_check, which fires only after the tracker
+    // rename committed; the preflight must refuse the same state up front.
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    raw.exec(`
+      CREATE TABLE executor_invocations (
+        invocation_id TEXT PRIMARY KEY,
+        workflow_run_id TEXT NOT NULL,
+        step_run_id TEXT NOT NULL,
+        step_key TEXT NOT NULL,
+        executor_family TEXT NOT NULL,
+        state TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      INSERT INTO executor_invocations
+        (invocation_id, workflow_run_id, step_run_id, step_key,
+         executor_family, state, attempt, created_at, updated_at)
+      VALUES ('inv-orphan', 'wf_missing_parent', 'implementation',
+              'implementation', 'agent-loop', 'running', 1, 1, 1);
+    `);
+    raw.close();
+
+    expect(() => openDb(dataDir)).toThrow(
+      /missing workflow run wf_missing_parent/,
+    );
+
+    // Fail-closed: the tracker rename was not committed, so the source graph
+    // is still intact under its legacy names.
+    const inspect = new DatabaseSync(path.join(dataDir, "momentum.db"), {
+      readOnly: true,
+    });
+    try {
+      const tables = tableNames(inspect);
+      expect(tables).toContain("source_items");
+      expect(tables).not.toContain("tracker_items");
+      expect(
+        inspect.prepare("SELECT COUNT(*) AS n FROM source_items").get(),
+      ).toEqual({ n: 2 });
+    } finally {
+      inspect.close();
+    }
+  });
+
   it("migrates a pre-rename database through the read-only open path", () => {
     const dataDir = makeTempDir();
     const seededBefore = seedLegacySourceGraph(dataDir);
