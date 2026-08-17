@@ -667,6 +667,95 @@ describe("tracker schema rename migration", () => {
     }
   });
 
+  it("does not commit the rename when a later migration fails, and retries cleanly after repair", () => {
+    const dataDir = makeTempDir();
+    const seededBefore = seedLegacySourceGraph(dataDir);
+
+    // Manufacture a legacy executor schema that deterministically fails the
+    // executor invocation rebuild mid-migration: the guards pass (both legacy
+    // tables exist and executor_rounds carries invocation_id), but the
+    // invocation table is missing heartbeat_at, which the rebuild's SELECT
+    // requires. The rename must not be stranded committed by that failure.
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    raw.exec(`
+      CREATE TABLE executor_invocations (
+        invocation_id TEXT PRIMARY KEY,
+        workflow_run_id TEXT NOT NULL,
+        step_run_id TEXT NOT NULL,
+        step_key TEXT NOT NULL,
+        executor_family TEXT NOT NULL,
+        state TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        started_at INTEGER,
+        finished_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+
+      CREATE TABLE executor_rounds (
+        round_id TEXT PRIMARY KEY,
+        invocation_id TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        round_index INTEGER NOT NULL,
+        state TEXT NOT NULL,
+        started_at INTEGER,
+        heartbeat_at INTEGER,
+        finished_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+    `);
+    raw.close();
+
+    expect(() => openDb(dataDir)).toThrow(/heartbeat_at/);
+
+    // Fail-closed and retryable: the tracker rename was not committed, so the
+    // source graph is still intact under its legacy names.
+    const inspect = new DatabaseSync(path.join(dataDir, "momentum.db"), {
+      readOnly: true,
+    });
+    try {
+      const tables = tableNames(inspect);
+      expect(tables).toContain("source_items");
+      expect(tables).toContain("source_snapshots");
+      expect(tables).toContain("source_reconciliation_runs");
+      expect(tables).not.toContain("tracker_items");
+      expect(
+        inspect.prepare("SELECT COUNT(*) AS n FROM source_items").get(),
+      ).toEqual({ n: 2 });
+    } finally {
+      inspect.close();
+    }
+
+    // Operator repair: drop the malformed executor tables, then reopen. The
+    // retried migration chain completes the rename losslessly.
+    const repair = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    repair.exec("DROP TABLE executor_rounds; DROP TABLE executor_invocations;");
+    repair.close();
+
+    const db = openDb(dataDir);
+    try {
+      const tables = tableNames(db);
+      expect(tables).toContain("tracker_items");
+      expect(tables).not.toContain("source_items");
+      const items = db
+        .prepare("SELECT id FROM tracker_items ORDER BY id")
+        .all() as Array<{ id: string }>;
+      expect(items.map((row) => row.id).sort()).toEqual(
+        [seededBefore.linkedItemId, seededBefore.unlinkedItemId].sort(),
+      );
+      const snapshots = db
+        .prepare("SELECT tracker_item_id FROM tracker_snapshots")
+        .all() as Array<{ tracker_item_id: string }>;
+      for (const snapshot of snapshots) {
+        expect(snapshot.tracker_item_id).toBe(seededBefore.linkedItemId);
+      }
+      expect(db.prepare("PRAGMA foreign_key_check").all()).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it("migrates a pre-rename database through the read-only open path", () => {
     const dataDir = makeTempDir();
     const seededBefore = seedLegacySourceGraph(dataDir);

@@ -3598,7 +3598,31 @@ describe("momentum project status", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("echoes filter values back when --source, --project, and --milestone are passed", async () => {
+  it("rejects the removed --source flag with a usage error", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+
+    const result = await run([
+      "project",
+      "status",
+      "--source",
+      "linear",
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe("");
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      code: "usage_error",
+      message:
+        "Unknown flag for project status: --source. Use --adapter to filter by tracker adapter.",
+    });
+  });
+
+  it("echoes filter values back when --adapter, --project, and --milestone are passed", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
     const { upsertTrackerItem } = await import("../src/core/tracker/items.js");

@@ -17,6 +17,7 @@ type ParsedFlags = {
   json: boolean;
   dataDir?: string;
   adapter?: string;
+  source?: string;
   project?: string;
   staleThresholdHours?: number;
   intentStaleThresholdDays?: number;
@@ -43,6 +44,14 @@ function projectStatus(parsed: ParsedFlags, io: CliIo): number {
   if (parsed.args.length > 2) {
     return usageError(
       `Unexpected argument for project status: ${parsed.args[2]}`,
+      parsed,
+      io,
+    );
+  }
+
+  if (parsed.source !== undefined) {
+    return usageError(
+      "Unknown flag for project status: --source. Use --adapter to filter by tracker adapter.",
       parsed,
       io,
     );

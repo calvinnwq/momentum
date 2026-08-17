@@ -2261,24 +2261,15 @@ export function trackerSchemaMigrationNeeded(db: MomentumDb): boolean {
 }
 
 /**
- * Rename the durable tracker graph from source vocabulary to tracker
- * vocabulary, in place, losslessly, and exactly once.
- *
- * Runs before the additive DDL pass so a legacy database is renamed rather
- * than gaining empty tracker-named tables beside populated source-named ones.
- * `ALTER TABLE ... RENAME TO` / `RENAME COLUMN` rewrite the referencing
- * foreign-key clauses in dependent tables (SQLite non-legacy alter semantics),
- * so row bytes, ids, timestamps, links, and uniqueness constraints are
- * untouched; only names change. Old-name indexes are dropped and their
- * tracker-named equivalents recreated in the same transaction.
- *
- * Fails closed without mutating anything when the database is ambiguous: a
- * tracker-named table beside its still-present source-named table cannot be
- * renamed losslessly and parks the open for operator inspection.
+ * Refuse an ambiguous partially renamed tracker graph without mutating
+ * anything: a tracker-named table beside its still-present source-named table
+ * (or a table carrying both column spellings) cannot be renamed losslessly
+ * and parks the open for operator inspection. Hoisted into the fail-closed
+ * block at the top of `applyQueueMigrations` so the refusal lands before any
+ * earlier migration commits and the refused database stays byte-identical to
+ * its pre-open state; `migrateTrackerSchemaRename` re-checks as defense.
  */
-function migrateTrackerSchemaRename(db: MomentumDb): void {
-  if (!trackerSchemaMigrationNeeded(db)) return;
-
+function assertTrackerSchemaRenameUnambiguous(db: MomentumDb): void {
   for (const [legacyTable, trackerTable] of TRACKER_TABLE_RENAMES) {
     if (tableExists(db, legacyTable) && tableExists(db, trackerTable)) {
       throw new Error(
@@ -2287,6 +2278,45 @@ function migrateTrackerSchemaRename(db: MomentumDb): void {
       );
     }
   }
+  for (const [
+    table,
+    legacyColumn,
+    trackerColumn,
+  ] of TRACKER_ITEM_COLUMN_RENAMES) {
+    if (!tableExists(db, table)) continue;
+    if (
+      columnExists(db, table, legacyColumn) &&
+      columnExists(db, table, trackerColumn)
+    ) {
+      throw new Error(
+        `tracker schema migration refused: ${table} carries both ${legacyColumn} and ${trackerColumn}`,
+      );
+    }
+  }
+}
+
+/**
+ * Rename the durable tracker graph from source vocabulary to tracker
+ * vocabulary, in place, losslessly, and exactly once.
+ *
+ * Runs after the legacy executor rebuild (whose tables are disjoint from the
+ * tracker graph) so an executor-rebuild failure leaves a pre-rename database
+ * untouched and retryable, and before the additive DDL pass so a legacy
+ * database is renamed rather than gaining empty tracker-named tables beside
+ * populated source-named ones.
+ * `ALTER TABLE ... RENAME TO` / `RENAME COLUMN` rewrite the referencing
+ * foreign-key clauses in dependent tables (SQLite non-legacy alter semantics),
+ * so row bytes, ids, timestamps, links, and uniqueness constraints are
+ * untouched; only names change. Old-name indexes are dropped and their
+ * tracker-named equivalents recreated in the same transaction.
+ *
+ * Fails closed without mutating anything when the database is ambiguous; see
+ * `assertTrackerSchemaRenameUnambiguous`.
+ */
+function migrateTrackerSchemaRename(db: MomentumDb): void {
+  if (!trackerSchemaMigrationNeeded(db)) return;
+
+  assertTrackerSchemaRenameUnambiguous(db);
 
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -2353,12 +2383,22 @@ export function applyQueueMigrations(
   ) {
     assertWorkflowRouteStatePlanCurrent(db, routeStatePlan);
   }
-  // Runs before the additive pass so legacy source-named tracker tables are
-  // renamed instead of coexisting with freshly created tracker-named tables.
-  migrateTrackerSchemaRename(db);
-  // Runs before the main additive pass because it must rebuild tables with
-  // foreign keys disabled, which SQLite only allows outside a transaction.
+  // Fail closed before any mutation, part three: an ambiguous partially
+  // renamed tracker graph must refuse the whole migration chain up front, so
+  // the refused database stays byte-identical to its pre-open state.
+  if (trackerSchemaMigrationNeeded(db)) {
+    assertTrackerSchemaRenameUnambiguous(db);
+  }
+  // Runs before the tracker rename and the main additive pass because it must
+  // rebuild tables with foreign keys disabled, which SQLite only allows
+  // outside a transaction. Its tables are disjoint from the tracker graph, so
+  // running it first means a mid-rebuild failure leaves a pre-rename database
+  // untouched and retryable instead of stranding a committed rename.
   migrateLegacyExecutorInvocationSchema(db, options);
+  // Runs after the executor legacy rebuild (see above) and before the
+  // additive pass so legacy source-named tracker tables are renamed instead
+  // of coexisting with freshly created tracker-named tables.
+  migrateTrackerSchemaRename(db);
   db.exec("BEGIN");
   try {
     if (tableExists(db, "jobs")) {
