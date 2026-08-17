@@ -1454,6 +1454,46 @@ function migrateLegacyExecutorInvocationSchema(
   }
 }
 
+const PARTIAL_LEGACY_INVOCATION_REQUIRED_COLUMNS: readonly string[] = [
+  "invocation_id",
+  "workflow_run_id",
+  "step_run_id",
+  "step_key",
+  "executor_family",
+  "state",
+  "attempt",
+  "created_at",
+  "updated_at",
+];
+
+/**
+ * Read-only precondition of `migratePartialLegacyExecutorInvocationSchema`:
+ * when that phase would run (a legacy invocation table with no legacy round
+ * source), every required invocation column must be present. Shared with the
+ * migration itself so the up-front refusal and the phase's own refusal can
+ * never drift, and hoisted into the fail-closed block at the top of
+ * `applyQueueMigrations` because the phase runs after the tracker rename and
+ * the additive pass; without the preflight its refusal would strand a
+ * committed rename beside the unmigrated legacy executor table.
+ */
+function assertPartialLegacyInvocationColumnContract(db: MomentumDb): void {
+  if (!tableExists(db, "executor_invocations")) return;
+  if (
+    tableExists(db, "executor_rounds") &&
+    columnExists(db, "executor_rounds", "invocation_id")
+  ) {
+    return;
+  }
+  const missingColumn = PARTIAL_LEGACY_INVOCATION_REQUIRED_COLUMNS.find(
+    (column) => !columnExists(db, "executor_invocations", column),
+  );
+  if (missingColumn !== undefined) {
+    throw new Error(
+      `partial SDK-05 invocation migration is missing required column ${missingColumn}`,
+    );
+  }
+}
+
 /**
  * Complete the interrupted SDK-05 migration shape where invocations were
  * persisted but no legacy rounds were ever written. The normal rebuild cannot
@@ -1478,25 +1518,8 @@ function migratePartialLegacyExecutorInvocationSchema(
     return;
   }
 
-  const requiredColumns = [
-    "invocation_id",
-    "workflow_run_id",
-    "step_run_id",
-    "step_key",
-    "executor_family",
-    "state",
-    "attempt",
-    "created_at",
-    "updated_at",
-  ];
-  const missingColumn = requiredColumns.find(
-    (column) => !columnExists(db, "executor_invocations", column),
-  );
-  if (missingColumn !== undefined) {
-    throw new Error(
-      `partial SDK-05 invocation migration is missing required column ${missingColumn}`,
-    );
-  }
+  assertPartialLegacyInvocationColumnContract(db);
+  const requiredColumns = PARTIAL_LEGACY_INVOCATION_REQUIRED_COLUMNS;
 
   const optionalColumns = ["started_at", "heartbeat_at", "finished_at"].filter(
     (column) => columnExists(db, "executor_invocations", column),
@@ -2264,7 +2287,11 @@ export function trackerSchemaMigrationNeeded(db: MomentumDb): boolean {
  * Refuse an ambiguous partially renamed tracker graph without mutating
  * anything: a tracker-named table beside its still-present source-named table
  * (or a table carrying both column spellings) cannot be renamed losslessly
- * and parks the open for operator inspection. Hoisted into the fail-closed
+ * and parks the open for operator inspection. A legacy tracker-item column
+ * whose declared foreign-key parent table is absent is refused the same way:
+ * `RENAME COLUMN` cannot repair the dangling reference, so the renamed column
+ * would still point at the missing parent and every later insert would fail.
+ * Hoisted into the fail-closed
  * block at the top of `applyQueueMigrations` so the refusal lands before any
  * earlier migration commits and the refused database stays byte-identical to
  * its pre-open state; `migrateTrackerSchemaRename` re-checks as defense.
@@ -2290,6 +2317,17 @@ function assertTrackerSchemaRenameUnambiguous(db: MomentumDb): void {
     ) {
       throw new Error(
         `tracker schema migration refused: ${table} carries both ${legacyColumn} and ${trackerColumn}`,
+      );
+    }
+    if (!columnExists(db, table, legacyColumn)) continue;
+    const foreignKeys = db
+      .prepare(`PRAGMA foreign_key_list(${table})`)
+      .all() as Array<{ table: string; from: string }>;
+    const legacyFk = foreignKeys.find((fk) => fk.from === legacyColumn);
+    if (legacyFk !== undefined && !tableExists(db, legacyFk.table)) {
+      throw new Error(
+        `tracker schema migration refused: ${table}.${legacyColumn} references missing table ${legacyFk.table}; ` +
+          "resolve the dangling foreign-key parent before reopening this database",
       );
     }
   }
@@ -2388,6 +2426,16 @@ export function applyQueueMigrations(
   // the refused database stays byte-identical to its pre-open state.
   if (trackerSchemaMigrationNeeded(db)) {
     assertTrackerSchemaRenameUnambiguous(db);
+  }
+  // Fail closed before any mutation, part four: the partial SDK-05 invocation
+  // phase runs after the tracker rename and the additive pass, so its
+  // deterministic column refusal is checked up front when a rename is pending.
+  // The guard state it reads is not changed by the earlier phases: the legacy
+  // rebuild only runs when executor_rounds carries invocation_id, in which
+  // case the check short-circuits. Otherwise the late refusal would strand a
+  // committed rename beside the unmigrated legacy executor table.
+  if (trackerSchemaMigrationNeeded(db)) {
+    assertPartialLegacyInvocationColumnContract(db);
   }
   // Runs before the tracker rename and the main additive pass because it must
   // rebuild tables with foreign keys disabled, which SQLite only allows

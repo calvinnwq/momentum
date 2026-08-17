@@ -513,6 +513,54 @@ describe("tracker schema rename migration", () => {
           .run(),
       ).toThrow(/FOREIGN KEY constraint failed/);
 
+      // The dependent tables' renamed columns point at the renamed parent:
+      // SQLite's rename rewrote the foreign-key clauses to tracker_items.
+      for (const table of ["evidence_records", "update_intents"]) {
+        const foreignKeys = db
+          .prepare(`PRAGMA foreign_key_list(${table})`)
+          .all() as Array<{ table: string; from: string }>;
+        const trackerFk = foreignKeys.find(
+          (fk) => fk.from === "tracker_item_id",
+        );
+        expect(
+          trackerFk,
+          `missing tracker_item_id FK on ${table}`,
+        ).toBeDefined();
+        expect(trackerFk!.table).toBe("tracker_items");
+      }
+
+      // The rewritten foreign keys are live: dangling tracker-item references
+      // are rejected while real ones insert cleanly.
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO evidence_records
+               (id, source, type, occurred_at, summary, tracker_item_id,
+                ingest_key, created_at, updated_at)
+             VALUES ('evidence_dangling', 'workflow', 'validate_complete', 1,
+                     'dangling', 'missing-item', 'ingest-key-dangling', 1, 1)`,
+          )
+          .run(),
+      ).toThrow(/FOREIGN KEY constraint failed/);
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO update_intents
+               (id, adapter_kind, intent_type, reason, tracker_item_id,
+                idempotency_key, created_at, updated_at)
+             VALUES ('intent_dangling', 'linear', 'source_satisfied', 'dangling',
+                     'missing-item', 'idem-dangling', 1, 1)`,
+          )
+          .run(),
+      ).toThrow(/FOREIGN KEY constraint failed/);
+      db.prepare(
+        `INSERT INTO evidence_records
+           (id, source, type, occurred_at, summary, tracker_item_id,
+            ingest_key, created_at, updated_at)
+         VALUES ('evidence_linked', 'workflow', 'validate_complete', 1,
+                 'linked', ?, 'ingest-key-linked', 1, 1)`,
+      ).run(seededBefore.linkedItemId);
+
       expect(db.prepare("PRAGMA foreign_key_check").all()).toHaveLength(0);
     } finally {
       db.close();
@@ -667,6 +715,45 @@ describe("tracker schema rename migration", () => {
     }
   });
 
+  it("fails closed without mutating a database whose legacy dependents reference a missing parent table", () => {
+    const dataDir = makeTempDir();
+
+    // Manufacture the tampered partial state: dependent tables still carry
+    // source_item_id foreign keys, but the source_items parent is gone.
+    // SQLite allows creating (and keeping) tables whose foreign-key parent is
+    // absent; only inserts fail. Renaming the column cannot repair the
+    // dangling reference, so the open must refuse before any mutation.
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    raw.exec(LEGACY_SOURCE_SCHEMA);
+    raw.exec(`
+      DROP TABLE source_snapshots;
+      DROP TABLE source_reconciliation_runs;
+      DROP TABLE source_items;
+    `);
+    raw.close();
+
+    expect(() => openDb(dataDir)).toThrow(/tracker/i);
+
+    // The refused database is unchanged: the legacy column spelling is still
+    // in place and no tracker-named tables were created.
+    const inspect = new DatabaseSync(path.join(dataDir, "momentum.db"), {
+      readOnly: true,
+    });
+    try {
+      const tables = tableNames(inspect);
+      expect(tables).not.toContain("tracker_items");
+      expect(tables).not.toContain("source_items");
+      expect(columnNames(inspect, "evidence_records")).toContain(
+        "source_item_id",
+      );
+      expect(columnNames(inspect, "update_intents")).toContain(
+        "source_item_id",
+      );
+    } finally {
+      inspect.close();
+    }
+  });
+
   it("does not commit the rename when a later migration fails, and retries cleanly after repair", () => {
     const dataDir = makeTempDir();
     const seededBefore = seedLegacySourceGraph(dataDir);
@@ -750,6 +837,62 @@ describe("tracker schema rename migration", () => {
       for (const snapshot of snapshots) {
         expect(snapshot.tracker_item_id).toBe(seededBefore.linkedItemId);
       }
+      expect(db.prepare("PRAGMA foreign_key_check").all()).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses before the rename when the partial invocation phase would fail after it, and retries cleanly after repair", () => {
+    const dataDir = makeTempDir();
+    const seededBefore = seedLegacySourceGraph(dataDir);
+
+    // Manufacture the partial SDK-05 shape that deterministically fails the
+    // late partial-invocation phase: an invocation table with no legacy round
+    // source and missing required columns. The legacy rebuild skips it (no
+    // executor_rounds), so without the up-front preflight the failure would
+    // land only after the tracker rename committed.
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    raw.exec(
+      "CREATE TABLE executor_invocations (invocation_id TEXT PRIMARY KEY) STRICT;",
+    );
+    raw.close();
+
+    expect(() => openDb(dataDir)).toThrow(/missing required column/);
+
+    // Fail-closed and retryable: the tracker rename was not committed, so the
+    // source graph is still intact under its legacy names.
+    const inspect = new DatabaseSync(path.join(dataDir, "momentum.db"), {
+      readOnly: true,
+    });
+    try {
+      const tables = tableNames(inspect);
+      expect(tables).toContain("source_items");
+      expect(tables).not.toContain("tracker_items");
+      expect(
+        inspect.prepare("SELECT COUNT(*) AS n FROM source_items").get(),
+      ).toEqual({ n: 2 });
+    } finally {
+      inspect.close();
+    }
+
+    // Operator repair: drop the malformed invocation table, then reopen. The
+    // retried migration chain completes the rename losslessly.
+    const repair = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    repair.exec("DROP TABLE executor_invocations;");
+    repair.close();
+
+    const db = openDb(dataDir);
+    try {
+      const tables = tableNames(db);
+      expect(tables).toContain("tracker_items");
+      expect(tables).not.toContain("source_items");
+      const items = db
+        .prepare("SELECT id FROM tracker_items ORDER BY id")
+        .all() as Array<{ id: string }>;
+      expect(items.map((row) => row.id).sort()).toEqual(
+        [seededBefore.linkedItemId, seededBefore.unlinkedItemId].sort(),
+      );
       expect(db.prepare("PRAGMA foreign_key_check").all()).toHaveLength(0);
     } finally {
       db.close();
