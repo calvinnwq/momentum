@@ -694,6 +694,58 @@ describe("NAM-06 intent graph preflight", () => {
     }
   });
 
+  it("refuses an audit ledger whose intents parent table is absent", () => {
+    const dataDir = makeTempDir();
+    openDb(dataDir).close();
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      // With enforcement off, seeding the audit row and then dropping its
+      // parent is accepted, mirroring an externally damaged database.
+      // Recreating an empty intents table here would strand this row, so
+      // the open must refuse instead.
+      raw.exec("PRAGMA foreign_keys = OFF");
+      raw
+        .prepare(
+          `INSERT INTO intent_apply_audits
+           (id, intent_id, adapter_kind, provider, requested_at,
+            operator_reason, intent_apply_policy, mutation_kind,
+            preview_summary, idempotency_marker, lifecycle_state,
+            created_at, updated_at)
+         VALUES ('audit_orphan_1', 'intent-existing', 'linear', 'linear', 1,
+                 'x', 'workflow_verified', 'status_update', 'p', 'm',
+                 'succeeded', 1, 1)`,
+        )
+        .run();
+      raw.exec("DROP TABLE intents");
+    } finally {
+      raw.close();
+    }
+
+    expect(() => openDb(dataDir)).toThrow(
+      /intent schema migration refused: intent_apply_audits exists without its intents parent table/,
+    );
+    expect(() => openExistingDbMigratedReadOnly(dataDir)).toThrow(
+      /intent_apply_audits exists without its intents parent table/,
+    );
+
+    // The refused database is unchanged: no empty parent was created and the
+    // audit row survives.
+    const inspect = new DatabaseSync(path.join(dataDir, "momentum.db"), {
+      readOnly: true,
+    });
+    try {
+      expect(tableNames(inspect)).not.toContain("intents");
+      const audit = inspect
+        .prepare(
+          "SELECT intent_id FROM intent_apply_audits WHERE id = 'audit_orphan_1'",
+        )
+        .get() as { intent_id: string };
+      expect(audit.intent_id).toBe("intent-existing");
+    } finally {
+      inspect.close();
+    }
+  });
+
   it("drops the legacy tracker-link index during safe canonical completion, idempotently", () => {
     const dataDir = makeTempDir();
     openDb(dataDir).close();

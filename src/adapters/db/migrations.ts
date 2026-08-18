@@ -2784,7 +2784,8 @@ function intentIndexContractViolation(
  * a present intent-table foreign key that does not match its exact
  * from/table/to contract (tracker link to `tracker_items`/`source_items`,
  * goal and evidence links; the FK-less pre-M6 shape stays supported), a
- * missing or mismatched `intent_apply_audits.intent_id` foreign key, or a
+ * missing or mismatched `intent_apply_audits.intent_id` foreign key, an
+ * audit ledger present without any intent parent table, or a
  * canonical-named index whose definition does not match
  * INTENT_INDEX_CONTRACTS. Read-only: never mutates.
  */
@@ -2850,6 +2851,13 @@ function intentSchemaUnsupportedReason(db: MomentumDb): string | undefined {
     }
   }
   if (tableExists(db, "intent_apply_audits")) {
+    // The audit ledger has never existed without its intent parent (both are
+    // created inside the same additive transaction), so an orphaned audit
+    // table cannot be completed losslessly: recreating an empty parent would
+    // strand every existing audit relation.
+    if (presentTable === undefined) {
+      return `intent_apply_audits exists without its ${intentTable} parent table`;
+    }
     for (const column of INTENT_APPLY_AUDIT_REQUIRED_COLUMNS) {
       if (!columnExists(db, "intent_apply_audits", column)) {
         return `intent_apply_audits is missing required column ${column}`;
