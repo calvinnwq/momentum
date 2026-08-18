@@ -131,8 +131,7 @@ export type ExecutorObservationPhase =
   (typeof EXECUTOR_OBSERVATION_PHASES)[number];
 
 export type ExecutorObservationPhaseInput =
-  | ExecutorObservationPhase
-  | "mirroring_external_state";
+  ExecutorObservationPhase | "mirroring_external_state";
 
 /**
  * Initial record an executor may submit.

@@ -1000,7 +1000,8 @@ function normalizeObservationPhase(
       `Cannot ${operation}: ${String(value)} is not an executor observation phase.`,
     );
   }
-  return (OBSERVATION_PHASE_ALIASES[value] ?? value) as ExecutorObservationPhase;
+  return (OBSERVATION_PHASE_ALIASES[value] ??
+    value) as ExecutorObservationPhase;
 }
 
 function allocateCheckpointIdentity(
