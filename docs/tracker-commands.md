@@ -133,6 +133,8 @@ JSON output includes:
 - `externalApply` — always present; project-scoped audit-ledger rollup across pending intents (see below).
 - `nextAction`
 
+For compatibility with schemaVersion 2 consumers from before the intent rename, `pendingUpdateIntents`, `totalPendingUpdateIntentCount`, `truncatedPendingUpdateIntents`, and the matching `counts.pendingUpdateIntents` / `counts.staleUpdateIntents` fields remain available as aliases of the intent-named fields.
+
 Tracker item and mismatch lists are truncated to the first 20 entries with total / truncated flags. Text output prints the active filters, count summaries, reconciliation warnings, top tracker items, mismatches, pending intents, and next action.
 
 Pending intents include `intentId`, `adapterKind`, `intentType`, `targetExternalId`, `reason`, `goalId`, `trackerItemId`, `evidenceRecordId`, `createdAt`, `ageMs`, `stale`, and an `externalApply` block with `{applyState, totalAttempts, counts, latestAttempt}`. `applyState` is `idle`, `in_flight`, or `blocked`; `counts` has `claimed`, `succeeded`, `failed`, `blocked`, `audit_incomplete`; `latestAttempt` is the most recent audit row or `null` (see [Audit row shape](intent-commands.md#audit-row-shape) for the full field list).

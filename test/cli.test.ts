@@ -3591,6 +3591,11 @@ describe("momentum project status", () => {
       truncatedMismatches: false,
       reconciliationWarnings: [],
       pendingIntents: [],
+      pendingUpdateIntents: [],
+      totalPendingIntentCount: 0,
+      totalPendingUpdateIntentCount: 0,
+      truncatedPendingIntents: false,
+      truncatedPendingUpdateIntents: false,
     });
     expect(
       (payload["counts"] as Record<string, unknown>)["pendingIntents"],
@@ -4125,9 +4130,18 @@ describe("momentum project status", () => {
     expect((payload["counts"] as Record<string, unknown>)["staleIntents"]).toBe(
       0,
     );
+    expect(
+      (payload["counts"] as Record<string, unknown>)["pendingUpdateIntents"],
+    ).toBe(1);
+    expect(
+      (payload["counts"] as Record<string, unknown>)["staleUpdateIntents"],
+    ).toBe(0);
     expect(payload["intentStaleThresholdMs"]).toBe(30 * 24 * 60 * 60 * 1000);
     expect(payload["totalPendingIntentCount"]).toBe(1);
+    expect(payload["pendingUpdateIntents"]).toEqual(intents);
+    expect(payload["totalPendingUpdateIntentCount"]).toBe(1);
     expect(payload["truncatedPendingIntents"]).toBe(false);
+    expect(payload["truncatedPendingUpdateIntents"]).toBe(false);
   });
 
   it("surfaces pending intents for legacy scalar project and milestone metadata", async () => {

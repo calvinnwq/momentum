@@ -436,6 +436,30 @@ describe("executor SDK core contract", () => {
     );
   });
 
+  it("normalizes the legacy mirror phase at the SDK boundary", () => {
+    const { db, attempt } = openExecutorDb("agent-once");
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      attemptId: attempt.attemptId,
+      now: () => 25,
+    });
+    const round = emptyRound(attempt, "running");
+
+    const started = envelope.facade.startRound({
+      ...roundStartForSdk(round),
+      state: "mirroring_external_state",
+    });
+    expect(started.state).toBe("supervising_delegate");
+
+    const observed = envelope.facade.observeRound(round.roundId, {
+      phase: "mirroring_external_state",
+    });
+    expect(observed.state).toBe("supervising_delegate");
+    expect(loadExecutorRound(db, round.roundId)?.state).toBe(
+      "supervising_delegate",
+    );
+  });
+
   it("uses the envelope clock for executor round timestamps", () => {
     const { db, attempt } = openExecutorDb("agent-once");
     let clockCalls = 0;

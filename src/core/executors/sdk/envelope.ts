@@ -49,11 +49,13 @@ import type {
   ExecutorEnvelope,
   ExecutorEnvelopeSnapshot,
   ExecutorFindingInput,
+  ExecutorObservationPhase,
   ExecutorRoundEnvelopeSnapshot,
   ExecutorRoundObservation,
   ExecutorRoundProgress,
   ExecutorRoundProgressResult,
   ExecutorRoundStart,
+  ExecutorRoundStartInput,
   ExecutorRoundView,
 } from "./types.js";
 
@@ -162,14 +164,17 @@ export class DurableExecutorEnvelope {
   }
 
   startRound(
-    record: ExecutorRoundStart,
+    record: ExecutorRoundStartInput,
     initialCheckpoints: readonly ExecutorCheckpointInput[] = [],
   ): ExecutorRoundView {
     return withSqliteTransaction(this.#db, "write", () => {
       assertRoundStartInput(record);
       initialCheckpoints.forEach(assertCheckpointInput);
       const attempt = this.#loadAttempt();
-      assertObservationPhase(record.state, `start round ${record.roundId}`);
+      const normalizedState = normalizeObservationPhase(
+        record.state,
+        `start round ${record.roundId}`,
+      );
       this.#assertRoundIdentity(record, attempt);
       this.#assertExecutorWritable(attempt, `start round ${record.roundId}`);
       const rounds = this.#listStepRounds(attempt);
@@ -190,7 +195,10 @@ export class DurableExecutorEnvelope {
         );
       }
       const now = this.#now();
-      const durableRecord = roundRecordFromStart(record, now);
+      const durableRecord = roundRecordFromStart(
+        { ...record, state: normalizedState },
+        now,
+      );
       const roundId = allocateExecutorRoundId(this.#db, durableRecord);
       const round = insertExecutorRound(
         this.#db,
@@ -240,8 +248,10 @@ export class DurableExecutorEnvelope {
           `Cannot observe terminal round ${roundId} (${current.state}).`,
         );
       }
-      const phase = observation.phase ?? current.state;
-      assertObservationPhase(phase, `observe round ${roundId}`);
+      const phase = normalizeObservationPhase(
+        observation.phase ?? current.state,
+        `observe round ${roundId}`,
+      );
       const update: ExecutorRoundUpdate = {
         toState: phase,
         heartbeatAt: this.#now(),
@@ -548,7 +558,7 @@ export class DurableExecutorEnvelope {
   }
 
   #assertRoundIdentity(
-    round: ExecutorRoundStart,
+    round: ExecutorRoundStartInput,
     attempt: ExecutorAttemptRecord,
   ): void {
     const mismatches: string[] = [];
@@ -776,7 +786,7 @@ function assertVerificationResults(value: unknown, label: string): void {
 
 function assertRoundStartInput(
   value: unknown,
-): asserts value is ExecutorRoundStart {
+): asserts value is ExecutorRoundStartInput {
   assertRecord(value, "round start");
   for (const field of [
     "roundId",
@@ -804,7 +814,7 @@ function assertRoundStartInput(
     invalidInput("round start attemptNumber must be a positive integer");
   }
   assertNonNegativeInteger(value["roundIndex"], "round start roundIndex");
-  assertObservationPhase(value["state"], "start round");
+  normalizeObservationPhase(value["state"], "start round");
   for (const field of [
     "agentProvider",
     "model",
@@ -840,7 +850,7 @@ function assertRoundObservationInput(
 ): asserts value is ExecutorRoundObservation {
   assertRecord(value, "round observation");
   if (value["phase"] !== undefined) {
-    assertObservationPhase(value["phase"], "observe round");
+    normalizeObservationPhase(value["phase"], "observe round");
   }
   for (const field of [
     "agentProvider",
@@ -973,16 +983,24 @@ function assertDaemonDecisionInput(value: unknown): void {
   }
 }
 
-const OBSERVATION_PHASES: ReadonlySet<string> = new Set(
-  EXECUTOR_OBSERVATION_PHASES,
-);
+const OBSERVATION_PHASE_ALIASES: Readonly<Record<string, string>> = {
+  mirroring_external_state: "supervising_delegate",
+};
+const OBSERVATION_PHASES: ReadonlySet<string> = new Set([
+  ...EXECUTOR_OBSERVATION_PHASES,
+  ...Object.keys(OBSERVATION_PHASE_ALIASES),
+]);
 
-function assertObservationPhase(value: unknown, operation: string): void {
+function normalizeObservationPhase(
+  value: unknown,
+  operation: string,
+): ExecutorObservationPhase {
   if (typeof value !== "string" || !OBSERVATION_PHASES.has(value)) {
     throw new ExecutorEnvelopeAccessError(
       `Cannot ${operation}: ${String(value)} is not an executor observation phase.`,
     );
   }
+  return (OBSERVATION_PHASE_ALIASES[value] ?? value) as ExecutorObservationPhase;
 }
 
 function allocateCheckpointIdentity(

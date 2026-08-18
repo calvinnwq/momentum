@@ -130,6 +130,10 @@ export const EXECUTOR_OBSERVATION_PHASES = [
 export type ExecutorObservationPhase =
   (typeof EXECUTOR_OBSERVATION_PHASES)[number];
 
+export type ExecutorObservationPhaseInput =
+  | ExecutorObservationPhase
+  | "mirroring_external_state";
+
 /**
  * Initial record an executor may submit.
  * Decision-owned fields are omitted and filled with null by the durable facade;
@@ -163,13 +167,17 @@ export type ExecutorRoundStart = Omit<
     readonly Readonly<ExecutorRoundVerificationResult>[] | undefined;
 };
 
+export type ExecutorRoundStartInput = Omit<ExecutorRoundStart, "state"> & {
+  readonly state: ExecutorObservationPhaseInput;
+};
+
 /**
  * Evidence-bearing round fields an executor may record during its tick.
  * Classification, terminal state, executor recommendation, human gate, and
  * finished timestamp are deliberately absent: those are daemon decisions.
  */
 export type ExecutorRoundObservation = {
-  readonly phase?: ExecutorObservationPhase;
+  readonly phase?: ExecutorObservationPhaseInput;
   readonly agentProvider?: string | null;
   readonly model?: string | null;
   readonly effort?: string | null;
@@ -212,7 +220,7 @@ export interface ExecutorEnvelope {
   snapshot(): ExecutorEnvelopeSnapshot;
   /** Atomically starts a round with any initial durable binding checkpoints. */
   startRound(
-    record: ExecutorRoundStart,
+    record: ExecutorRoundStartInput,
     initialCheckpoints?: readonly ExecutorCheckpointInput[],
   ): ExecutorRoundView;
   observeRound(

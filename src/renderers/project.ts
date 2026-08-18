@@ -58,6 +58,13 @@ export function projectStatusToJsonShape(
   filters: ProjectRollupFilters,
   rollup: ProjectRollup,
 ): Record<string, unknown> {
+  const pendingIntents = rollup.pendingIntents.map((intent) => ({
+    ...intent,
+    externalApply: projectRollupExternalApplyIntentToJsonShape(
+      intent.externalApply,
+    ),
+  }));
+
   return {
     ok: true,
     command: "project status",
@@ -73,7 +80,11 @@ export function projectStatusToJsonShape(
     staleThresholdMs: rollup.reconciliationStaleThresholdMs,
     intentStaleThresholdMs: rollup.intentStaleThresholdMs,
     generatedAt: rollup.generatedAt,
-    counts: rollup.counts,
+    counts: {
+      ...rollup.counts,
+      pendingUpdateIntents: rollup.counts.pendingIntents,
+      staleUpdateIntents: rollup.counts.staleIntents,
+    },
     trackerItems: rollup.trackerItems,
     totalTrackerItemCount: rollup.totalTrackerItemCount,
     truncatedTrackerItems: rollup.truncatedTrackerItems,
@@ -81,14 +92,12 @@ export function projectStatusToJsonShape(
     totalMismatchCount: rollup.totalMismatchCount,
     truncatedMismatches: rollup.truncatedMismatches,
     reconciliationWarnings: rollup.reconciliationWarnings,
-    pendingIntents: rollup.pendingIntents.map((intent) => ({
-      ...intent,
-      externalApply: projectRollupExternalApplyIntentToJsonShape(
-        intent.externalApply,
-      ),
-    })),
+    pendingIntents,
+    pendingUpdateIntents: pendingIntents,
     totalPendingIntentCount: rollup.totalPendingIntentCount,
+    totalPendingUpdateIntentCount: rollup.totalPendingIntentCount,
     truncatedPendingIntents: rollup.truncatedPendingIntents,
+    truncatedPendingUpdateIntents: rollup.truncatedPendingIntents,
     externalApply: projectRollupExternalApplyToJsonShape(rollup.externalApply),
     nextAction: rollup.nextAction,
   };
