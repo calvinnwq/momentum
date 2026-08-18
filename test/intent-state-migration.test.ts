@@ -334,6 +334,176 @@ describe("NAM-06 intent table rename", () => {
   });
 });
 
+function columnNames(db: DatabaseSync, table: string): string[] {
+  return (
+    db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  ).map((row) => row.name);
+}
+
+describe("NAM-06 intent graph preflight", () => {
+  it("completes the tracker-link column rename on a canonical intents table, idempotently", () => {
+    const dataDir = makeTempDir();
+    openDb(dataDir).close();
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      // A partial state where the table rename landed without the
+      // tracker-link column rename.
+      raw.exec(
+        "ALTER TABLE intents RENAME COLUMN tracker_item_id TO source_item_id",
+      );
+    } finally {
+      raw.close();
+    }
+
+    const db = openDb(dataDir);
+    try {
+      const columns = columnNames(db, "intents");
+      expect(columns).toContain("tracker_item_id");
+      expect(columns).not.toContain("source_item_id");
+      db.prepare(
+        `INSERT INTO intents
+           (id, adapter_kind, intent_type, payload_json, reason, status,
+            idempotency_key, created_at, updated_at)
+         VALUES ('intent_link_1', 'linear', 'status_update', '{}', 'r',
+                 'pending', 'link-key-1', 1, 1)`,
+      ).run();
+    } finally {
+      db.close();
+    }
+
+    // A second open of the completed database is a no-op.
+    const before = fs.readFileSync(path.join(dataDir, "momentum.db"));
+    openDb(dataDir).close();
+    const after = fs.readFileSync(path.join(dataDir, "momentum.db"));
+    expect(after.equals(before)).toBe(true);
+  });
+
+  it("refuses a canonical intents table missing a required column before the tracker rename commits, then retries after repair", () => {
+    const dataDir = makeTempDir();
+    openDb(dataDir).close();
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      raw.exec("ALTER TABLE intents DROP COLUMN skipped_at");
+      // A pending NAM-05 tracker rename that must not commit beside the
+      // refused intent graph.
+      raw.exec("ALTER TABLE tracker_items RENAME TO source_items");
+    } finally {
+      raw.close();
+    }
+
+    expect(() => openDb(dataDir)).toThrow(
+      /intent schema migration refused: intents is missing required column skipped_at/,
+    );
+
+    // Fail closed: the pending tracker rename did not commit either.
+    const inspect = new DatabaseSync(path.join(dataDir, "momentum.db"), {
+      readOnly: true,
+    });
+    try {
+      expect(tableNames(inspect)).toContain("source_items");
+      expect(tableNames(inspect)).not.toContain("tracker_items");
+      expect(columnNames(inspect, "intents")).not.toContain("skipped_at");
+    } finally {
+      inspect.close();
+    }
+
+    // Repairing the unsupported column makes the next open complete the
+    // pending migration chain.
+    const repair = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      repair.exec("ALTER TABLE intents ADD COLUMN skipped_at INTEGER");
+    } finally {
+      repair.close();
+    }
+    const db = openDb(dataDir);
+    try {
+      expect(tableNames(db)).toContain("tracker_items");
+      expect(tableNames(db)).not.toContain("source_items");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses a stale intent_apply_audits foreign key stranded on update_intents", () => {
+    const dataDir = makeTempDir();
+    openDb(dataDir).close();
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      // Retarget the audit ledger at the retired table name: the rename
+      // rewrites the foreign key, the fresh canonical table does not.
+      raw.exec("ALTER TABLE intents RENAME TO update_intents");
+      raw.exec(`
+CREATE TABLE intents (
+  id TEXT PRIMARY KEY,
+  adapter_kind TEXT NOT NULL,
+  target_external_id TEXT,
+  intent_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  reason TEXT NOT NULL,
+  goal_id TEXT REFERENCES goals(id),
+  tracker_item_id TEXT REFERENCES tracker_items(id),
+  evidence_record_id TEXT REFERENCES evidence_records(id),
+  status TEXT NOT NULL DEFAULT 'pending',
+  idempotency_key TEXT NOT NULL,
+  decision_reason TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  applied_at INTEGER,
+  skipped_at INTEGER,
+  canceled_at INTEGER,
+  apply_state TEXT NOT NULL DEFAULT 'idle'
+) STRICT`);
+      raw.exec("DROP TABLE update_intents");
+    } finally {
+      raw.close();
+    }
+
+    expect(() => openDb(dataDir)).toThrow(
+      /intent schema migration refused: intent_apply_audits\.intent_id references update_intents instead of intents/,
+    );
+  });
+
+  it("completes the canonical column rename on migrated read-only open", () => {
+    const dataDir = makeTempDir();
+    openDb(dataDir).close();
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      raw.exec(
+        "ALTER TABLE intents RENAME COLUMN tracker_item_id TO source_item_id",
+      );
+    } finally {
+      raw.close();
+    }
+
+    const db = openExistingDbMigratedReadOnly(dataDir);
+    expect(db).toBeDefined();
+    try {
+      const columns = columnNames(db!, "intents");
+      expect(columns).toContain("tracker_item_id");
+      expect(columns).not.toContain("source_item_id");
+    } finally {
+      db!.close();
+    }
+  });
+
+  it("refuses an unsupported canonical intent graph on migrated read-only open", () => {
+    const dataDir = makeTempDir();
+    openDb(dataDir).close();
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      raw.exec("ALTER TABLE intents DROP COLUMN skipped_at");
+    } finally {
+      raw.close();
+    }
+
+    expect(() => openExistingDbMigratedReadOnly(dataDir)).toThrow(
+      /intent schema migration refused: intents is missing required column skipped_at/,
+    );
+  });
+});
+
 describe("NAM-06 supervising_delegate round-state rename", () => {
   it("migrates persisted mirroring_external_state rounds and leaves other states alone", () => {
     const dataDir = makeTempDir();

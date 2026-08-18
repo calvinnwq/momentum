@@ -2540,29 +2540,141 @@ const INTENT_INDEX_RENAME_DROPS: readonly string[] = [
   "idx_update_intents_created_at",
 ];
 
-/**
- * Whether the durable intent graph still carries the pre-rename
- * `update_intents` table name. Exported so read-only opens route a pre-rename
- * database through the full migration chain.
- */
-export function intentSchemaMigrationNeeded(db: MomentumDb): boolean {
-  return tableExists(db, INTENT_TABLE_RENAME[0]);
+// Every canonical intent column the rename chain and the additive DDL pass
+// structurally depend on (writes and the intent index DDL), minus the
+// additively ensured M6 columns (INTENT_M6_COLUMNS) and the tracker-link
+// column, which is validated separately because a supported database
+// legitimately carries either spelling.
+const INTENT_REQUIRED_COLUMNS: readonly string[] = [
+  "id",
+  "adapter_kind",
+  "target_external_id",
+  "intent_type",
+  "payload_json",
+  "reason",
+  "goal_id",
+  "evidence_record_id",
+  "status",
+  "idempotency_key",
+  "decision_reason",
+  "error_code",
+  "error_message",
+  "created_at",
+  "updated_at",
+  "applied_at",
+  "skipped_at",
+  "canceled_at",
+];
+
+function tableForeignKeyForColumn(
+  db: MomentumDb,
+  table: string,
+  column: string,
+): { table: string; from: string } | undefined {
+  const foreignKeys = db
+    .prepare(`PRAGMA foreign_key_list(${table})`)
+    .all() as Array<{ table: string; from: string }>;
+  return foreignKeys.find((fk) => fk.from === column);
 }
 
 /**
- * Refuse an ambiguous partially renamed intent graph without mutating
- * anything: an `intents` table beside a still-present `update_intents` table
- * cannot be renamed losslessly and parks the open for operator inspection.
- * Hoisted into the fail-closed block at the top of `applyQueueMigrations` so
- * the refusal lands before any earlier migration commits;
- * `migrateIntentSchemaRename` re-checks as defense.
+ * Inventory the durable intent graph and return the refusal reason for an
+ * unsupported partial schema, or undefined when the graph is fully legacy,
+ * fully canonical, or completable by the known safe rename. Unsupported
+ * states: both table names present, both or neither tracker-link column
+ * spelling on the intent table, a missing required column, a tracker-link
+ * foreign key whose parent table is absent and not produced by the migration
+ * chain, or an `intent_apply_audits.intent_id` foreign key stranded on a
+ * table name the chain will not resolve. Read-only: never mutates.
  */
-function assertIntentSchemaRenameUnambiguous(db: MomentumDb): void {
+function intentSchemaUnsupportedReason(db: MomentumDb): string | undefined {
   const [legacyTable, intentTable] = INTENT_TABLE_RENAME;
-  if (tableExists(db, legacyTable) && tableExists(db, intentTable)) {
+  const hasLegacy = tableExists(db, legacyTable);
+  const hasCanonical = tableExists(db, intentTable);
+  if (hasLegacy && hasCanonical) {
+    return `both ${legacyTable} and ${intentTable} exist`;
+  }
+  const presentTable = hasCanonical
+    ? intentTable
+    : hasLegacy
+      ? legacyTable
+      : undefined;
+  if (presentTable !== undefined) {
+    const hasLegacyLink = columnExists(db, presentTable, "source_item_id");
+    const hasTrackerLink = columnExists(db, presentTable, "tracker_item_id");
+    if (hasLegacyLink && hasTrackerLink) {
+      return `${presentTable} carries both source_item_id and tracker_item_id`;
+    }
+    if (!hasLegacyLink && !hasTrackerLink) {
+      return `${presentTable} is missing its tracker-link column`;
+    }
+    for (const column of INTENT_REQUIRED_COLUMNS) {
+      if (!columnExists(db, presentTable, column)) {
+        return `${presentTable} is missing required column ${column}`;
+      }
+    }
+    const linkColumn = hasTrackerLink ? "tracker_item_id" : "source_item_id";
+    const linkFk = tableForeignKeyForColumn(db, presentTable, linkColumn);
+    if (
+      linkFk !== undefined &&
+      linkFk.table !== "tracker_items" &&
+      !tableExists(db, linkFk.table)
+    ) {
+      return `${presentTable}.${linkColumn} references missing table ${linkFk.table}`;
+    }
+  }
+  if (tableExists(db, "intent_apply_audits")) {
+    const auditFk = tableForeignKeyForColumn(
+      db,
+      "intent_apply_audits",
+      "intent_id",
+    );
+    if (
+      auditFk !== undefined &&
+      auditFk.table !== intentTable &&
+      !(auditFk.table === legacyTable && hasLegacy)
+    ) {
+      return `intent_apply_audits.intent_id references ${auditFk.table} instead of ${intentTable}`;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Whether the durable intent graph needs the full migration chain: the
+ * pre-rename `update_intents` table name is still present, a canonical
+ * `intents` table still carries the legacy `source_item_id` tracker-link
+ * column (the known safe rename completes it), or the graph is in an
+ * unsupported partial state that the fail-closed preflight must refuse
+ * before any mutation. Exported so read-only opens route all three through
+ * the full migration chain instead of serving a stale or malformed graph.
+ */
+export function intentSchemaMigrationNeeded(db: MomentumDb): boolean {
+  const [legacyTable, intentTable] = INTENT_TABLE_RENAME;
+  if (tableExists(db, legacyTable)) return true;
+  if (
+    tableExists(db, intentTable) &&
+    columnExists(db, intentTable, "source_item_id")
+  ) {
+    return true;
+  }
+  return intentSchemaUnsupportedReason(db) !== undefined;
+}
+
+/**
+ * Refuse an unsupported partially migrated intent graph without mutating
+ * anything (see `intentSchemaUnsupportedReason` for the inventory) and park
+ * the open for operator inspection. Hoisted into the fail-closed block at
+ * the top of `applyQueueMigrations` so the refusal lands before any earlier
+ * migration commits and the refused database stays byte-identical to its
+ * pre-open state; `migrateIntentSchemaRename` re-checks as defense.
+ */
+function assertIntentSchemaSupported(db: MomentumDb): void {
+  const reason = intentSchemaUnsupportedReason(db);
+  if (reason !== undefined) {
     throw new Error(
-      `intent schema migration refused: both ${legacyTable} and ${intentTable} exist; ` +
-        "resolve the ambiguous partial state before reopening this database",
+      `intent schema migration refused: ${reason}; ` +
+        "resolve the unsupported partial state before reopening this database",
     );
   }
 }
@@ -2580,16 +2692,29 @@ function assertIntentSchemaRenameUnambiguous(db: MomentumDb): void {
  * ids, idempotency keys, decisions, errors, timestamps, and links are
  * untouched; only names change. Old-name indexes are dropped and their
  * intent-named equivalents recreated in the same transaction.
+ *
+ * Also completes the tracker-link column rename atomically for a canonical
+ * `intents` table that landed the table rename without it: a lone
+ * `source_item_id` column is renamed to `tracker_item_id` in the same
+ * transaction. Unsupported partial states are refused up front by
+ * `assertIntentSchemaSupported` before anything mutates.
  */
 function migrateIntentSchemaRename(db: MomentumDb): void {
   if (!intentSchemaMigrationNeeded(db)) return;
 
-  assertIntentSchemaRenameUnambiguous(db);
+  assertIntentSchemaSupported(db);
 
   const [legacyTable, intentTable] = INTENT_TABLE_RENAME;
   db.exec("BEGIN IMMEDIATE");
   try {
-    db.exec(`ALTER TABLE ${legacyTable} RENAME TO ${intentTable}`);
+    if (tableExists(db, legacyTable)) {
+      db.exec(`ALTER TABLE ${legacyTable} RENAME TO ${intentTable}`);
+    }
+    if (columnExists(db, intentTable, "source_item_id")) {
+      db.exec(
+        `ALTER TABLE ${intentTable} RENAME COLUMN source_item_id TO tracker_item_id`,
+      );
+    }
     for (const indexName of INTENT_INDEX_RENAME_DROPS) {
       db.exec(`DROP INDEX IF EXISTS ${indexName}`);
     }
@@ -2628,14 +2753,15 @@ export function applyQueueMigrations(
   ) {
     assertWorkflowRouteStatePlanCurrent(db, routeStatePlan);
   }
-  // Fail closed before any mutation, part three: an ambiguous partially
-  // renamed tracker or intent graph must refuse the whole migration chain up
-  // front, so the refused database stays byte-identical to its pre-open state.
+  // Fail closed before any mutation, part three: an ambiguous or unsupported
+  // partially renamed tracker or intent graph must refuse the whole migration
+  // chain up front, so the refused database stays byte-identical to its
+  // pre-open state.
   if (trackerSchemaMigrationNeeded(db)) {
     assertTrackerSchemaRenameUnambiguous(db);
   }
   if (intentSchemaMigrationNeeded(db)) {
-    assertIntentSchemaRenameUnambiguous(db);
+    assertIntentSchemaSupported(db);
   }
   // Fail closed before any mutation, part four: the partial SDK-05 invocation
   // phase runs after the tracker rename and the additive pass, so its full
