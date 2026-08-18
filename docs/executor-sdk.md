@@ -321,6 +321,11 @@ When Momentum observes an unowned escaped descendant, loses ownership visibility
 - `heartbeat()` for liveness;
 - `recordArtifact()`, `recordCheckpoint()`, `recordFinding()`, and `recordDecision()` for append-only evidence.
 
+For compatibility, the facade accepts the legacy `mirroring_external_state`
+observation phase as input and normalizes it to the canonical
+`supervising_delegate` round state; newly persisted rounds always use the
+canonical value.
+
 It does not expose SQLite or terminal-classification methods. The daemon controller and frozen executor facade are separate runtime objects, not merely different TypeScript views of one object. The facade rejects evidence for another attempt, overlapping or gapped rounds, writes after either the round or attempt is terminal, and terminal states submitted through JavaScript or casted observation inputs. Every public write validates its complete payload at runtime, including round starts and observations, progress checkpoint batches, artifacts, checkpoints, findings, decisions, and daemon settlement. Observation updates use an explicit runtime field whitelist rather than spreading caller objects. State-dependent checks and writes are transactional; daemon-allocated checkpoint identity, terminal classification, and attempt settlement share one write transaction.
 Executor writes are available only while the attempt is `running`; a daemon transition to `waiting_operator` or any other non-running state revokes every facade write, including heartbeat, until daemon policy moves the attempt again.
 

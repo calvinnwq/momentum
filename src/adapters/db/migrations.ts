@@ -2370,7 +2370,7 @@ const TRACKER_INDEX_RENAME_DROPS: readonly string[] = [
 // Recreated per table and guarded by table/column existence: a supported older
 // database can carry the source-named tracker tables without evidence_records
 // or update_intents yet. Those dependent tables (and these same tracker-item
-// indexes, via EVIDENCE_RECORDS_DDL / UPDATE_INTENTS_DDL) are created by the
+// indexes, via EVIDENCE_RECORDS_DDL / INTENTS_DDL) are created by the
 // later additive DDL pass, so a skipped index here is still created.
 const TRACKER_INDEX_RECREATES: ReadonlyArray<[string, string]> = [
   [

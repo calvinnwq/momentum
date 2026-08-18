@@ -106,8 +106,8 @@ type EvidenceRow = {
 
 /**
  * Inspect a Goal's terminal state, its linked TrackerItems, and the goal/tracker
- * evidence records, then create (or replay) durable `source_satisfied` update
- * intents for every linked open TrackerItem with verification evidence. A
+ * evidence records, then create (or replay) durable `source_satisfied` intents
+ * for every linked open TrackerItem with verification evidence. A
  * completed Goal can have multiple linked open TrackerItems and therefore
  * multiple pending intents.
  *
