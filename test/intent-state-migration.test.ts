@@ -340,6 +340,68 @@ function columnNames(db: DatabaseSync, table: string): string[] {
   ).map((row) => row.name);
 }
 
+/** The canonical intents table DDL with a configurable tracker-link line. */
+function intentsTableDdl(trackerLinkLine: string): string {
+  return `
+CREATE TABLE intents (
+  id TEXT PRIMARY KEY,
+  adapter_kind TEXT NOT NULL,
+  target_external_id TEXT,
+  intent_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  reason TEXT NOT NULL,
+  goal_id TEXT REFERENCES goals(id),
+  ${trackerLinkLine},
+  evidence_record_id TEXT REFERENCES evidence_records(id),
+  status TEXT NOT NULL DEFAULT 'pending',
+  idempotency_key TEXT NOT NULL,
+  decision_reason TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  applied_at INTEGER,
+  skipped_at INTEGER,
+  canceled_at INTEGER,
+  apply_state TEXT NOT NULL DEFAULT 'idle'
+) STRICT`;
+}
+
+/** The canonical intent_apply_audits DDL with a configurable intent_id line. */
+function auditsTableDdl(intentIdLine: string): string {
+  return `
+CREATE TABLE intent_apply_audits (
+  id TEXT PRIMARY KEY,
+  ${intentIdLine},
+  adapter_kind TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  external_target_external_id TEXT,
+  external_target_external_key TEXT,
+  external_target_url TEXT,
+  external_target_title TEXT,
+  requested_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  operator_reason TEXT NOT NULL,
+  operator_actor TEXT,
+  intent_apply_policy TEXT NOT NULL,
+  allow_status_mutation INTEGER NOT NULL DEFAULT 0,
+  mutation_kind TEXT NOT NULL,
+  preview_summary TEXT NOT NULL,
+  idempotency_marker TEXT NOT NULL,
+  lifecycle_state TEXT NOT NULL,
+  result_status TEXT,
+  result_code TEXT,
+  result_message TEXT,
+  external_ref_comment_id TEXT,
+  external_ref_comment_url TEXT,
+  external_ref_state_transition_id TEXT,
+  reconcile_status TEXT,
+  reconcile_warning TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT`;
+}
+
 describe("NAM-06 intent graph preflight", () => {
   it("completes the tracker-link column rename on a canonical intents table, idempotently", () => {
     const dataDir = makeTempDir();
@@ -432,29 +494,9 @@ describe("NAM-06 intent graph preflight", () => {
       // Retarget the audit ledger at the retired table name: the rename
       // rewrites the foreign key, the fresh canonical table does not.
       raw.exec("ALTER TABLE intents RENAME TO update_intents");
-      raw.exec(`
-CREATE TABLE intents (
-  id TEXT PRIMARY KEY,
-  adapter_kind TEXT NOT NULL,
-  target_external_id TEXT,
-  intent_type TEXT NOT NULL,
-  payload_json TEXT NOT NULL DEFAULT '{}',
-  reason TEXT NOT NULL,
-  goal_id TEXT REFERENCES goals(id),
-  tracker_item_id TEXT REFERENCES tracker_items(id),
-  evidence_record_id TEXT REFERENCES evidence_records(id),
-  status TEXT NOT NULL DEFAULT 'pending',
-  idempotency_key TEXT NOT NULL,
-  decision_reason TEXT,
-  error_code TEXT,
-  error_message TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  applied_at INTEGER,
-  skipped_at INTEGER,
-  canceled_at INTEGER,
-  apply_state TEXT NOT NULL DEFAULT 'idle'
-) STRICT`);
+      raw.exec(
+        intentsTableDdl("tracker_item_id TEXT REFERENCES tracker_items(id)"),
+      );
       raw.exec("DROP TABLE update_intents");
     } finally {
       raw.close();
@@ -501,6 +543,191 @@ CREATE TABLE intents (
     expect(() => openExistingDbMigratedReadOnly(dataDir)).toThrow(
       /intent schema migration refused: intents is missing required column skipped_at/,
     );
+  });
+
+  it("refuses an intent_apply_audits table without its intent_id foreign key", () => {
+    const dataDir = makeTempDir();
+    openDb(dataDir).close();
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      raw.exec("DROP TABLE intent_apply_audits");
+      raw.exec(auditsTableDdl("intent_id TEXT NOT NULL"));
+    } finally {
+      raw.close();
+    }
+
+    expect(() => openDb(dataDir)).toThrow(
+      /intent schema migration refused: intent_apply_audits\.intent_id carries no foreign key/,
+    );
+    expect(() => openExistingDbMigratedReadOnly(dataDir)).toThrow(
+      /intent_apply_audits\.intent_id carries no foreign key/,
+    );
+  });
+
+  it("refuses a tracker-link foreign key targeting the wrong parent column", () => {
+    const dataDir = makeTempDir();
+    openDb(dataDir).close();
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      raw.exec("DROP TABLE intents");
+      raw.exec(
+        intentsTableDdl(
+          "tracker_item_id TEXT REFERENCES tracker_items(status)",
+        ),
+      );
+    } finally {
+      raw.close();
+    }
+
+    expect(() => openDb(dataDir)).toThrow(
+      /intent schema migration refused: intents\.tracker_item_id references tracker_items\(status\) instead of tracker_items\(id\)/,
+    );
+  });
+
+  it("refuses a same-name index that does not match the canonical definition, then retries after repair", () => {
+    const dataDir = makeTempDir();
+    openDb(dataDir).close();
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      // CREATE INDEX IF NOT EXISTS would silently preserve this non-unique
+      // impostor and idempotency-key uniqueness would be lost.
+      raw.exec("DROP INDEX idx_intents_idempotency_key");
+      raw.exec("CREATE INDEX idx_intents_idempotency_key ON intents(status)");
+    } finally {
+      raw.close();
+    }
+
+    expect(() => openDb(dataDir)).toThrow(
+      /intent schema migration refused: index idx_intents_idempotency_key does not match its canonical definition/,
+    );
+
+    const repair = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      repair.exec("DROP INDEX idx_intents_idempotency_key");
+      repair.exec(
+        "CREATE UNIQUE INDEX idx_intents_idempotency_key ON intents(idempotency_key)",
+      );
+    } finally {
+      repair.close();
+    }
+
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO intents
+           (id, adapter_kind, intent_type, payload_json, reason, status,
+            idempotency_key, created_at, updated_at)
+         VALUES ('intent_idem_1', 'linear', 'status_update', '{}', 'r',
+                 'pending', 'idem-key-1', 1, 1)`,
+      ).run();
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO intents
+               (id, adapter_kind, intent_type, payload_json, reason, status,
+                idempotency_key, created_at, updated_at)
+             VALUES ('intent_idem_2', 'linear', 'status_update', '{}', 'r',
+                     'pending', 'idem-key-1', 1, 1)`,
+          )
+          .run(),
+      ).toThrow(/UNIQUE/);
+    } finally {
+      db.close();
+    }
+
+    const before = fs.readFileSync(path.join(dataDir, "momentum.db"));
+    openDb(dataDir).close();
+    const after = fs.readFileSync(path.join(dataDir, "momentum.db"));
+    expect(after.equals(before)).toBe(true);
+  });
+
+  it("refuses a missing audit column before the intent rename commits, then retries after repair", () => {
+    const dataDir = makeTempDir();
+    openDb(dataDir).close();
+    rewindIntentRename(dataDir);
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      raw.exec("DROP INDEX idx_intent_apply_audits_lifecycle_state");
+      raw.exec("DROP INDEX idx_intent_apply_audits_active");
+      raw.exec("ALTER TABLE intent_apply_audits DROP COLUMN lifecycle_state");
+    } finally {
+      raw.close();
+    }
+
+    expect(() => openDb(dataDir)).toThrow(
+      /intent schema migration refused: intent_apply_audits is missing required column lifecycle_state/,
+    );
+
+    // Fail closed: the intent rename did not commit, so the legacy graph is
+    // unchanged and the failed open retries from its original state.
+    const inspect = new DatabaseSync(path.join(dataDir, "momentum.db"), {
+      readOnly: true,
+    });
+    try {
+      expect(tableNames(inspect)).toContain("update_intents");
+      expect(tableNames(inspect)).not.toContain("intents");
+      expect(indexNames(inspect)).toContain(
+        "idx_update_intents_idempotency_key",
+      );
+    } finally {
+      inspect.close();
+    }
+
+    const repair = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      repair.exec(
+        "ALTER TABLE intent_apply_audits ADD COLUMN lifecycle_state TEXT NOT NULL DEFAULT 'succeeded'",
+      );
+    } finally {
+      repair.close();
+    }
+
+    const db = openDb(dataDir);
+    try {
+      expect(tableNames(db)).toContain("intents");
+      expect(tableNames(db)).not.toContain("update_intents");
+      const indexes = indexNames(db);
+      expect(indexes).toContain("idx_intent_apply_audits_lifecycle_state");
+      expect(indexes).toContain("idx_intent_apply_audits_active");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("drops the legacy tracker-link index during safe canonical completion, idempotently", () => {
+    const dataDir = makeTempDir();
+    openDb(dataDir).close();
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      // A realistic partial state: the table rename landed without the
+      // column rename, still carrying the pre-NAM-05 tracker-link index
+      // name on the legacy column spelling.
+      raw.exec(
+        "ALTER TABLE intents RENAME COLUMN tracker_item_id TO source_item_id",
+      );
+      raw.exec("DROP INDEX idx_intents_tracker_item");
+      raw.exec(
+        `CREATE INDEX idx_update_intents_source_item
+           ON intents(source_item_id) WHERE source_item_id IS NOT NULL`,
+      );
+    } finally {
+      raw.close();
+    }
+
+    const db = openDb(dataDir);
+    try {
+      expect(columnNames(db, "intents")).toContain("tracker_item_id");
+      const indexes = indexNames(db);
+      expect(indexes).toContain("idx_intents_tracker_item");
+      expect(indexes).not.toContain("idx_update_intents_source_item");
+    } finally {
+      db.close();
+    }
+
+    const before = fs.readFileSync(path.join(dataDir, "momentum.db"));
+    openDb(dataDir).close();
+    const after = fs.readFileSync(path.join(dataDir, "momentum.db"));
+    expect(after.equals(before)).toBe(true);
   });
 });
 

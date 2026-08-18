@@ -2538,6 +2538,11 @@ const INTENT_INDEX_RENAME_DROPS: readonly string[] = [
   "idx_update_intents_evidence",
   "idx_update_intents_adapter_target",
   "idx_update_intents_created_at",
+  // A supported partial canonical state (`intents.source_item_id`) can still
+  // carry the pre-NAM-05 tracker-link index; the column rename retargets its
+  // definition but keeps the legacy name, so it must be dropped here or it
+  // survives as a duplicate of idx_intents_tracker_item.
+  "idx_update_intents_source_item",
 ];
 
 // Every canonical intent column the rename chain and the additive DDL pass
@@ -2570,11 +2575,204 @@ function tableForeignKeyForColumn(
   db: MomentumDb,
   table: string,
   column: string,
-): { table: string; from: string } | undefined {
+): { table: string; from: string; to: string | null } | undefined {
   const foreignKeys = db
     .prepare(`PRAGMA foreign_key_list(${table})`)
-    .all() as Array<{ table: string; from: string }>;
+    .all() as Array<{ table: string; from: string; to: string | null }>;
   return foreignKeys.find((fk) => fk.from === column);
+}
+
+// Every canonical `intent_apply_audits` column the additive DDL pass and the
+// audit ledger writes structurally depend on. The intent rename commits in
+// its own transaction before the additive pass runs INTENT_APPLY_AUDITS_DDL,
+// so a missing audit column must refuse the open up front instead of
+// stranding a committed rename beside a failing index build.
+const INTENT_APPLY_AUDIT_REQUIRED_COLUMNS: readonly string[] = [
+  "id",
+  "intent_id",
+  "adapter_kind",
+  "provider",
+  "external_target_external_id",
+  "external_target_external_key",
+  "external_target_url",
+  "external_target_title",
+  "requested_at",
+  "finished_at",
+  "operator_reason",
+  "operator_actor",
+  "intent_apply_policy",
+  "allow_status_mutation",
+  "mutation_kind",
+  "preview_summary",
+  "idempotency_marker",
+  "lifecycle_state",
+  "result_status",
+  "result_code",
+  "result_message",
+  "external_ref_comment_id",
+  "external_ref_comment_url",
+  "external_ref_state_transition_id",
+  "reconcile_status",
+  "reconcile_warning",
+  "created_at",
+  "updated_at",
+];
+
+// The canonical intent-graph index contract: CREATE INDEX IF NOT EXISTS
+// silently preserves a same-name index with the wrong owner, uniqueness,
+// columns, or predicate, so any pre-existing canonical-named index must
+// match this inventory or the open is refused. The tracker-link index
+// legitimately covers either column spelling because RENAME COLUMN
+// retargets index definitions in lockstep with the supported partial state.
+const INTENT_INDEX_CONTRACTS: ReadonlyArray<{
+  name: string;
+  onAudits: boolean;
+  unique: boolean;
+  partial: boolean;
+  columns: readonly string[] | "tracker-link";
+}> = [
+  {
+    name: "idx_intents_idempotency_key",
+    onAudits: false,
+    unique: true,
+    partial: false,
+    columns: ["idempotency_key"],
+  },
+  {
+    name: "idx_intents_status",
+    onAudits: false,
+    unique: false,
+    partial: false,
+    columns: ["status"],
+  },
+  {
+    name: "idx_intents_goal",
+    onAudits: false,
+    unique: false,
+    partial: true,
+    columns: ["goal_id"],
+  },
+  {
+    name: "idx_intents_tracker_item",
+    onAudits: false,
+    unique: false,
+    partial: true,
+    columns: "tracker-link",
+  },
+  {
+    name: "idx_intents_evidence",
+    onAudits: false,
+    unique: false,
+    partial: true,
+    columns: ["evidence_record_id"],
+  },
+  {
+    name: "idx_intents_adapter_target",
+    onAudits: false,
+    unique: false,
+    partial: false,
+    columns: ["adapter_kind", "target_external_id"],
+  },
+  {
+    name: "idx_intents_created_at",
+    onAudits: false,
+    unique: false,
+    partial: false,
+    columns: ["created_at"],
+  },
+  {
+    name: "idx_intent_apply_audits_intent_id",
+    onAudits: true,
+    unique: false,
+    partial: false,
+    columns: ["intent_id"],
+  },
+  {
+    name: "idx_intent_apply_audits_lifecycle_state",
+    onAudits: true,
+    unique: false,
+    partial: false,
+    columns: ["lifecycle_state"],
+  },
+  {
+    name: "idx_intent_apply_audits_finished_at",
+    onAudits: true,
+    unique: false,
+    partial: false,
+    columns: ["finished_at"],
+  },
+  {
+    name: "idx_intent_apply_audits_created_at",
+    onAudits: true,
+    unique: false,
+    partial: false,
+    columns: ["created_at"],
+  },
+  {
+    name: "idx_intent_apply_audits_active",
+    onAudits: true,
+    unique: true,
+    partial: true,
+    columns: ["intent_id"],
+  },
+];
+
+/**
+ * The refusal reason for a pre-existing canonical-named intent-graph index
+ * whose definition does not match INTENT_INDEX_CONTRACTS, or undefined when
+ * every present canonical-named index matches. Absent indexes are fine: the
+ * rename transaction and the additive DDL pass create them from fresh DDL.
+ */
+function intentIndexContractViolation(
+  db: MomentumDb,
+  intentTableName: string | undefined,
+  linkColumn: string | undefined,
+): string | undefined {
+  for (const contract of INTENT_INDEX_CONTRACTS) {
+    const owner = contract.onAudits ? "intent_apply_audits" : intentTableName;
+    const master = db
+      .prepare(
+        "SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = ?",
+      )
+      .get(contract.name) as { tbl_name: string } | undefined;
+    if (master === undefined) continue;
+    const expectedColumns =
+      contract.columns === "tracker-link"
+        ? [linkColumn ?? "tracker_item_id"]
+        : contract.columns;
+    const expected =
+      `expected ${contract.unique ? "unique " : ""}` +
+      `${contract.partial ? "partial " : ""}index on ` +
+      `${owner ?? "the intent table"}(${expectedColumns.join(", ")})`;
+    if (owner === undefined || master.tbl_name !== owner) {
+      return `index ${contract.name} is defined on ${master.tbl_name} (${expected})`;
+    }
+    const listRow = (
+      db.prepare(`PRAGMA index_list(${owner})`).all() as Array<{
+        name: string;
+        unique: number;
+        partial: number;
+      }>
+    ).find((row) => row.name === contract.name);
+    if (listRow === undefined) continue;
+    const actualColumns = (
+      db.prepare(`PRAGMA index_info(${contract.name})`).all() as Array<{
+        seqno: number;
+        name: string | null;
+      }>
+    )
+      .sort((a, b) => a.seqno - b.seqno)
+      .map((row) => row.name);
+    if (
+      Boolean(listRow.unique) !== contract.unique ||
+      Boolean(listRow.partial) !== contract.partial ||
+      actualColumns.length !== expectedColumns.length ||
+      expectedColumns.some((column, i) => actualColumns[i] !== column)
+    ) {
+      return `index ${contract.name} does not match its canonical definition (${expected})`;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -2582,10 +2780,13 @@ function tableForeignKeyForColumn(
  * unsupported partial schema, or undefined when the graph is fully legacy,
  * fully canonical, or completable by the known safe rename. Unsupported
  * states: both table names present, both or neither tracker-link column
- * spelling on the intent table, a missing required column, a tracker-link
- * foreign key whose parent table is absent and not produced by the migration
- * chain, or an `intent_apply_audits.intent_id` foreign key stranded on a
- * table name the chain will not resolve. Read-only: never mutates.
+ * spelling on the intent table, a missing required intent or audit column,
+ * a present intent-table foreign key that does not match its exact
+ * from/table/to contract (tracker link to `tracker_items`/`source_items`,
+ * goal and evidence links; the FK-less pre-M6 shape stays supported), a
+ * missing or mismatched `intent_apply_audits.intent_id` foreign key, or a
+ * canonical-named index whose definition does not match
+ * INTENT_INDEX_CONTRACTS. Read-only: never mutates.
  */
 function intentSchemaUnsupportedReason(db: MomentumDb): string | undefined {
   const [legacyTable, intentTable] = INTENT_TABLE_RENAME;
@@ -2599,6 +2800,7 @@ function intentSchemaUnsupportedReason(db: MomentumDb): string | undefined {
     : hasLegacy
       ? legacyTable
       : undefined;
+  let linkColumn: string | undefined;
   if (presentTable !== undefined) {
     const hasLegacyLink = columnExists(db, presentTable, "source_item_id");
     const hasTrackerLink = columnExists(db, presentTable, "tracker_item_id");
@@ -2613,31 +2815,65 @@ function intentSchemaUnsupportedReason(db: MomentumDb): string | undefined {
         return `${presentTable} is missing required column ${column}`;
       }
     }
-    const linkColumn = hasTrackerLink ? "tracker_item_id" : "source_item_id";
+    linkColumn = hasTrackerLink ? "tracker_item_id" : "source_item_id";
+    // The pre-M6 update_intents shape carried no foreign keys at all (see
+    // the pre-M6 additive-migration regression in test/migrations.test.ts),
+    // so an absent intent-table foreign key is a supported legacy
+    // combination; a present one must match its exact from/table/to
+    // contract.
     const linkFk = tableForeignKeyForColumn(db, presentTable, linkColumn);
-    if (
-      linkFk !== undefined &&
-      linkFk.table !== "tracker_items" &&
-      !tableExists(db, linkFk.table)
-    ) {
-      return `${presentTable}.${linkColumn} references missing table ${linkFk.table}`;
+    if (linkFk !== undefined) {
+      if (linkFk.table !== "tracker_items" && linkFk.table !== "source_items") {
+        return `${presentTable}.${linkColumn} references unsupported table ${linkFk.table}`;
+      }
+      if (linkFk.to !== null && linkFk.to !== "id") {
+        return `${presentTable}.${linkColumn} references ${linkFk.table}(${linkFk.to}) instead of ${linkFk.table}(id)`;
+      }
+      // `tracker_items` is produced by the migration chain when absent; a
+      // legacy `source_items` parent must already exist for the tracker
+      // rename to resolve the reference.
+      if (linkFk.table === "source_items" && !tableExists(db, "source_items")) {
+        return `${presentTable}.${linkColumn} references missing table source_items`;
+      }
+    }
+    for (const [column, parent] of [
+      ["goal_id", "goals"],
+      ["evidence_record_id", "evidence_records"],
+    ] as const) {
+      const fk = tableForeignKeyForColumn(db, presentTable, column);
+      if (
+        fk !== undefined &&
+        (fk.table !== parent || (fk.to !== null && fk.to !== "id"))
+      ) {
+        return `${presentTable}.${column} references ${fk.table}(${fk.to ?? "id"}) instead of ${parent}(id)`;
+      }
     }
   }
   if (tableExists(db, "intent_apply_audits")) {
+    for (const column of INTENT_APPLY_AUDIT_REQUIRED_COLUMNS) {
+      if (!columnExists(db, "intent_apply_audits", column)) {
+        return `intent_apply_audits is missing required column ${column}`;
+      }
+    }
     const auditFk = tableForeignKeyForColumn(
       db,
       "intent_apply_audits",
       "intent_id",
     );
+    if (auditFk === undefined) {
+      return "intent_apply_audits.intent_id carries no foreign key";
+    }
     if (
-      auditFk !== undefined &&
       auditFk.table !== intentTable &&
       !(auditFk.table === legacyTable && hasLegacy)
     ) {
       return `intent_apply_audits.intent_id references ${auditFk.table} instead of ${intentTable}`;
     }
+    if (auditFk.to !== null && auditFk.to !== "id") {
+      return `intent_apply_audits.intent_id references ${auditFk.table}(${auditFk.to}) instead of ${auditFk.table}(id)`;
+    }
   }
-  return undefined;
+  return intentIndexContractViolation(db, presentTable, linkColumn);
 }
 
 /**
