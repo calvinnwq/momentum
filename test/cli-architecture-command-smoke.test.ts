@@ -32,7 +32,7 @@ async function run(args: string[]): Promise<CliResult> {
   const code = await runCli(args, {
     stdout: { write: (chunk: string) => ((stdout += chunk), true) },
     stderr: { write: (chunk: string) => ((stderr += chunk), true) },
-    env: { ...process.env, HOME: home }
+    env: { ...process.env, HOME: home },
   });
   return { code, stdout, stderr };
 }
@@ -56,42 +56,42 @@ describe("M11 closeout command-family smoke matrix", () => {
         args: ["workflow", "status", ...dataDirArgs(dataDir)],
         code: 0,
         stream: "stdout",
-        match: { ok: true, command: "workflow status", count: 0, runs: [] }
+        match: { ok: true, command: "workflow status", count: 0, runs: [] },
       },
       {
         label: "source family",
-        args: ["source", "list", ...dataDirArgs(dataDir)],
+        args: ["tracker", "list", ...dataDirArgs(dataDir)],
         code: 0,
         stream: "stdout",
-        match: { ok: true, command: "source list", count: 0, items: [] }
+        match: { ok: true, command: "tracker list", count: 0, items: [] },
       },
       {
         label: "evidence family",
         args: ["evidence", "list", ...dataDirArgs(dataDir)],
         code: 0,
         stream: "stdout",
-        match: { ok: true, command: "evidence list", count: 0, records: [] }
+        match: { ok: true, command: "evidence list", count: 0, records: [] },
       },
       {
         label: "project family",
         args: ["project", "status", ...dataDirArgs(dataDir)],
         code: 0,
         stream: "stdout",
-        match: { ok: true, command: "project status" }
+        match: { ok: true, command: "project status" },
       },
       {
         label: "intent family",
         args: ["intent", "list", ...dataDirArgs(dataDir)],
         code: 0,
         stream: "stdout",
-        match: { ok: true, command: "intent list", count: 0, intents: [] }
+        match: { ok: true, command: "intent list", count: 0, intents: [] },
       },
       {
         label: "daemon compatibility surface",
         args: ["daemon", "status", ...dataDirArgs(dataDir)],
         code: 0,
         stream: "stdout",
-        match: { ok: true, command: "daemon status", hasRun: false }
+        match: { ok: true, command: "daemon status", hasRun: false },
       },
       {
         label: "recovery compatibility surface",
@@ -102,8 +102,8 @@ describe("M11 closeout command-family smoke matrix", () => {
           ok: false,
           command: "recovery clear",
           code: "goal_not_found",
-          goalId: "missing-goal"
-        }
+          goalId: "missing-goal",
+        },
       },
       {
         label: "doctor compatibility surface",
@@ -113,9 +113,9 @@ describe("M11 closeout command-family smoke matrix", () => {
         match: {
           ok: true,
           command: "doctor",
-          milestone: DOCTOR_SCOPE
-        }
-      }
+          milestone: DOCTOR_SCOPE,
+        },
+      },
     ];
 
     for (const spec of cases) {

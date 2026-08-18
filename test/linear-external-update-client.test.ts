@@ -31,7 +31,7 @@ function buildIntent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {
     reason:
       "Goal completed with verification evidence (no_mistakes_complete); source item NGX-1 appears satisfied.",
     goalId: "goal_test_1",
-    sourceItemId: "source_item_test_1",
+    trackerItemId: "source_item_test_1",
     evidenceRecordId: "evidence_record_test_1",
     status: "pending",
     idempotencyKey: "linear:linear-issue-1:source_satisfied:goal_test_1",

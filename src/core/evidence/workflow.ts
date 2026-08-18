@@ -59,7 +59,7 @@ export type WorkflowEvidenceSource = {
 
 export type ParseWorkflowArtifactOptions = {
   goalId?: string | null;
-  sourceItemId?: string | null;
+  trackerItemId?: string | null;
 };
 
 export type ParseWorkflowArtifactResult = {
@@ -351,7 +351,7 @@ function parsePlanFile(
     summary,
     metadata,
     goalId: options.goalId ?? null,
-    sourceItemId: options.sourceItemId ?? null,
+    trackerItemId: options.trackerItemId ?? null,
     runId,
     stepId: null,
     ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:plan_created`,
@@ -466,7 +466,7 @@ function parseLedgerFile(
       summary,
       metadata,
       goalId: options.goalId ?? null,
-      sourceItemId: options.sourceItemId ?? null,
+      trackerItemId: options.trackerItemId ?? null,
       runId,
       stepId,
       ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:${normalized.ingestSuffix}`,
@@ -617,7 +617,7 @@ function parseApprovalFile(
     summary: `Approval recorded: ${boundary} (${runId})`,
     metadata,
     goalId: options.goalId ?? null,
-    sourceItemId: options.sourceItemId ?? null,
+    trackerItemId: options.trackerItemId ?? null,
     runId,
     stepId: null,
     ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:approval:${identityBoundary}`,

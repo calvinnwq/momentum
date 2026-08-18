@@ -9,14 +9,14 @@ import {
   DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
   PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
   buildProjectRollup,
-  type ProjectRollupMismatchKind
+  type ProjectRollupMismatchKind,
 } from "../src/core/repo/project-rollup.js";
 import { ingestEvidenceRecord } from "../src/core/evidence/records.js";
 import {
-  finishSourceReconciliationRun,
-  startSourceReconciliationRun
-} from "../src/core/source/reconciliation-runs.js";
-import { upsertSourceItem } from "../src/core/source/items.js";
+  finishTrackerReconciliationRun,
+  startTrackerReconciliationRun,
+} from "../src/core/tracker/reconciliation-runs.js";
+import { upsertTrackerItem } from "../src/core/tracker/items.js";
 import { createUpdateIntent } from "../src/core/intent/update-intents.js";
 
 const tempRoots: string[] = [];
@@ -29,7 +29,9 @@ afterEach(() => {
 });
 
 function makeTempDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-project-rollup-"));
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "momentum-project-rollup-"),
+  );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
 }
@@ -45,7 +47,7 @@ function seedGoal(db: MomentumDb, seed: GoalSeed): void {
     `INSERT INTO goals
        (id, title, branch, artifact_dir, state, current_iteration,
         needs_manual_recovery, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     seed.id,
     `Goal ${seed.id}`,
@@ -55,11 +57,11 @@ function seedGoal(db: MomentumDb, seed: GoalSeed): void {
     1,
     seed.needsManualRecovery ? 1 : 0,
     1000,
-    1000
+    1000,
   );
 }
 
-type SourceItemSeed = {
+type TrackerItemSeed = {
   externalId: string;
   externalKey?: string;
   title?: string;
@@ -73,21 +75,21 @@ type SourceItemSeed = {
   adapterKind?: string;
 };
 
-function seedSourceItem(db: MomentumDb, seed: SourceItemSeed): string {
+function seedTrackerItem(db: MomentumDb, seed: TrackerItemSeed): string {
   const metadata: Record<string, unknown> = {};
   if (seed.projectId || seed.projectName) {
     metadata["project"] = {
       id: seed.projectId ?? null,
-      name: seed.projectName ?? null
+      name: seed.projectName ?? null,
     };
   }
   if (seed.milestoneId || seed.milestoneName) {
     metadata["milestone"] = {
       id: seed.milestoneId ?? null,
-      name: seed.milestoneName ?? null
+      name: seed.milestoneName ?? null,
     };
   }
-  const created = upsertSourceItem(db, {
+  const created = upsertTrackerItem(db, {
     adapterKind: seed.adapterKind ?? "linear",
     externalId: seed.externalId,
     externalKey: seed.externalKey ?? null,
@@ -95,24 +97,24 @@ function seedSourceItem(db: MomentumDb, seed: SourceItemSeed): string {
     status: seed.status ?? "Todo",
     metadata,
     observedAt: seed.observedAt ?? 1000,
-    goalId: seed.goalId ?? null
+    goalId: seed.goalId ?? null,
   });
   return created.id;
 }
 
 describe("buildProjectRollup", () => {
-  it("returns empty rollup with stable shape when no source items exist", () => {
+  it("returns empty rollup with stable shape when no tracker items exist", () => {
     const db = openDb(makeTempDir());
     try {
       const rollup = buildProjectRollup(db, { now: 2_000_000 });
-      expect(rollup.counts.sourceItems.total).toBe(0);
-      expect(rollup.counts.sourceItems.byStatus).toEqual({});
+      expect(rollup.counts.trackerItems.total).toBe(0);
+      expect(rollup.counts.trackerItems.byStatus).toEqual({});
       expect(rollup.counts.goals.total).toBe(0);
       expect(rollup.counts.goals.byState).toEqual({});
-      expect(rollup.sourceItems).toEqual([]);
+      expect(rollup.trackerItems).toEqual([]);
       expect(rollup.mismatches).toEqual([]);
       expect(rollup.reconciliationStaleThresholdMs).toBe(
-        DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS
+        DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
       );
       expect(rollup.reconciliationWarnings).toEqual([]);
       expect(rollup.pendingUpdateIntents).toEqual([]);
@@ -123,95 +125,95 @@ describe("buildProjectRollup", () => {
     }
   });
 
-  it("counts SourceItems by observed state and linked Goal state", () => {
+  it("counts TrackerItems by observed state and linked Goal state", () => {
     const db = openDb(makeTempDir());
     try {
       seedGoal(db, { id: "goal-a", state: "completed" });
       seedGoal(db, { id: "goal-b", state: "queued" });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-1",
         status: "Done",
-        goalId: "goal-a"
+        goalId: "goal-a",
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-2",
         status: "In Progress",
-        goalId: "goal-b"
+        goalId: "goal-b",
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-3",
         status: "Todo",
-        goalId: null
+        goalId: null,
       });
 
       const rollup = buildProjectRollup(db, { now: 2_000_000 });
-      expect(rollup.counts.sourceItems.total).toBe(3);
-      expect(rollup.counts.sourceItems.byStatus).toEqual({
+      expect(rollup.counts.trackerItems.total).toBe(3);
+      expect(rollup.counts.trackerItems.byStatus).toEqual({
         Done: 1,
         "In Progress": 1,
-        Todo: 1
+        Todo: 1,
       });
-      expect(rollup.counts.sourceItems.linkedToGoal).toBe(2);
-      expect(rollup.counts.sourceItems.unlinked).toBe(1);
+      expect(rollup.counts.trackerItems.linkedToGoal).toBe(2);
+      expect(rollup.counts.trackerItems.unlinked).toBe(1);
       expect(rollup.counts.goals.total).toBe(2);
       expect(rollup.counts.goals.byState).toEqual({
         completed: 1,
-        queued: 1
+        queued: 1,
       });
     } finally {
       db.close();
     }
   });
 
-  it("filters source items by project id, project name, milestone id, and milestone name", () => {
+  it("filters tracker items by project id, project name, milestone id, and milestone name", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-a1",
         projectId: "proj-1",
         projectName: "Alpha",
         milestoneId: "ms-1",
-        milestoneName: "Mile 1"
+        milestoneName: "Mile 1",
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-a2",
         projectId: "proj-1",
         projectName: "Alpha",
         milestoneId: "ms-2",
-        milestoneName: "Mile 2"
+        milestoneName: "Mile 2",
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-b1",
         projectId: "proj-2",
         projectName: "Beta",
         milestoneId: "ms-3",
-        milestoneName: "Mile 3"
+        milestoneName: "Mile 3",
       });
 
       const byProjectId = buildProjectRollup(db, {
         filters: { projectId: "proj-1" },
-        now: 2_000_000
+        now: 2_000_000,
       });
-      expect(byProjectId.counts.sourceItems.total).toBe(2);
+      expect(byProjectId.counts.trackerItems.total).toBe(2);
 
       const byProjectName = buildProjectRollup(db, {
         filters: { projectName: "Beta" },
-        now: 2_000_000
+        now: 2_000_000,
       });
-      expect(byProjectName.counts.sourceItems.total).toBe(1);
+      expect(byProjectName.counts.trackerItems.total).toBe(1);
 
       const byMilestoneId = buildProjectRollup(db, {
         filters: { projectId: "proj-1", milestoneId: "ms-2" },
-        now: 2_000_000
+        now: 2_000_000,
       });
-      expect(byMilestoneId.counts.sourceItems.total).toBe(1);
-      expect(byMilestoneId.sourceItems[0]?.externalId).toBe("issue-a2");
+      expect(byMilestoneId.counts.trackerItems.total).toBe(1);
+      expect(byMilestoneId.trackerItems[0]?.externalId).toBe("issue-a2");
 
       const byMilestoneName = buildProjectRollup(db, {
         filters: { milestoneName: "Mile 3" },
-        now: 2_000_000
+        now: 2_000_000,
       });
-      expect(byMilestoneName.counts.sourceItems.total).toBe(1);
+      expect(byMilestoneName.counts.trackerItems.total).toBe(1);
     } finally {
       db.close();
     }
@@ -222,23 +224,23 @@ describe("buildProjectRollup", () => {
     try {
       seedGoal(db, { id: "goal-open", state: "queued" });
       seedGoal(db, { id: "goal-done", state: "completed" });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-mismatch-a",
         status: "Done",
-        goalId: "goal-open"
+        goalId: "goal-open",
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-mismatch-b",
         status: "In Progress",
-        goalId: "goal-done"
+        goalId: "goal-done",
       });
 
       const rollup = buildProjectRollup(db, { now: 2_000_000 });
       const kinds = rollup.mismatches.map((m) => m.kind).sort();
-      expect(kinds).toContain("source_done_goal_not_terminal");
-      expect(kinds).toContain("goal_done_source_not_done");
-      expect(rollup.counts.mismatches.source_done_goal_not_terminal).toBe(1);
-      expect(rollup.counts.mismatches.goal_done_source_not_done).toBe(1);
+      expect(kinds).toContain("tracker_done_goal_not_terminal");
+      expect(kinds).toContain("goal_done_tracker_not_done");
+      expect(rollup.counts.mismatches.tracker_done_goal_not_terminal).toBe(1);
+      expect(rollup.counts.mismatches.goal_done_tracker_not_done).toBe(1);
     } finally {
       db.close();
     }
@@ -249,15 +251,15 @@ describe("buildProjectRollup", () => {
     try {
       seedGoal(db, { id: "goal-missing-evidence", state: "completed" });
       seedGoal(db, { id: "goal-has-evidence", state: "completed" });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-missing",
         status: "Done",
-        goalId: "goal-missing-evidence"
+        goalId: "goal-missing-evidence",
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-has",
         status: "Done",
-        goalId: "goal-has-evidence"
+        goalId: "goal-has-evidence",
       });
       ingestEvidenceRecord(db, {
         source: "workflow",
@@ -265,7 +267,7 @@ describe("buildProjectRollup", () => {
         occurredAt: 1_500,
         summary: "verification passed",
         goalId: "goal-has-evidence",
-        ingestKey: "ingest-has-evidence-1"
+        ingestKey: "ingest-has-evidence-1",
       });
       ingestEvidenceRecord(db, {
         source: "workflow",
@@ -273,12 +275,12 @@ describe("buildProjectRollup", () => {
         occurredAt: 1_400,
         summary: "plan recorded",
         goalId: "goal-has-evidence",
-        ingestKey: "ingest-has-evidence-2"
+        ingestKey: "ingest-has-evidence-2",
       });
 
       const rollup = buildProjectRollup(db, { now: 2_000_000 });
       const missingMismatches = rollup.mismatches.filter(
-        (m) => m.kind === "evidence_missing_after_completion"
+        (m) => m.kind === "evidence_missing_after_completion",
       );
       expect(missingMismatches).toHaveLength(1);
       expect(missingMismatches[0]?.goalId).toBe("goal-missing-evidence");
@@ -290,27 +292,29 @@ describe("buildProjectRollup", () => {
     }
   });
 
-  it("counts source-item-linked evidence for completed linked goals", () => {
+  it("counts tracker-item-linked evidence for completed linked goals", () => {
     const db = openDb(makeTempDir());
     try {
       seedGoal(db, { id: "goal-source-evidence", state: "completed" });
-      const sourceItemId = seedSourceItem(db, {
+      const trackerItemId = seedTrackerItem(db, {
         externalId: "issue-source-evidence",
         status: "Done",
-        goalId: "goal-source-evidence"
+        goalId: "goal-source-evidence",
       });
       ingestEvidenceRecord(db, {
         source: "workflow",
         type: "verification",
         occurredAt: 1_500,
         summary: "verification passed",
-        sourceItemId,
-        ingestKey: "ingest-source-evidence-1"
+        trackerItemId,
+        ingestKey: "ingest-source-evidence-1",
       });
 
       const rollup = buildProjectRollup(db, { now: 2_000_000 });
       expect(
-        rollup.mismatches.filter((m) => m.kind === "evidence_missing_after_completion")
+        rollup.mismatches.filter(
+          (m) => m.kind === "evidence_missing_after_completion",
+        ),
       ).toEqual([]);
       expect(rollup.counts.evidence.goalsWithEvidence).toBe(1);
       expect(rollup.counts.evidence.goalsWithoutEvidence).toBe(0);
@@ -326,12 +330,12 @@ describe("buildProjectRollup", () => {
       seedGoal(db, {
         id: "goal-recover",
         state: "queued",
-        needsManualRecovery: true
+        needsManualRecovery: true,
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-recover",
         status: "Todo",
-        goalId: "goal-recover"
+        goalId: "goal-recover",
       });
 
       const rollup = buildProjectRollup(db, { now: 2_000_000 });
@@ -347,25 +351,26 @@ describe("buildProjectRollup", () => {
   it("emits a stale reconciliation warning when last run is older than the threshold", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, { externalId: "issue-stale" });
+      seedTrackerItem(db, { externalId: "issue-stale" });
       const oldRunStartedAt = 0;
-      const run = startSourceReconciliationRun(
+      const run = startTrackerReconciliationRun(
         db,
         { adapterKind: "linear" },
-        { now: () => oldRunStartedAt }
+        { now: () => oldRunStartedAt },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: run.id,
           state: "succeeded",
           itemsSeen: 1,
-          itemsUpserted: 1
+          itemsUpserted: 1,
         },
-        { now: () => oldRunStartedAt + 1 }
+        { now: () => oldRunStartedAt + 1 },
       );
 
-      const now = oldRunStartedAt + DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS + 60_000;
+      const now =
+        oldRunStartedAt + DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS + 60_000;
       const rollup = buildProjectRollup(db, { now });
       expect(rollup.reconciliationWarnings).toHaveLength(1);
       expect(rollup.reconciliationWarnings[0]?.reason).toBe("stale");
@@ -378,43 +383,45 @@ describe("buildProjectRollup", () => {
   it("respects a custom reconciliation stale threshold", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, { externalId: "issue-stale-custom" });
-      const run = startSourceReconciliationRun(
+      seedTrackerItem(db, { externalId: "issue-stale-custom" });
+      const run = startTrackerReconciliationRun(
         db,
         { adapterKind: "linear" },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: run.id,
           state: "succeeded",
           itemsSeen: 0,
-          itemsUpserted: 0
+          itemsUpserted: 0,
         },
-        { now: () => 2_000 }
+        { now: () => 2_000 },
       );
 
       const withGenerousThreshold = buildProjectRollup(db, {
         now: 100_000,
-        reconciliationStaleThresholdMs: 10_000_000
+        reconciliationStaleThresholdMs: 10_000_000,
       });
       expect(withGenerousThreshold.reconciliationWarnings).toEqual([]);
 
       const withTightThreshold = buildProjectRollup(db, {
         now: 100_000,
-        reconciliationStaleThresholdMs: 1_000
+        reconciliationStaleThresholdMs: 1_000,
       });
-      expect(withTightThreshold.reconciliationWarnings[0]?.reason).toBe("stale");
+      expect(withTightThreshold.reconciliationWarnings[0]?.reason).toBe(
+        "stale",
+      );
     } finally {
       db.close();
     }
   });
 
-  it("warns when reconciliation has never run and source items exist", () => {
+  it("warns when reconciliation has never run and tracker items exist", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, { externalId: "issue-no-recon" });
+      seedTrackerItem(db, { externalId: "issue-no-recon" });
 
       const rollup = buildProjectRollup(db, { now: 2_000_000 });
       const warning = rollup.reconciliationWarnings[0];
@@ -431,28 +438,30 @@ describe("buildProjectRollup", () => {
     try {
       const rollup = buildProjectRollup(db, {
         filters: { adapterKind: "linear" },
-        now: 2_000_000
+        now: 2_000_000,
       });
-      expect(rollup.counts.sourceItems.total).toBe(0);
+      expect(rollup.counts.trackerItems.total).toBe(0);
       expect(rollup.reconciliationWarnings).toEqual([]);
     } finally {
       db.close();
     }
   });
 
-  it("reports never-run warnings per adapter represented in the filtered source items", () => {
+  it("reports never-run warnings per adapter represented in the filtered tracker items", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, { externalId: "issue-linear", adapterKind: "linear" });
-      seedSourceItem(db, { externalId: "issue-gh", adapterKind: "github" });
+      seedTrackerItem(db, {
+        externalId: "issue-linear",
+        adapterKind: "linear",
+      });
+      seedTrackerItem(db, { externalId: "issue-gh", adapterKind: "github" });
 
       const rollup = buildProjectRollup(db, { now: 2_000_000 });
-      expect(rollup.reconciliationWarnings.map((warning) => warning.adapterKind)).toEqual([
-        "github",
-        "linear"
-      ]);
       expect(
-        rollup.reconciliationWarnings.map((warning) => warning.reason)
+        rollup.reconciliationWarnings.map((warning) => warning.adapterKind),
+      ).toEqual(["github", "linear"]);
+      expect(
+        rollup.reconciliationWarnings.map((warning) => warning.reason),
       ).toEqual(["never_run", "never_run"]);
     } finally {
       db.close();
@@ -462,28 +471,28 @@ describe("buildProjectRollup", () => {
   it("warns when the last reconciliation failed", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, { externalId: "issue-failed" });
-      const run = startSourceReconciliationRun(
+      seedTrackerItem(db, { externalId: "issue-failed" });
+      const run = startTrackerReconciliationRun(
         db,
         { adapterKind: "linear" },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: run.id,
           state: "failed",
           itemsSeen: 0,
           itemsUpserted: 0,
-          error: "source_auth_unavailable: no token"
+          error: "tracker_auth_unavailable: no token",
         },
-        { now: () => 2_000 }
+        { now: () => 2_000 },
       );
 
       const rollup = buildProjectRollup(db, { now: 3_000 });
       const warning = rollup.reconciliationWarnings[0];
       expect(warning?.reason).toBe("last_failed");
-      expect(warning?.error).toBe("source_auth_unavailable: no token");
+      expect(warning?.error).toBe("tracker_auth_unavailable: no token");
     } finally {
       db.close();
     }
@@ -492,33 +501,33 @@ describe("buildProjectRollup", () => {
   it("falls back past stale running reconciliation runs when checking freshness", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, { externalId: "issue-running-stale" });
-      const succeeded = startSourceReconciliationRun(
+      seedTrackerItem(db, { externalId: "issue-running-stale" });
+      const succeeded = startTrackerReconciliationRun(
         db,
         { adapterKind: "linear" },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: succeeded.id,
           state: "succeeded",
           itemsSeen: 1,
-          itemsUpserted: 1
+          itemsUpserted: 1,
         },
-        { now: () => 2_000 }
+        { now: () => 2_000 },
       );
-      startSourceReconciliationRun(
+      startTrackerReconciliationRun(
         db,
         { adapterKind: "linear" },
-        { now: () => 3_000 }
+        { now: () => 3_000 },
       );
 
       const rollup = buildProjectRollup(db, {
-        now: 3_000 + DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS + 60_000
+        now: 3_000 + DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS + 60_000,
       });
       expect(rollup.reconciliationWarnings).toMatchObject([
-        { adapterKind: "linear", reason: "stale", lastRunState: "succeeded" }
+        { adapterKind: "linear", reason: "stale", lastRunState: "succeeded" },
       ]);
     } finally {
       db.close();
@@ -528,68 +537,74 @@ describe("buildProjectRollup", () => {
   it("marks stale running reconciliation runs when no terminal run exists", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, { externalId: "issue-running-only" });
-      startSourceReconciliationRun(
+      seedTrackerItem(db, { externalId: "issue-running-only" });
+      startTrackerReconciliationRun(
         db,
         { adapterKind: "linear" },
-        { now: () => 3_000 }
+        { now: () => 3_000 },
       );
 
       const rollup = buildProjectRollup(db, {
-        now: 3_000 + DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS + 60_000
+        now: 3_000 + DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS + 60_000,
       });
       expect(rollup.reconciliationWarnings).toMatchObject([
-        { adapterKind: "linear", reason: "stale", lastRunState: "running" }
+        { adapterKind: "linear", reason: "stale", lastRunState: "running" },
       ]);
-      expect(rollup.nextAction.kind).toBe("reconcile_stale_source");
+      expect(rollup.nextAction.kind).toBe("reconcile_stale_tracker");
     } finally {
       db.close();
     }
   });
 
-  it("scopes reconciliation warnings to runs covering filtered source items", () => {
+  it("scopes reconciliation warnings to runs covering filtered tracker items", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-alpha",
         projectId: "proj-alpha",
-        projectName: "Alpha"
+        projectName: "Alpha",
       });
-      const alphaRun = startSourceReconciliationRun(
+      const alphaRun = startTrackerReconciliationRun(
         db,
-        { adapterKind: "linear", metadata: { filters: { projectName: "Alpha" } } },
-        { now: () => 1_000 }
+        {
+          adapterKind: "linear",
+          metadata: { filters: { projectName: "Alpha" } },
+        },
+        { now: () => 1_000 },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: alphaRun.id,
           state: "succeeded",
           itemsSeen: 1,
-          itemsUpserted: 1
+          itemsUpserted: 1,
         },
-        { now: () => 2_000 }
+        { now: () => 2_000 },
       );
-      const betaRun = startSourceReconciliationRun(
+      const betaRun = startTrackerReconciliationRun(
         db,
-        { adapterKind: "linear", metadata: { filters: { projectName: "Beta" } } },
-        { now: () => 3_000 }
+        {
+          adapterKind: "linear",
+          metadata: { filters: { projectName: "Beta" } },
+        },
+        { now: () => 3_000 },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: betaRun.id,
           state: "failed",
           itemsSeen: 0,
           itemsUpserted: 0,
-          error: "source_auth_unavailable: beta token"
+          error: "tracker_auth_unavailable: beta token",
         },
-        { now: () => 4_000 }
+        { now: () => 4_000 },
       );
 
       const rollup = buildProjectRollup(db, {
         filters: { projectName: "Alpha" },
-        now: 5_000
+        now: 5_000,
       });
       expect(rollup.reconciliationWarnings).toEqual([]);
       expect(rollup.nextAction.kind).toBe("no_action_required");
@@ -598,38 +613,41 @@ describe("buildProjectRollup", () => {
     }
   });
 
-  it("reports never-run when scoped source items have no compatible reconciliation run", () => {
+  it("reports never-run when scoped tracker items have no compatible reconciliation run", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-alpha-never",
         projectId: "proj-alpha",
-        projectName: "Alpha"
+        projectName: "Alpha",
       });
-      const betaRun = startSourceReconciliationRun(
+      const betaRun = startTrackerReconciliationRun(
         db,
-        { adapterKind: "linear", metadata: { filters: { projectName: "Beta" } } },
-        { now: () => 1_000 }
+        {
+          adapterKind: "linear",
+          metadata: { filters: { projectName: "Beta" } },
+        },
+        { now: () => 1_000 },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: betaRun.id,
           state: "succeeded",
           itemsSeen: 1,
-          itemsUpserted: 1
+          itemsUpserted: 1,
         },
-        { now: () => 2_000 }
+        { now: () => 2_000 },
       );
 
       const rollup = buildProjectRollup(db, {
         filters: { projectName: "Alpha" },
-        now: 3_000
+        now: 3_000,
       });
       expect(rollup.reconciliationWarnings).toMatchObject([
-        { adapterKind: "linear", reason: "never_run" }
+        { adapterKind: "linear", reason: "never_run" },
       ]);
-      expect(rollup.nextAction.kind).toBe("reconcile_stale_source");
+      expect(rollup.nextAction.kind).toBe("reconcile_stale_tracker");
     } finally {
       db.close();
     }
@@ -638,30 +656,33 @@ describe("buildProjectRollup", () => {
   it("matches stored reconciliation filter names against source metadata ids", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-proj-id",
         projectId: "proj-1",
-        projectName: "Alpha"
+        projectName: "Alpha",
       });
-      const run = startSourceReconciliationRun(
+      const run = startTrackerReconciliationRun(
         db,
-        { adapterKind: "linear", metadata: { filters: { projectName: "proj-1" } } },
-        { now: () => 1_000 }
+        {
+          adapterKind: "linear",
+          metadata: { filters: { projectName: "proj-1" } },
+        },
+        { now: () => 1_000 },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: run.id,
           state: "succeeded",
           itemsSeen: 1,
-          itemsUpserted: 1
+          itemsUpserted: 1,
         },
-        { now: () => 2_000 }
+        { now: () => 2_000 },
       );
 
       const rollup = buildProjectRollup(db, {
         filters: { projectId: "proj-1", projectName: "proj-1" },
-        now: 3_000
+        now: 3_000,
       });
       expect(rollup.reconciliationWarnings).toEqual([]);
     } finally {
@@ -672,34 +693,37 @@ describe("buildProjectRollup", () => {
   it("matches run filter names against scalar source metadata values", () => {
     const db = openDb(makeTempDir());
     try {
-      upsertSourceItem(db, {
+      upsertTrackerItem(db, {
         externalId: "issue-scalar-run-id",
         adapterKind: "linear",
         title: "Scalar run metadata issue",
         metadata: {
-          project: "Momentum"
+          project: "Momentum",
         },
-        observedAt: 1_000
+        observedAt: 1_000,
       });
-      const run = startSourceReconciliationRun(
+      const run = startTrackerReconciliationRun(
         db,
-        { adapterKind: "linear", metadata: { filters: { projectName: "Momentum" } } },
-        { now: () => 1_000 }
+        {
+          adapterKind: "linear",
+          metadata: { filters: { projectName: "Momentum" } },
+        },
+        { now: () => 1_000 },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: run.id,
           state: "succeeded",
           itemsSeen: 1,
-          itemsUpserted: 1
+          itemsUpserted: 1,
         },
-        { now: () => 2_000 }
+        { now: () => 2_000 },
       );
 
       const rollup = buildProjectRollup(db, {
         filters: { projectName: "Momentum" },
-        now: 3_000
+        now: 3_000,
       });
       expect(rollup.reconciliationWarnings).toEqual([]);
     } finally {
@@ -710,35 +734,35 @@ describe("buildProjectRollup", () => {
   it("matches reconciliation filter ids against rollup filter names through source metadata", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-proj-name",
         projectId: "proj-1",
         projectName: "Alpha",
         milestoneId: "mile-1",
-        milestoneName: "M1"
+        milestoneName: "M1",
       });
-      const run = startSourceReconciliationRun(
+      const run = startTrackerReconciliationRun(
         db,
         {
           adapterKind: "linear",
-          metadata: { filters: { projectId: "proj-1", milestoneId: "mile-1" } }
+          metadata: { filters: { projectId: "proj-1", milestoneId: "mile-1" } },
         },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: run.id,
           state: "succeeded",
           itemsSeen: 1,
-          itemsUpserted: 1
+          itemsUpserted: 1,
         },
-        { now: () => 2_000 }
+        { now: () => 2_000 },
       );
 
       const rollup = buildProjectRollup(db, {
         filters: { projectName: "Alpha", milestoneName: "M1" },
-        now: 3_000
+        now: 3_000,
       });
       expect(rollup.reconciliationWarnings).toEqual([]);
     } finally {
@@ -749,38 +773,41 @@ describe("buildProjectRollup", () => {
   it("does not treat one id-scoped reconciliation as covering an ambiguous name rollup", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-alpha-1",
         projectId: "proj-1",
-        projectName: "Alpha"
+        projectName: "Alpha",
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-alpha-2",
         projectId: "proj-2",
-        projectName: "Alpha"
+        projectName: "Alpha",
       });
-      const run = startSourceReconciliationRun(
+      const run = startTrackerReconciliationRun(
         db,
-        { adapterKind: "linear", metadata: { filters: { projectId: "proj-1" } } },
-        { now: () => 1_000 }
+        {
+          adapterKind: "linear",
+          metadata: { filters: { projectId: "proj-1" } },
+        },
+        { now: () => 1_000 },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: run.id,
           state: "succeeded",
           itemsSeen: 1,
-          itemsUpserted: 1
+          itemsUpserted: 1,
         },
-        { now: () => 2_000 }
+        { now: () => 2_000 },
       );
 
       const rollup = buildProjectRollup(db, {
         filters: { projectName: "Alpha" },
-        now: 3_000
+        now: 3_000,
       });
       expect(rollup.reconciliationWarnings).toMatchObject([
-        { adapterKind: "linear", reason: "never_run" }
+        { adapterKind: "linear", reason: "never_run" },
       ]);
     } finally {
       db.close();
@@ -790,28 +817,28 @@ describe("buildProjectRollup", () => {
   it("ignores successful dry-run reconciliations when checking freshness", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, { externalId: "issue-dry-run" });
-      const run = startSourceReconciliationRun(
+      seedTrackerItem(db, { externalId: "issue-dry-run" });
+      const run = startTrackerReconciliationRun(
         db,
         { adapterKind: "linear", metadata: { dryRun: true } },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: run.id,
           state: "succeeded",
           itemsSeen: 1,
-          itemsUpserted: 0
+          itemsUpserted: 0,
         },
-        { now: () => 2_000 }
+        { now: () => 2_000 },
       );
 
       const rollup = buildProjectRollup(db, { now: 3_000 });
       expect(rollup.reconciliationWarnings).toMatchObject([
-        { adapterKind: "linear", reason: "never_run" }
+        { adapterKind: "linear", reason: "never_run" },
       ]);
-      expect(rollup.nextAction.kind).toBe("reconcile_stale_source");
+      expect(rollup.nextAction.kind).toBe("reconcile_stale_tracker");
     } finally {
       db.close();
     }
@@ -820,42 +847,42 @@ describe("buildProjectRollup", () => {
   it("does not count milestone-scoped reconciliations as fresh for project-wide rollups", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-alpha-m1",
         projectName: "Alpha",
-        milestoneName: "M1"
+        milestoneName: "M1",
       });
-      const run = startSourceReconciliationRun(
+      const run = startTrackerReconciliationRun(
         db,
         {
           adapterKind: "linear",
-          metadata: { filters: { projectName: "Alpha", milestoneName: "M1" } }
+          metadata: { filters: { projectName: "Alpha", milestoneName: "M1" } },
         },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: run.id,
           state: "succeeded",
           itemsSeen: 1,
-          itemsUpserted: 1
+          itemsUpserted: 1,
         },
-        { now: () => 2_000 }
+        { now: () => 2_000 },
       );
 
       const broadRollup = buildProjectRollup(db, {
         filters: { projectName: "Alpha" },
-        now: 3_000
+        now: 3_000,
       });
       expect(broadRollup.reconciliationWarnings).toMatchObject([
-        { adapterKind: "linear", reason: "never_run" }
+        { adapterKind: "linear", reason: "never_run" },
       ]);
-      expect(broadRollup.nextAction.kind).toBe("reconcile_stale_source");
+      expect(broadRollup.nextAction.kind).toBe("reconcile_stale_tracker");
 
       const matchingRollup = buildProjectRollup(db, {
         filters: { projectName: "Alpha", milestoneName: "M1" },
-        now: 3_000
+        now: 3_000,
       });
       expect(matchingRollup.reconciliationWarnings).toEqual([]);
     } finally {
@@ -866,55 +893,61 @@ describe("buildProjectRollup", () => {
   it("ignores max-pages reconciliation runs when checking freshness", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, { externalId: "issue-max-pages" });
-      const run = startSourceReconciliationRun(
+      seedTrackerItem(db, { externalId: "issue-max-pages" });
+      const run = startTrackerReconciliationRun(
         db,
         { adapterKind: "linear" },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: run.id,
           state: "succeeded",
           itemsSeen: 1,
           itemsUpserted: 1,
-          metadata: { paginationStopped: { reason: "max_pages", pageIndex: 1 } }
+          metadata: {
+            paginationStopped: { reason: "max_pages", pageIndex: 1 },
+          },
         },
-        { now: () => 2_000 }
+        { now: () => 2_000 },
       );
 
       const rollup = buildProjectRollup(db, { now: 3_000 });
       expect(rollup.reconciliationWarnings).toMatchObject([
-        { adapterKind: "linear", reason: "never_run" }
+        { adapterKind: "linear", reason: "never_run" },
       ]);
-      expect(rollup.nextAction.kind).toBe("reconcile_stale_source");
+      expect(rollup.nextAction.kind).toBe("reconcile_stale_tracker");
     } finally {
       db.close();
     }
   });
 
-  it("truncates large source item lists to the bounded limit with deterministic ordering", () => {
+  it("truncates large tracker item lists to the bounded limit with deterministic ordering", () => {
     const db = openDb(makeTempDir());
     try {
       const total = 105;
       for (let i = 0; i < total; i += 1) {
         const ext = `issue-${String(i).padStart(4, "0")}`;
-        seedSourceItem(db, { externalId: ext, externalKey: ext, status: "Todo" });
+        seedTrackerItem(db, {
+          externalId: ext,
+          externalKey: ext,
+          status: "Todo",
+        });
       }
 
       const rollup = buildProjectRollup(db, { now: 2_000_000 });
-      expect(rollup.counts.sourceItems.total).toBe(total);
-      expect(rollup.totalSourceItemCount).toBe(total);
-      expect(rollup.sourceItems).toHaveLength(
-        PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT
+      expect(rollup.counts.trackerItems.total).toBe(total);
+      expect(rollup.totalTrackerItemCount).toBe(total);
+      expect(rollup.trackerItems).toHaveLength(
+        PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
       );
-      expect(rollup.truncatedSourceItems).toBe(true);
-      const first = rollup.sourceItems[0];
-      const last = rollup.sourceItems.at(-1);
+      expect(rollup.truncatedTrackerItems).toBe(true);
+      const first = rollup.trackerItems[0];
+      const last = rollup.trackerItems.at(-1);
       expect(first?.externalKey).toBe("issue-0000");
       expect(last?.externalKey).toBe(
-        `issue-${String(PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT - 1).padStart(4, "0")}`
+        `issue-${String(PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT - 1).padStart(4, "0")}`,
       );
     } finally {
       db.close();
@@ -924,31 +957,33 @@ describe("buildProjectRollup", () => {
   it("prefers canonical UUID-backed Linear rows when key matches legacy key-only rows", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "NGX-522",
         externalKey: "NGX-522",
         title: "Legacy stale issue",
         status: "In Review",
         observedAt: 1_000,
-        projectName: "Momentum"
+        projectName: "Momentum",
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "00000000-0000-4000-8000-000000000001",
         externalKey: "NGX-522",
         title: "Canonical issue",
         status: "Done",
         observedAt: 2_000,
-        projectName: "Momentum"
+        projectName: "Momentum",
       });
 
       const rollup = buildProjectRollup(db, {
         filters: { adapterKind: "linear", projectName: "Momentum" },
-        now: 3_000
+        now: 3_000,
       });
-      expect(rollup.sourceItems).toHaveLength(1);
-      expect(rollup.sourceItems[0]?.externalId).toBe("00000000-0000-4000-8000-000000000001");
-      expect(rollup.sourceItems[0]?.status).toBe("Done");
-      expect(rollup.counts.sourceItems.total).toBe(1);
+      expect(rollup.trackerItems).toHaveLength(1);
+      expect(rollup.trackerItems[0]?.externalId).toBe(
+        "00000000-0000-4000-8000-000000000001",
+      );
+      expect(rollup.trackerItems[0]?.status).toBe("Done");
+      expect(rollup.counts.trackerItems.total).toBe(1);
     } finally {
       db.close();
     }
@@ -957,133 +992,135 @@ describe("buildProjectRollup", () => {
   it("filters project status after selecting the canonical Linear duplicate", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "NGX-923",
         externalKey: "NGX-923",
         title: "Legacy stale issue",
         status: "Todo",
         observedAt: 1_000,
-        projectName: "Momentum"
+        projectName: "Momentum",
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "00000000-0000-4000-8000-000000000923",
         externalKey: "NGX-923",
         title: "Canonical moved issue",
         status: "Done",
         observedAt: 2_000,
-        projectName: "Other"
+        projectName: "Other",
       });
 
       const rollup = buildProjectRollup(db, {
         filters: { adapterKind: "linear", projectName: "Momentum" },
-        now: 3_000
+        now: 3_000,
       });
-      expect(rollup.counts.sourceItems.total).toBe(0);
-      expect(rollup.sourceItems).toEqual([]);
+      expect(rollup.counts.trackerItems.total).toBe(0);
+      expect(rollup.trackerItems).toEqual([]);
       expect(rollup.reconciliationWarnings).toEqual([]);
     } finally {
       db.close();
     }
   });
 
-  it("preserves duplicate Linear goal links and source-item evidence on the effective row", () => {
+  it("preserves duplicate Linear goal links and tracker-item evidence on the effective row", () => {
     const db = openDb(makeTempDir());
     try {
       seedGoal(db, { id: "goal-linked-legacy", state: "completed" });
-      const legacySourceItemId = seedSourceItem(db, {
+      const legacyTrackerItemId = seedTrackerItem(db, {
         externalId: "NGX-924",
         externalKey: "NGX-924",
         title: "Legacy linked issue",
         status: "Done",
         goalId: "goal-linked-legacy",
         observedAt: 1_000,
-        projectName: "Momentum"
+        projectName: "Momentum",
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "00000000-0000-4000-8000-000000000924",
         externalKey: "NGX-924",
         title: "Canonical unlinked issue",
         status: "Done",
         observedAt: 2_000,
-        projectName: "Momentum"
+        projectName: "Momentum",
       });
       ingestEvidenceRecord(db, {
         source: "workflow",
         type: "verification",
         occurredAt: 1_500,
         summary: "verification passed",
-        sourceItemId: legacySourceItemId,
-        ingestKey: "ingest-legacy-linked-evidence"
+        trackerItemId: legacyTrackerItemId,
+        ingestKey: "ingest-legacy-linked-evidence",
       });
 
       const rollup = buildProjectRollup(db, {
         filters: { adapterKind: "linear", projectName: "Momentum" },
-        now: 3_000
+        now: 3_000,
       });
-      expect(rollup.sourceItems).toHaveLength(1);
-      expect(rollup.sourceItems[0]?.externalId).toBe(
-        "00000000-0000-4000-8000-000000000924"
+      expect(rollup.trackerItems).toHaveLength(1);
+      expect(rollup.trackerItems[0]?.externalId).toBe(
+        "00000000-0000-4000-8000-000000000924",
       );
-      expect(rollup.sourceItems[0]?.goalId).toBeNull();
-      expect(rollup.counts.sourceItems.linkedToGoal).toBe(1);
+      expect(rollup.trackerItems[0]?.goalId).toBeNull();
+      expect(rollup.counts.trackerItems.linkedToGoal).toBe(1);
       expect(rollup.counts.goals.total).toBe(1);
       expect(rollup.counts.evidence.totalRecords).toBe(1);
       expect(rollup.counts.evidence.goalsWithEvidence).toBe(1);
       expect(
-        rollup.mismatches.filter((m) => m.kind === "evidence_missing_after_completion")
+        rollup.mismatches.filter(
+          (m) => m.kind === "evidence_missing_after_completion",
+        ),
       ).toEqual([]);
     } finally {
       db.close();
     }
   });
 
-  it("preserves source-item evidence on the linked duplicate goal only", () => {
+  it("preserves tracker-item evidence on the linked duplicate goal only", () => {
     const db = openDb(makeTempDir());
     try {
       seedGoal(db, { id: "goal-with-evidence", state: "completed" });
       seedGoal(db, { id: "goal-without-evidence", state: "completed" });
-      const legacySourceItemId = seedSourceItem(db, {
+      const legacyTrackerItemId = seedTrackerItem(db, {
         externalId: "NGX-925",
         externalKey: "NGX-925",
         title: "Legacy linked issue",
         status: "Done",
         goalId: "goal-with-evidence",
         observedAt: 1_000,
-        projectName: "Momentum"
+        projectName: "Momentum",
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "00000000-0000-4000-8000-000000000925",
         externalKey: "NGX-925",
         title: "Canonical linked issue",
         status: "Done",
         goalId: "goal-without-evidence",
         observedAt: 2_000,
-        projectName: "Momentum"
+        projectName: "Momentum",
       });
       ingestEvidenceRecord(db, {
         source: "workflow",
         type: "verification",
         occurredAt: 1_500,
         summary: "verification passed",
-        sourceItemId: legacySourceItemId,
-        ingestKey: "ingest-legacy-only-evidence"
+        trackerItemId: legacyTrackerItemId,
+        ingestKey: "ingest-legacy-only-evidence",
       });
 
       const rollup = buildProjectRollup(db, {
         filters: { adapterKind: "linear", projectName: "Momentum" },
-        now: 3_000
+        now: 3_000,
       });
-      expect(rollup.sourceItems).toHaveLength(1);
-      expect(rollup.sourceItems[0]?.externalId).toBe(
-        "00000000-0000-4000-8000-000000000925"
+      expect(rollup.trackerItems).toHaveLength(1);
+      expect(rollup.trackerItems[0]?.externalId).toBe(
+        "00000000-0000-4000-8000-000000000925",
       );
-      expect(rollup.sourceItems[0]?.goalId).toBe("goal-without-evidence");
+      expect(rollup.trackerItems[0]?.goalId).toBe("goal-without-evidence");
       expect(rollup.counts.goals.total).toBe(2);
       expect(rollup.counts.evidence.totalRecords).toBe(1);
       expect(rollup.counts.evidence.goalsWithEvidence).toBe(1);
       expect(rollup.counts.evidence.goalsWithoutEvidence).toBe(1);
       const missingEvidence = rollup.mismatches.filter(
-        (mismatch) => mismatch.kind === "evidence_missing_after_completion"
+        (mismatch) => mismatch.kind === "evidence_missing_after_completion",
       );
       expect(missingEvidence).toHaveLength(1);
       expect(missingEvidence[0]?.goalId).toBe("goal-without-evidence");
@@ -1095,29 +1132,29 @@ describe("buildProjectRollup", () => {
   it("does not dedupe non-Linear rows that share an external key", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         adapterKind: "github",
         externalId: "owner/repo#1",
         externalKey: "ISSUE-1",
         title: "First GitHub issue",
-        observedAt: 1_000
+        observedAt: 1_000,
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         adapterKind: "github",
         externalId: "owner/other#1",
         externalKey: "ISSUE-1",
         title: "Second GitHub issue",
-        observedAt: 2_000
+        observedAt: 2_000,
       });
 
       const rollup = buildProjectRollup(db, {
         filters: { adapterKind: "github" },
-        now: 3_000
+        now: 3_000,
       });
-      expect(rollup.counts.sourceItems.total).toBe(2);
-      expect(rollup.sourceItems.map((item) => item.externalId)).toEqual([
+      expect(rollup.counts.trackerItems.total).toBe(2);
+      expect(rollup.trackerItems.map((item) => item.externalId)).toEqual([
         "owner/other#1",
-        "owner/repo#1"
+        "owner/repo#1",
       ]);
     } finally {
       db.close();
@@ -1127,30 +1164,32 @@ describe("buildProjectRollup", () => {
   it("uses freshest row when both matching rows are canonical", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "11111111-1111-1111-1111-111111111111",
         externalKey: "NGX-901",
         title: "Canonical older",
         status: "Todo",
         observedAt: 2_000,
-        projectName: "Momentum"
+        projectName: "Momentum",
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "22222222-2222-2222-2222-222222222222",
         externalKey: "NGX-901",
         title: "Canonical newer",
         status: "Done",
         observedAt: 4_000,
-        projectName: "Momentum"
+        projectName: "Momentum",
       });
 
       const rollup = buildProjectRollup(db, {
         filters: { adapterKind: "linear", projectName: "Momentum" },
-        now: 5_000
+        now: 5_000,
       });
-      expect(rollup.sourceItems).toHaveLength(1);
-      expect(rollup.sourceItems[0]?.externalId).toBe("22222222-2222-2222-2222-222222222222");
-      expect(rollup.sourceItems[0]?.status).toBe("Done");
+      expect(rollup.trackerItems).toHaveLength(1);
+      expect(rollup.trackerItems[0]?.externalId).toBe(
+        "22222222-2222-2222-2222-222222222222",
+      );
+      expect(rollup.trackerItems[0]?.status).toBe("Done");
     } finally {
       db.close();
     }
@@ -1159,31 +1198,31 @@ describe("buildProjectRollup", () => {
   it("uses freshest row when matching rows are legacy key-only duplicates", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "legacy-issue-a",
         externalKey: "NGX-902",
         title: "Legacy stale",
         status: "In Review",
         observedAt: 3_000,
-        projectName: "Momentum"
+        projectName: "Momentum",
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "legacy-issue-b",
         externalKey: "NGX-902",
         title: "Legacy fresh",
         status: "Done",
         observedAt: 6_000,
-        projectName: "Momentum"
+        projectName: "Momentum",
       });
 
       const rollup = buildProjectRollup(db, {
         filters: { adapterKind: "linear", projectName: "Momentum" },
-        now: 7_000
+        now: 7_000,
       });
-      expect(rollup.sourceItems).toHaveLength(1);
-      expect(rollup.sourceItems[0]?.externalId).toBe("legacy-issue-b");
-      expect(rollup.sourceItems[0]?.status).toBe("Done");
-      expect(rollup.counts.sourceItems.total).toBe(1);
+      expect(rollup.trackerItems).toHaveLength(1);
+      expect(rollup.trackerItems[0]?.externalId).toBe("legacy-issue-b");
+      expect(rollup.trackerItems[0]?.status).toBe("Done");
+      expect(rollup.counts.trackerItems.total).toBe(1);
     } finally {
       db.close();
     }
@@ -1195,12 +1234,12 @@ describe("buildProjectRollup", () => {
       seedGoal(db, {
         id: "goal-recover",
         state: "queued",
-        needsManualRecovery: true
+        needsManualRecovery: true,
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-recover",
         status: "Done",
-        goalId: "goal-recover"
+        goalId: "goal-recover",
       });
 
       const rollup = buildProjectRollup(db, { now: 2_000_000 });
@@ -1213,22 +1252,22 @@ describe("buildProjectRollup", () => {
   it("picks reconcile_failed next action when the last reconciliation failed", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, { externalId: "issue-failed" });
-      const run = startSourceReconciliationRun(
+      seedTrackerItem(db, { externalId: "issue-failed" });
+      const run = startTrackerReconciliationRun(
         db,
         { adapterKind: "linear" },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: run.id,
           state: "failed",
           itemsSeen: 0,
           itemsUpserted: 0,
-          error: "boom"
+          error: "boom",
         },
-        { now: () => 2_000 }
+        { now: () => 2_000 },
       );
       const rollup = buildProjectRollup(db, { now: 3_000 });
       expect(rollup.nextAction.kind).toBe("reconcile_failed");
@@ -1240,7 +1279,7 @@ describe("buildProjectRollup", () => {
   it("reports an empty pendingUpdateIntents block when no intents exist", () => {
     const db = openDb(makeTempDir());
     try {
-      seedSourceItem(db, { externalId: "issue-intent" });
+      seedTrackerItem(db, { externalId: "issue-intent" });
       const rollup = buildProjectRollup(db, { now: 2_000_000 });
       expect(rollup.pendingUpdateIntents).toEqual([]);
       expect(rollup.counts.pendingUpdateIntents).toBe(0);
@@ -1248,7 +1287,7 @@ describe("buildProjectRollup", () => {
       expect(rollup.totalPendingUpdateIntentCount).toBe(0);
       expect(rollup.truncatedPendingUpdateIntents).toBe(false);
       expect(rollup.intentStaleThresholdMs).toBe(
-        DEFAULT_INTENT_STALE_THRESHOLD_MS
+        DEFAULT_INTENT_STALE_THRESHOLD_MS,
       );
     } finally {
       db.close();
@@ -1259,25 +1298,25 @@ describe("buildProjectRollup", () => {
     const db = openDb(makeTempDir());
     try {
       seedGoal(db, { id: "goal-intents", state: "queued" });
-      const sourceItemId = seedSourceItem(db, {
+      const trackerItemId = seedTrackerItem(db, {
         externalId: "issue-intent",
         status: "In Progress",
-        goalId: "goal-intents"
+        goalId: "goal-intents",
       });
-      const recon = startSourceReconciliationRun(
+      const recon = startTrackerReconciliationRun(
         db,
         { adapterKind: "linear" },
-        { now: () => 1_990_000 }
+        { now: () => 1_990_000 },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: recon.id,
           state: "succeeded",
           itemsSeen: 1,
-          itemsUpserted: 1
+          itemsUpserted: 1,
         },
-        { now: () => 1_991_000 }
+        { now: () => 1_991_000 },
       );
       createUpdateIntent(
         db,
@@ -1287,10 +1326,10 @@ describe("buildProjectRollup", () => {
           reason: "Goal completed",
           targetExternalId: "issue-intent",
           goalId: "goal-intents",
-          sourceItemId,
-          idempotencyKey: "linear:issue-intent:source_satisfied:goal-intents"
+          trackerItemId,
+          idempotencyKey: "linear:issue-intent:source_satisfied:goal-intents",
         },
-        { now: () => 1_500 }
+        { now: () => 1_500 },
       );
       createUpdateIntent(
         db,
@@ -1299,18 +1338,17 @@ describe("buildProjectRollup", () => {
           intentType: "comment_requested",
           reason: "Followup",
           goalId: "goal-intents",
-          idempotencyKey: "linear:issue-intent:comment_requested:goal-intents"
+          idempotencyKey: "linear:issue-intent:comment_requested:goal-intents",
         },
-        { now: () => 1_400 }
+        { now: () => 1_400 },
       );
 
       const rollup = buildProjectRollup(db, { now: 2_000_000 });
       expect(rollup.counts.pendingUpdateIntents).toBe(2);
       expect(rollup.counts.staleUpdateIntents).toBe(0);
-      expect(rollup.pendingUpdateIntents.map((intent) => intent.intentType)).toEqual([
-        "comment_requested",
-        "source_satisfied"
-      ]);
+      expect(
+        rollup.pendingUpdateIntents.map((intent) => intent.intentType),
+      ).toEqual(["comment_requested", "source_satisfied"]);
       const first = rollup.pendingUpdateIntents[0];
       expect(first?.adapterKind).toBe("linear");
       expect(first?.createdAt).toBe(1_400);
@@ -1327,26 +1365,26 @@ describe("buildProjectRollup", () => {
     const db = openDb(makeTempDir());
     try {
       seedGoal(db, { id: "goal-stale-intent", state: "queued" });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-stale-intent",
         status: "In Progress",
-        goalId: "goal-stale-intent"
+        goalId: "goal-stale-intent",
       });
       const reconTime = 1_000 + DEFAULT_INTENT_STALE_THRESHOLD_MS + 30_000;
-      const recon = startSourceReconciliationRun(
+      const recon = startTrackerReconciliationRun(
         db,
         { adapterKind: "linear" },
-        { now: () => reconTime }
+        { now: () => reconTime },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: recon.id,
           state: "succeeded",
           itemsSeen: 1,
-          itemsUpserted: 1
+          itemsUpserted: 1,
         },
-        { now: () => reconTime + 1 }
+        { now: () => reconTime + 1 },
       );
       createUpdateIntent(
         db,
@@ -1355,32 +1393,33 @@ describe("buildProjectRollup", () => {
           intentType: "source_satisfied",
           reason: "Old satisfaction",
           goalId: "goal-stale-intent",
-          idempotencyKey: "linear:issue-stale-intent:source_satisfied:goal-stale-intent"
+          idempotencyKey:
+            "linear:issue-stale-intent:source_satisfied:goal-stale-intent",
         },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
 
       const withDefaultTtl = buildProjectRollup(db, {
-        now: 1_000 + DEFAULT_INTENT_STALE_THRESHOLD_MS + 60_000
+        now: 1_000 + DEFAULT_INTENT_STALE_THRESHOLD_MS + 60_000,
       });
       expect(withDefaultTtl.counts.pendingUpdateIntents).toBe(1);
       expect(withDefaultTtl.counts.staleUpdateIntents).toBe(1);
       expect(withDefaultTtl.pendingUpdateIntents[0]?.stale).toBe(true);
       expect(withDefaultTtl.nextAction.detail).toMatchObject({
         total: 1,
-        stale: 1
+        stale: 1,
       });
 
       const withGenerousTtl = buildProjectRollup(db, {
         now: 1_000 + DEFAULT_INTENT_STALE_THRESHOLD_MS + 60_000,
-        intentStaleThresholdMs: 10 * DEFAULT_INTENT_STALE_THRESHOLD_MS
+        intentStaleThresholdMs: 10 * DEFAULT_INTENT_STALE_THRESHOLD_MS,
       });
       expect(withGenerousTtl.counts.staleUpdateIntents).toBe(0);
       expect(withGenerousTtl.pendingUpdateIntents[0]?.stale).toBe(false);
 
       const withTightTtl = buildProjectRollup(db, {
         now: 5_000,
-        intentStaleThresholdMs: 1_000
+        intentStaleThresholdMs: 1_000,
       });
       expect(withTightTtl.counts.staleUpdateIntents).toBe(1);
     } finally {
@@ -1393,20 +1432,20 @@ describe("buildProjectRollup", () => {
     try {
       seedGoal(db, { id: "goal-alpha", state: "completed" });
       seedGoal(db, { id: "goal-beta", state: "completed" });
-      const alphaItemId = seedSourceItem(db, {
+      const alphaItemId = seedTrackerItem(db, {
         externalId: "alpha-1",
         projectName: "Alpha",
-        goalId: "goal-alpha"
+        goalId: "goal-alpha",
       });
-      const crossScopeItemId = seedSourceItem(db, {
+      const crossScopeItemId = seedTrackerItem(db, {
         externalId: "beta-same-goal",
         projectName: "Beta",
-        goalId: "goal-alpha"
+        goalId: "goal-alpha",
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "beta-1",
         projectName: "Beta",
-        goalId: "goal-beta"
+        goalId: "goal-beta",
       });
       createUpdateIntent(
         db,
@@ -1415,22 +1454,22 @@ describe("buildProjectRollup", () => {
           intentType: "source_satisfied",
           reason: "Alpha satisfied",
           goalId: "goal-alpha",
-          sourceItemId: alphaItemId,
-          idempotencyKey: "linear:alpha-1:source_satisfied:goal-alpha"
+          trackerItemId: alphaItemId,
+          idempotencyKey: "linear:alpha-1:source_satisfied:goal-alpha",
         },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
       createUpdateIntent(
         db,
         {
           adapterKind: "linear",
           intentType: "source_satisfied",
-          reason: "Same goal but Beta source item",
+          reason: "Same goal but Beta tracker item",
           goalId: "goal-alpha",
-          sourceItemId: crossScopeItemId,
-          idempotencyKey: "linear:beta-same-goal:source_satisfied:goal-alpha"
+          trackerItemId: crossScopeItemId,
+          idempotencyKey: "linear:beta-same-goal:source_satisfied:goal-alpha",
         },
-        { now: () => 1_050 }
+        { now: () => 1_050 },
       );
       createUpdateIntent(
         db,
@@ -1439,20 +1478,20 @@ describe("buildProjectRollup", () => {
           intentType: "source_satisfied",
           reason: "Beta satisfied",
           goalId: "goal-beta",
-          idempotencyKey: "linear:beta-1:source_satisfied:goal-beta"
+          idempotencyKey: "linear:beta-1:source_satisfied:goal-beta",
         },
-        { now: () => 1_100 }
+        { now: () => 1_100 },
       );
 
       const alphaRollup = buildProjectRollup(db, {
         filters: { projectName: "Alpha" },
-        now: 2_000
+        now: 2_000,
       });
-      expect(alphaRollup.pendingUpdateIntents.map((intent) => intent.goalId)).toEqual([
-        "goal-alpha"
-      ]);
       expect(
-        alphaRollup.pendingUpdateIntents.map((intent) => intent.sourceItemId)
+        alphaRollup.pendingUpdateIntents.map((intent) => intent.goalId),
+      ).toEqual(["goal-alpha"]);
+      expect(
+        alphaRollup.pendingUpdateIntents.map((intent) => intent.trackerItemId),
       ).toEqual([alphaItemId]);
 
       const allRollup = buildProjectRollup(db, { now: 2_000 });
@@ -1466,7 +1505,7 @@ describe("buildProjectRollup", () => {
     const db = openDb(makeTempDir());
     try {
       seedGoal(db, { id: "goal-legacy", state: "completed" });
-      const sourceItem = upsertSourceItem(db, {
+      const trackerItem = upsertTrackerItem(db, {
         adapterKind: "linear",
         externalId: "legacy-metadata",
         externalKey: "NGX-LEGACY",
@@ -1474,10 +1513,10 @@ describe("buildProjectRollup", () => {
         status: "In Progress",
         metadata: {
           project: "Momentum",
-          milestone: "Momentum-Native Coding Workflow Adoption"
+          milestone: "Momentum-Native Coding Workflow Adoption",
         },
         observedAt: 1_000,
-        goalId: "goal-legacy"
+        goalId: "goal-legacy",
       });
       createUpdateIntent(
         db,
@@ -1486,25 +1525,24 @@ describe("buildProjectRollup", () => {
           intentType: "source_satisfied",
           reason: "Legacy metadata should still be surfaced",
           goalId: "goal-legacy",
-          sourceItemId: sourceItem.id,
-          idempotencyKey:
-            "linear:legacy-metadata:source_satisfied:goal-legacy"
+          trackerItemId: trackerItem.id,
+          idempotencyKey: "linear:legacy-metadata:source_satisfied:goal-legacy",
         },
-        { now: () => 1_050 }
+        { now: () => 1_050 },
       );
 
       const rollup = buildProjectRollup(db, {
         filters: {
           projectName: "Momentum",
-          milestoneName: "Momentum-Native Coding Workflow Adoption"
+          milestoneName: "Momentum-Native Coding Workflow Adoption",
         },
-        now: 2_000
+        now: 2_000,
       });
-      expect(rollup.counts.sourceItems.total).toBe(1);
+      expect(rollup.counts.trackerItems.total).toBe(1);
       expect(rollup.counts.pendingUpdateIntents).toBe(1);
       expect(rollup.pendingUpdateIntents[0]).toMatchObject({
         goalId: "goal-legacy",
-        sourceItemId: sourceItem.id
+        trackerItemId: trackerItem.id,
       });
       expect(rollup.nextAction.kind).toBe("review_pending_intents");
     } finally {
@@ -1515,7 +1553,7 @@ describe("buildProjectRollup", () => {
   it("does not cross-match object project ids and names when scoping pending intents", () => {
     const db = openDb(makeTempDir());
     try {
-      const alphaItem = upsertSourceItem(db, {
+      const alphaItem = upsertTrackerItem(db, {
         adapterKind: "linear",
         externalId: "project-alpha-id",
         externalKey: null,
@@ -1523,10 +1561,10 @@ describe("buildProjectRollup", () => {
         status: "Todo",
         metadata: {
           project: { id: "project-alpha-id", name: "Shared Label" },
-          milestone: { id: "milestone-alpha-id", name: "Alpha Milestone" }
+          milestone: { id: "milestone-alpha-id", name: "Alpha Milestone" },
         },
         observedAt: 1_000,
-        goalId: null
+        goalId: null,
       });
       createUpdateIntent(
         db,
@@ -1534,13 +1572,13 @@ describe("buildProjectRollup", () => {
           adapterKind: "linear",
           intentType: "source_satisfied",
           reason: "Alpha project intent",
-          sourceItemId: alphaItem.id,
-          idempotencyKey: "linear:alpha-object:source_satisfied"
+          trackerItemId: alphaItem.id,
+          idempotencyKey: "linear:alpha-object:source_satisfied",
         },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
 
-      const betaItem = upsertSourceItem(db, {
+      const betaItem = upsertTrackerItem(db, {
         adapterKind: "linear",
         externalId: "project-beta-id",
         externalKey: null,
@@ -1548,10 +1586,10 @@ describe("buildProjectRollup", () => {
         status: "Todo",
         metadata: {
           project: { id: "Shared Label", name: "Beta Project" },
-          milestone: { id: "milestone-beta-id", name: "Beta Milestone" }
+          milestone: { id: "milestone-beta-id", name: "Beta Milestone" },
         },
         observedAt: 1_100,
-        goalId: null
+        goalId: null,
       });
       createUpdateIntent(
         db,
@@ -1559,27 +1597,29 @@ describe("buildProjectRollup", () => {
           adapterKind: "linear",
           intentType: "source_satisfied",
           reason: "Beta project intent",
-          sourceItemId: betaItem.id,
-          idempotencyKey: "linear:beta-object:source_satisfied"
+          trackerItemId: betaItem.id,
+          idempotencyKey: "linear:beta-object:source_satisfied",
         },
-        { now: () => 1_100 }
+        { now: () => 1_100 },
       );
 
       const byProjectName = buildProjectRollup(db, {
         filters: { projectName: "Shared Label" },
-        now: 2_000
+        now: 2_000,
       });
-      expect(byProjectName.pendingUpdateIntents.map((intent) => intent.sourceItemId)).toEqual([
-        alphaItem.id
-      ]);
+      expect(
+        byProjectName.pendingUpdateIntents.map(
+          (intent) => intent.trackerItemId,
+        ),
+      ).toEqual([alphaItem.id]);
 
       const byProjectId = buildProjectRollup(db, {
         filters: { projectId: "Shared Label" },
-        now: 2_000
+        now: 2_000,
       });
-      expect(byProjectId.pendingUpdateIntents.map((intent) => intent.sourceItemId)).toEqual([
-        betaItem.id
-      ]);
+      expect(
+        byProjectId.pendingUpdateIntents.map((intent) => intent.trackerItemId),
+      ).toEqual([betaItem.id]);
     } finally {
       db.close();
     }
@@ -1589,10 +1629,10 @@ describe("buildProjectRollup", () => {
     const db = openDb(makeTempDir());
     try {
       seedGoal(db, { id: "goal-multi", state: "completed" });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "linear-issue",
         adapterKind: "linear",
-        goalId: "goal-multi"
+        goalId: "goal-multi",
       });
       createUpdateIntent(
         db,
@@ -1601,9 +1641,9 @@ describe("buildProjectRollup", () => {
           intentType: "source_satisfied",
           reason: "linear",
           goalId: "goal-multi",
-          idempotencyKey: "linear:multi:source_satisfied:goal-multi"
+          idempotencyKey: "linear:multi:source_satisfied:goal-multi",
         },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
       createUpdateIntent(
         db,
@@ -1612,17 +1652,17 @@ describe("buildProjectRollup", () => {
           intentType: "source_satisfied",
           reason: "github",
           goalId: "goal-multi",
-          idempotencyKey: "github:multi:source_satisfied:goal-multi"
+          idempotencyKey: "github:multi:source_satisfied:goal-multi",
         },
-        { now: () => 1_100 }
+        { now: () => 1_100 },
       );
 
       const linearOnly = buildProjectRollup(db, {
         filters: { adapterKind: "linear" },
-        now: 2_000
+        now: 2_000,
       });
       expect(
-        linearOnly.pendingUpdateIntents.map((intent) => intent.adapterKind)
+        linearOnly.pendingUpdateIntents.map((intent) => intent.adapterKind),
       ).toEqual(["linear"]);
     } finally {
       db.close();
@@ -1633,9 +1673,9 @@ describe("buildProjectRollup", () => {
     const db = openDb(makeTempDir());
     try {
       seedGoal(db, { id: "goal-mixed", state: "completed" });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-mixed",
-        goalId: "goal-mixed"
+        goalId: "goal-mixed",
       });
       createUpdateIntent(
         db,
@@ -1644,9 +1684,9 @@ describe("buildProjectRollup", () => {
           intentType: "source_satisfied",
           reason: "pending",
           goalId: "goal-mixed",
-          idempotencyKey: "linear:mixed:source_satisfied:goal-mixed"
+          idempotencyKey: "linear:mixed:source_satisfied:goal-mixed",
         },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
       const applied = createUpdateIntent(
         db,
@@ -1655,17 +1695,19 @@ describe("buildProjectRollup", () => {
           intentType: "comment_requested",
           reason: "applied",
           goalId: "goal-mixed",
-          idempotencyKey: "linear:mixed:comment_requested:goal-mixed"
+          idempotencyKey: "linear:mixed:comment_requested:goal-mixed",
         },
-        { now: () => 1_100 }
+        { now: () => 1_100 },
       );
       db.prepare(
-        "UPDATE update_intents SET status = 'applied', applied_at = ?, updated_at = ? WHERE id = ?"
+        "UPDATE update_intents SET status = 'applied', applied_at = ?, updated_at = ? WHERE id = ?",
       ).run(1_500, 1_500, applied.intent.id);
 
       const rollup = buildProjectRollup(db, { now: 2_000 });
       expect(rollup.counts.pendingUpdateIntents).toBe(1);
-      expect(rollup.pendingUpdateIntents[0]?.intentType).toBe("source_satisfied");
+      expect(rollup.pendingUpdateIntents[0]?.intentType).toBe(
+        "source_satisfied",
+      );
     } finally {
       db.close();
     }
@@ -1675,33 +1717,33 @@ describe("buildProjectRollup", () => {
     const db = openDb(makeTempDir());
     try {
       seedGoal(db, { id: "goal-pending-source-satisfied", state: "completed" });
-      const sourceItemId = seedSourceItem(db, {
+      const trackerItemId = seedTrackerItem(db, {
         externalId: "issue-pending-source-satisfied",
         status: "In Progress",
-        goalId: "goal-pending-source-satisfied"
+        goalId: "goal-pending-source-satisfied",
       });
       createUpdateIntent(
         db,
         {
           adapterKind: "linear",
           intentType: "source_satisfied",
-          reason: "Goal completed; source item needs operator review.",
+          reason: "Goal completed; tracker item needs operator review.",
           targetExternalId: "issue-pending-source-satisfied",
           goalId: "goal-pending-source-satisfied",
-          sourceItemId,
+          trackerItemId,
           idempotencyKey:
-            "linear:issue-pending-source-satisfied:source_satisfied:goal-pending-source-satisfied"
+            "linear:issue-pending-source-satisfied:source_satisfied:goal-pending-source-satisfied",
         },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
 
       const rollup = buildProjectRollup(db, { now: 2_000 });
-      expect(rollup.counts.mismatches.goal_done_source_not_done).toBe(1);
+      expect(rollup.counts.mismatches.goal_done_tracker_not_done).toBe(1);
       expect(rollup.counts.pendingUpdateIntents).toBe(1);
       expect(rollup.nextAction.kind).toBe("review_pending_intents");
       expect(rollup.nextAction.detail).toMatchObject({
         total: 1,
-        stale: 0
+        stale: 0,
       });
     } finally {
       db.close();
@@ -1714,11 +1756,11 @@ describe("buildProjectRollup", () => {
       seedGoal(db, {
         id: "goal-recover-intent",
         state: "queued",
-        needsManualRecovery: true
+        needsManualRecovery: true,
       });
-      seedSourceItem(db, {
+      seedTrackerItem(db, {
         externalId: "issue-recover-intent",
-        goalId: "goal-recover-intent"
+        goalId: "goal-recover-intent",
       });
       createUpdateIntent(
         db,
@@ -1727,9 +1769,10 @@ describe("buildProjectRollup", () => {
           intentType: "source_satisfied",
           reason: "should not pick this",
           goalId: "goal-recover-intent",
-          idempotencyKey: "linear:recover-intent:source_satisfied:goal-recover-intent"
+          idempotencyKey:
+            "linear:recover-intent:source_satisfied:goal-recover-intent",
         },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
 
       const rollup = buildProjectRollup(db, { now: 2_000 });
@@ -1741,10 +1784,10 @@ describe("buildProjectRollup", () => {
 
   it("exposes ProjectRollupMismatchKind values consistently", () => {
     const allowed: ProjectRollupMismatchKind[] = [
-      "source_done_goal_not_terminal",
-      "goal_done_source_not_done",
+      "tracker_done_goal_not_terminal",
+      "goal_done_tracker_not_done",
       "evidence_missing_after_completion",
-      "manual_recovery_required"
+      "manual_recovery_required",
     ];
     expect(allowed).toHaveLength(4);
   });

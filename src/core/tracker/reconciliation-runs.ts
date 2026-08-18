@@ -2,24 +2,24 @@ import { randomUUID } from "node:crypto";
 
 import type { MomentumDb } from "../../adapters/db.js";
 
-export const SOURCE_RECONCILIATION_RUN_STATES = [
+export const TRACKER_RECONCILIATION_RUN_STATES = [
   "running",
   "succeeded",
-  "failed"
+  "failed",
 ] as const;
 
-export type SourceReconciliationRunState =
-  (typeof SOURCE_RECONCILIATION_RUN_STATES)[number];
+export type TrackerReconciliationRunState =
+  (typeof TRACKER_RECONCILIATION_RUN_STATES)[number];
 
-export type SourceReconciliationTerminalState = Extract<
-  SourceReconciliationRunState,
+export type TrackerReconciliationTerminalState = Extract<
+  TrackerReconciliationRunState,
   "succeeded" | "failed"
 >;
 
-export type SourceReconciliationRun = {
+export type TrackerReconciliationRun = {
   id: string;
   adapterKind: string;
-  state: SourceReconciliationRunState;
+  state: TrackerReconciliationRunState;
   startedAt: number;
   finishedAt: number | null;
   error: string | null;
@@ -30,32 +30,32 @@ export type SourceReconciliationRun = {
   updatedAt: number;
 };
 
-export type StartSourceReconciliationRunInput = {
+export type StartTrackerReconciliationRunInput = {
   adapterKind: string;
   metadata?: Record<string, unknown>;
 };
 
-export type FinishSourceReconciliationRunInput = {
+export type FinishTrackerReconciliationRunInput = {
   runId: string;
-  state: SourceReconciliationTerminalState;
+  state: TrackerReconciliationTerminalState;
   itemsSeen: number;
   itemsUpserted: number;
   error?: string | null;
   metadata?: Record<string, unknown>;
 };
 
-export type ListSourceReconciliationRunsOptions = {
+export type ListTrackerReconciliationRunsOptions = {
   adapterKind?: string;
 };
 
-export type SourceReconciliationRunClock = {
+export type TrackerReconciliationRunClock = {
   now?: () => number;
 };
 
-type SourceReconciliationRunRow = {
+type TrackerReconciliationRunRow = {
   id: string;
   adapter_kind: string;
-  state: SourceReconciliationRunState;
+  state: TrackerReconciliationRunState;
   started_at: number;
   finished_at: number | null;
   error: string | null;
@@ -66,51 +66,51 @@ type SourceReconciliationRunRow = {
   updated_at: number;
 };
 
-export function startSourceReconciliationRun(
+export function startTrackerReconciliationRun(
   db: MomentumDb,
-  input: StartSourceReconciliationRunInput,
-  clock: SourceReconciliationRunClock = {}
-): SourceReconciliationRun {
+  input: StartTrackerReconciliationRunInput,
+  clock: TrackerReconciliationRunClock = {},
+): TrackerReconciliationRun {
   validateAdapterKind(input.adapterKind);
   const now = clock.now?.() ?? Date.now();
   const metadataJson = JSON.stringify(input.metadata ?? {});
   const row = db
     .prepare(
-      `INSERT INTO source_reconciliation_runs
+      `INSERT INTO tracker_reconciliation_runs
          (id, adapter_kind, state, started_at, finished_at, error,
           items_seen, items_upserted, metadata_json, created_at, updated_at)
        VALUES (?, ?, 'running', ?, NULL, NULL, 0, 0, ?, ?, ?)
-       RETURNING *`
+       RETURNING *`,
     )
     .get(
-      `source_reconciliation_run_${randomUUID()}`,
+      `tracker_reconciliation_run_${randomUUID()}`,
       input.adapterKind,
       now,
       metadataJson,
       now,
-      now
-    ) as SourceReconciliationRunRow;
+      now,
+    ) as TrackerReconciliationRunRow;
 
-  return sourceReconciliationRunFromRow(row);
+  return trackerReconciliationRunFromRow(row);
 }
 
-export function finishSourceReconciliationRun(
+export function finishTrackerReconciliationRun(
   db: MomentumDb,
-  input: FinishSourceReconciliationRunInput,
-  clock: SourceReconciliationRunClock = {}
-): SourceReconciliationRun | null {
+  input: FinishTrackerReconciliationRunInput,
+  clock: TrackerReconciliationRunClock = {},
+): TrackerReconciliationRun | null {
   validateRunId(input.runId);
   validateTerminalState(input.state);
   validateCount(input.itemsSeen, "itemsSeen");
   validateCount(input.itemsUpserted, "itemsUpserted");
   const now = clock.now?.() ?? Date.now();
-  const existing = getSourceReconciliationRun(db, input.runId);
+  const existing = getTrackerReconciliationRun(db, input.runId);
   if (!existing) return null;
   const metadataJson = JSON.stringify(input.metadata ?? existing.metadata);
 
   const row = db
     .prepare(
-      `UPDATE source_reconciliation_runs
+      `UPDATE tracker_reconciliation_runs
           SET state = ?,
               finished_at = ?,
               error = ?,
@@ -119,7 +119,7 @@ export function finishSourceReconciliationRun(
               metadata_json = ?,
               updated_at = ?
         WHERE id = ? AND state = 'running'
-        RETURNING *`
+        RETURNING *`,
     )
     .get(
       input.state,
@@ -129,52 +129,53 @@ export function finishSourceReconciliationRun(
       input.itemsUpserted,
       metadataJson,
       now,
-      input.runId
-    ) as SourceReconciliationRunRow | undefined;
+      input.runId,
+    ) as TrackerReconciliationRunRow | undefined;
 
   return row
-    ? sourceReconciliationRunFromRow(row)
-    : getSourceReconciliationRun(db, input.runId);
+    ? trackerReconciliationRunFromRow(row)
+    : getTrackerReconciliationRun(db, input.runId);
 }
 
-export function getSourceReconciliationRun(
+export function getTrackerReconciliationRun(
   db: MomentumDb,
-  runId: string
-): SourceReconciliationRun | null {
+  runId: string,
+): TrackerReconciliationRun | null {
   validateRunId(runId);
   const row = db
-    .prepare("SELECT * FROM source_reconciliation_runs WHERE id = ?")
-    .get(runId) as SourceReconciliationRunRow | undefined;
-  return row ? sourceReconciliationRunFromRow(row) : null;
+    .prepare("SELECT * FROM tracker_reconciliation_runs WHERE id = ?")
+    .get(runId) as TrackerReconciliationRunRow | undefined;
+  return row ? trackerReconciliationRunFromRow(row) : null;
 }
 
-export function listSourceReconciliationRuns(
+export function listTrackerReconciliationRuns(
   db: MomentumDb,
-  options: ListSourceReconciliationRunsOptions = {}
-): SourceReconciliationRun[] {
-  const rows = options.adapterKind === undefined
-    ? (db
-        .prepare(
-          `SELECT *
-             FROM source_reconciliation_runs
-            ORDER BY started_at ASC, created_at ASC, id ASC`
-        )
-        .all() as SourceReconciliationRunRow[])
-    : (db
-        .prepare(
-          `SELECT *
-             FROM source_reconciliation_runs
+  options: ListTrackerReconciliationRunsOptions = {},
+): TrackerReconciliationRun[] {
+  const rows =
+    options.adapterKind === undefined
+      ? (db
+          .prepare(
+            `SELECT *
+             FROM tracker_reconciliation_runs
+            ORDER BY started_at ASC, created_at ASC, id ASC`,
+          )
+          .all() as TrackerReconciliationRunRow[])
+      : (db
+          .prepare(
+            `SELECT *
+             FROM tracker_reconciliation_runs
             WHERE adapter_kind = ?
-            ORDER BY started_at ASC, created_at ASC, id ASC`
-        )
-        .all(options.adapterKind) as SourceReconciliationRunRow[]);
+            ORDER BY started_at ASC, created_at ASC, id ASC`,
+          )
+          .all(options.adapterKind) as TrackerReconciliationRunRow[]);
 
-  return rows.map(sourceReconciliationRunFromRow);
+  return rows.map(trackerReconciliationRunFromRow);
 }
 
-function sourceReconciliationRunFromRow(
-  row: SourceReconciliationRunRow
-): SourceReconciliationRun {
+function trackerReconciliationRunFromRow(
+  row: TrackerReconciliationRunRow,
+): TrackerReconciliationRun {
   return {
     id: row.id,
     adapterKind: row.adapter_kind,
@@ -186,7 +187,7 @@ function sourceReconciliationRunFromRow(
     itemsUpserted: row.items_upserted,
     metadata: parseMetadata(row.metadata_json),
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
   };
 }
 
@@ -200,26 +201,30 @@ function parseMetadata(metadataJson: string): Record<string, unknown> {
 
 function validateAdapterKind(adapterKind: string): void {
   if (adapterKind.length === 0) {
-    throw new Error("source reconciliation adapterKind must be non-empty");
+    throw new Error("tracker reconciliation adapterKind must be non-empty");
   }
 }
 
 function validateRunId(runId: string): void {
   if (runId.length === 0) {
-    throw new Error("source reconciliation runId must be non-empty");
+    throw new Error("tracker reconciliation runId must be non-empty");
   }
 }
 
-function validateTerminalState(state: SourceReconciliationTerminalState): void {
+function validateTerminalState(
+  state: TrackerReconciliationTerminalState,
+): void {
   if (state !== "succeeded" && state !== "failed") {
     throw new Error(
-      `source reconciliation terminal state must be 'succeeded' or 'failed', got ${state}`
+      `tracker reconciliation terminal state must be 'succeeded' or 'failed', got ${state}`,
     );
   }
 }
 
 function validateCount(value: number, name: string): void {
   if (!Number.isInteger(value) || value < 0) {
-    throw new Error(`source reconciliation ${name} must be a non-negative integer`);
+    throw new Error(
+      `tracker reconciliation ${name} must be a non-negative integer`,
+    );
   }
 }

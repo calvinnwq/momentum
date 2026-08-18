@@ -8,7 +8,7 @@
  *
  *   - decides whether the real smoke may run at all, given operator-controlled
  *     environment variables (`planLinearReadSmoke`), and
- *   - maps a finished `reconcileLinearSource` result into a documented
+ *   - maps a finished `reconcileLinearTracker` result into a documented
  *     failure-mode taxonomy (`classifyRealSmokeReadOutcome`).
  *
  * Safety posture:
@@ -25,31 +25,34 @@
 import { LINEAR_API_KEY_ENV_VAR } from "../../intent/apply-execute.js";
 import type {
   LinearReconciliationFilters,
-  ReconcileLinearSourceResult
-} from "../../source/reconciliation.js";
+  ReconcileLinearTrackerResult,
+} from "../../tracker/reconciliation.js";
 
 /** Master opt-in switch. The real Linear read smoke skips unless this is truthy. */
 export const REAL_SMOKE_LINEAR_OPT_IN_ENV_VAR = "MOMENTUM_REAL_SMOKE_LINEAR";
 /** Enables the no-persist dry-run mode (still performs the real read). */
 export const REAL_SMOKE_DRY_RUN_ENV_VAR = "MOMENTUM_REAL_SMOKE_DRY_RUN";
 /** Optional read-only project scope (UUID -> projectId, else projectName). */
-export const REAL_SMOKE_LINEAR_PROJECT_ENV_VAR = "MOMENTUM_REAL_SMOKE_LINEAR_PROJECT";
+export const REAL_SMOKE_LINEAR_PROJECT_ENV_VAR =
+  "MOMENTUM_REAL_SMOKE_LINEAR_PROJECT";
 /** Optional read-only milestone scope (UUID -> milestoneId, else milestoneName). */
-export const REAL_SMOKE_LINEAR_MILESTONE_ENV_VAR = "MOMENTUM_REAL_SMOKE_LINEAR_MILESTONE";
+export const REAL_SMOKE_LINEAR_MILESTONE_ENV_VAR =
+  "MOMENTUM_REAL_SMOKE_LINEAR_MILESTONE";
 /** Optional bound on pages drained; defaults to a small, cheap read. */
-export const REAL_SMOKE_LINEAR_MAX_PAGES_ENV_VAR = "MOMENTUM_REAL_SMOKE_LINEAR_MAX_PAGES";
+export const REAL_SMOKE_LINEAR_MAX_PAGES_ENV_VAR =
+  "MOMENTUM_REAL_SMOKE_LINEAR_MAX_PAGES";
 /** Optional GraphQL endpoint override (e.g. to point a dry-run at a mock). */
-export const REAL_SMOKE_LINEAR_ENDPOINT_ENV_VAR = "MOMENTUM_REAL_SMOKE_LINEAR_ENDPOINT";
+export const REAL_SMOKE_LINEAR_ENDPOINT_ENV_VAR =
+  "MOMENTUM_REAL_SMOKE_LINEAR_ENDPOINT";
 /** Override the evidence output directory; defaults to `.agent-runs/real-smoke/`. */
-export const REAL_SMOKE_EVIDENCE_DIR_ENV_VAR = "MOMENTUM_REAL_SMOKE_EVIDENCE_DIR";
+export const REAL_SMOKE_EVIDENCE_DIR_ENV_VAR =
+  "MOMENTUM_REAL_SMOKE_EVIDENCE_DIR";
 
 /** A single bounded read keeps the opt-in smoke cheap and connectivity-focused. */
 export const DEFAULT_REAL_SMOKE_LINEAR_MAX_PAGES = 1;
 
 export type RealSmokeReadSkipReason =
-  | "not_opted_in"
-  | "missing_credentials"
-  | "config_invalid";
+  "not_opted_in" | "missing_credentials" | "config_invalid";
 
 export type RealSmokeReadPlan =
   | { mode: "skip"; reason: RealSmokeReadSkipReason; detail: string }
@@ -67,13 +70,13 @@ export type RealSmokeReadPlan =
  * read-only parameters. Pure: reads only the provided environment snapshot.
  */
 export function planLinearReadSmoke(
-  env: Record<string, string | undefined>
+  env: Record<string, string | undefined>,
 ): RealSmokeReadPlan {
   if (!isEnvFlagEnabled(env[REAL_SMOKE_LINEAR_OPT_IN_ENV_VAR])) {
     return {
       mode: "skip",
       reason: "not_opted_in",
-      detail: `${REAL_SMOKE_LINEAR_OPT_IN_ENV_VAR} is not set; the real Linear read smoke stays off by default and never runs in CI.`
+      detail: `${REAL_SMOKE_LINEAR_OPT_IN_ENV_VAR} is not set; the real Linear read smoke stays off by default and never runs in CI.`,
     };
   }
 
@@ -82,7 +85,7 @@ export function planLinearReadSmoke(
     return {
       mode: "skip",
       reason: "missing_credentials",
-      detail: `${LINEAR_API_KEY_ENV_VAR} is unset; the real Linear read smoke needs an operator-provided read credential.`
+      detail: `${LINEAR_API_KEY_ENV_VAR} is unset; the real Linear read smoke needs an operator-provided read credential.`,
     };
   }
 
@@ -91,7 +94,7 @@ export function planLinearReadSmoke(
     return {
       mode: "skip",
       reason: "config_invalid",
-      detail: `${REAL_SMOKE_LINEAR_MAX_PAGES_ENV_VAR} must be a positive integer; refusing to run with invalid configuration.`
+      detail: `${REAL_SMOKE_LINEAR_MAX_PAGES_ENV_VAR} must be a positive integer; refusing to run with invalid configuration.`,
     };
   }
 
@@ -102,7 +105,7 @@ export function planLinearReadSmoke(
     dryRun: isEnvFlagEnabled(env[REAL_SMOKE_DRY_RUN_ENV_VAR]),
     filters: buildSmokeFilters(env),
     endpoint: endpointRaw.length > 0 ? endpointRaw : null,
-    maxPages
+    maxPages,
   };
 }
 
@@ -124,44 +127,47 @@ export type RealSmokeReadOutcome =
     };
 
 /**
- * Map a finished `reconcileLinearSource` result into the documented real-smoke
+ * Map a finished `reconcileLinearTracker` result into the documented real-smoke
  * failure-mode taxonomy. Pure: inspects only the reconciliation result.
  */
 export function classifyRealSmokeReadOutcome(
-  result: ReconcileLinearSourceResult
+  result: ReconcileLinearTrackerResult,
 ): RealSmokeReadOutcome {
   const stop = result.paginationStopped;
   if (stop.reason === "complete" || stop.reason === "max_pages") {
     return {
       ok: true,
       itemsObserved: result.counts.itemsObserved,
-      pages: result.counts.pages
+      pages: result.counts.pages,
     };
   }
 
-  const code = stop.code ?? "source_adapter_threw";
+  const code = stop.code ?? "tracker_adapter_threw";
   const detail = stop.error ?? result.run.error ?? "linear read smoke failed";
 
   return {
     ok: false,
     mode: classifyFailureMode(code, detail),
     code,
-    detail
+    detail,
   };
 }
 
-function classifyFailureMode(code: string, detail: string): RealSmokeReadFailureMode {
-  if (code === "source_auth_unavailable") return "auth_failure";
+function classifyFailureMode(
+  code: string,
+  detail: string,
+): RealSmokeReadFailureMode {
+  if (code === "tracker_auth_unavailable") return "auth_failure";
 
   const text = detail.toLowerCase();
   if (/rate.?limit|too many request|\b429\b/.test(text)) return "rate_limited";
   if (/global fetch is unavailable/.test(text)) return "tool_unavailable";
 
-  if (code === "source_config_invalid") return "config_invalid";
+  if (code === "tracker_config_invalid") return "config_invalid";
 
   if (
     /(timed out|fetch failed|getaddrinfo|socket hang up|network|econnrefused|econnreset|enotfound|etimedout|eai_again)/.test(
-      text
+      text,
     )
   ) {
     return "network_failure";
@@ -171,7 +177,7 @@ function classifyFailureMode(code: string, detail: string): RealSmokeReadFailure
 }
 
 function buildSmokeFilters(
-  env: Record<string, string | undefined>
+  env: Record<string, string | undefined>,
 ): LinearReconciliationFilters {
   const filters: LinearReconciliationFilters = {};
 

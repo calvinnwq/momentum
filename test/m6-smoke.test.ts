@@ -447,7 +447,7 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
     try {
       const reconcile = await runCliBinaryAsync(
         [
-          "source",
+          "tracker",
           "reconcile",
           "linear",
           "--linear-endpoint",
@@ -460,24 +460,24 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
       );
       expect(
         reconcile.code,
-        `source reconcile linear stderr: ${reconcile.stderr}`,
+        `tracker reconcile linear stderr: ${reconcile.stderr}`,
       ).toBe(0);
 
       const sourceList = runCliBinary([
-        "source",
+        "tracker",
         "list",
         "--data-dir",
         dataDir,
         "--json",
       ]);
-      expect(sourceList.code, `source list stderr: ${sourceList.stderr}`).toBe(
+      expect(sourceList.code, `tracker list stderr: ${sourceList.stderr}`).toBe(
         0,
       );
-      const sourceItems = (
+      const trackerItems = (
         JSON.parse(sourceList.stdout) as { items: Array<{ id: string }> }
       ).items;
-      expect(sourceItems).toHaveLength(1);
-      const sourceItemId = sourceItems[0]!.id;
+      expect(trackerItems).toHaveLength(1);
+      const trackerItemId = trackerItems[0]!.id;
 
       const goalId = "goal-smoke-m6-apply";
       seedCompletedGoal(dataDir, goalId);
@@ -531,8 +531,8 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
         runDir,
         "--goal",
         goalId,
-        "--source-item",
-        sourceItemId,
+        "--tracker-item",
+        trackerItemId,
         "--data-dir",
         dataDir,
         "--json",
@@ -540,16 +540,16 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
       expect(ingest.code, `evidence ingest stderr: ${ingest.stderr}`).toBe(0);
 
       const link = runCliBinary([
-        "source",
+        "tracker",
         "link",
-        sourceItemId,
+        trackerItemId,
         "--goal",
         goalId,
         "--data-dir",
         dataDir,
         "--json",
       ]);
-      expect(link.code, `source link stderr: ${link.stderr}`).toBe(0);
+      expect(link.code, `tracker link stderr: ${link.stderr}`).toBe(0);
       const linkCounts = (
         JSON.parse(link.stdout) as {
           counts: { intentsCreated: number };
@@ -840,7 +840,7 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
         0,
       );
       expect(mock.requestCounts["MomentumIssueRefresh"] ?? 0).toBe(0);
-      // Source reconcile counts are unchanged by the refused apply.
+      // Tracker reconcile counts are unchanged by the refused apply.
       expect(mock.requestCounts["MomentumLinearIssues"] ?? 0).toBe(
         reconcileCallsBefore,
       );
@@ -1063,7 +1063,7 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
       ).toBeGreaterThanOrEqual(1);
       // No post-apply refresh because the apply failed before it.
       expect(mock.requestCounts["MomentumIssueRefresh"] ?? 0).toBe(0);
-      // Source reconcile counts are unchanged by the refused apply.
+      // Tracker reconcile counts are unchanged by the refused apply.
       expect(mock.requestCounts["MomentumLinearIssues"] ?? 0).toBe(
         reconcileCallsBefore,
       );
@@ -1218,7 +1218,7 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
       );
 
       // Mock saw exactly one commentCreate and at least one IssueRefresh
-      // attempt (the injected failure). Source reconcile traffic unchanged.
+      // attempt (the injected failure). Tracker reconcile traffic unchanged.
       expect(mock.commentsCreated).toHaveLength(1);
       expect(mock.commentsCreated[0]!.body).toContain(`idempotency: ${marker}`);
       expect(mock.issueUpdates).toHaveLength(0);
@@ -1437,7 +1437,7 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
       ).toBe(0);
       // Post-apply reconciliation ran exactly once for the winning CLI.
       expect(mock.requestCounts["MomentumIssueRefresh"]).toBe(1);
-      // Source reconcile traffic from the fixture is unchanged.
+      // Tracker reconcile traffic from the fixture is unchanged.
       expect(mock.requestCounts["MomentumLinearIssues"] ?? 0).toBe(
         reconcileCallsBefore,
       );
@@ -1969,7 +1969,7 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
         mock.requestCounts["MomentumExternalUpdateIssueStateUpdate"] ?? 0,
       ).toBe(0);
       expect(mock.requestCounts["MomentumIssueRefresh"] ?? 0).toBe(0);
-      // Source reconcile traffic from the fixture is unchanged.
+      // Tracker reconcile traffic from the fixture is unchanged.
       expect(mock.requestCounts["MomentumLinearIssues"] ?? 0).toBe(
         reconcileCallsBefore,
       );
@@ -1982,7 +1982,7 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
 type M6ExternalApplyFixture = {
   repo: string;
   dataDir: string;
-  sourceItemId: string;
+  trackerItemId: string;
   goalId: string;
   intentId: string;
   mock: LinearExternalApplyMockServer;
@@ -2047,7 +2047,7 @@ async function establishM6ExternalApplyFixture(options: {
 
   const reconcile = await runCliBinaryAsync(
     [
-      "source",
+      "tracker",
       "reconcile",
       "linear",
       "--linear-endpoint",
@@ -2060,20 +2060,20 @@ async function establishM6ExternalApplyFixture(options: {
   );
   if (reconcile.code !== 0) {
     await mock.close();
-    throw new Error(`source reconcile linear failed: ${reconcile.stderr}`);
+    throw new Error(`tracker reconcile linear failed: ${reconcile.stderr}`);
   }
 
   const sourceList = runCliBinary([
-    "source",
+    "tracker",
     "list",
     "--data-dir",
     dataDir,
     "--json",
   ]);
-  const sourceItems = (
+  const trackerItems = (
     JSON.parse(sourceList.stdout) as { items: Array<{ id: string }> }
   ).items;
-  const sourceItemId = sourceItems[0]!.id;
+  const trackerItemId = trackerItems[0]!.id;
 
   const goalId = "goal-smoke-m6-failure";
   seedCompletedGoal(dataDir, goalId);
@@ -2127,8 +2127,8 @@ async function establishM6ExternalApplyFixture(options: {
     runDir,
     "--goal",
     goalId,
-    "--source-item",
-    sourceItemId,
+    "--tracker-item",
+    trackerItemId,
     "--data-dir",
     dataDir,
     "--json",
@@ -2139,9 +2139,9 @@ async function establishM6ExternalApplyFixture(options: {
   }
 
   const link = runCliBinary([
-    "source",
+    "tracker",
     "link",
-    sourceItemId,
+    trackerItemId,
     "--goal",
     goalId,
     "--data-dir",
@@ -2150,7 +2150,7 @@ async function establishM6ExternalApplyFixture(options: {
   ]);
   if (link.code !== 0) {
     await mock.close();
-    throw new Error(`source link failed: ${link.stderr}`);
+    throw new Error(`tracker link failed: ${link.stderr}`);
   }
 
   const intentList = runCliBinary([
@@ -2168,7 +2168,7 @@ async function establishM6ExternalApplyFixture(options: {
   return {
     repo,
     dataDir,
-    sourceItemId,
+    trackerItemId,
     goalId,
     intentId,
     mock,

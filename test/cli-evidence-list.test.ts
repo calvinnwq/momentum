@@ -39,15 +39,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
 
   return { code, stdout, stderr };
@@ -59,35 +59,35 @@ function seedGoal(dataDir: string, goalId: string): void {
     db.prepare(
       `INSERT INTO goals
          (id, title, branch, artifact_dir, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?)`,
     ).run(goalId, "evidence list goal", "momentum/test", "/tmp/test", 1, 1);
   } finally {
     db.close();
   }
 }
 
-function seedSourceItem(dataDir: string, sourceItemId: string): void {
+function seedTrackerItem(dataDir: string, trackerItemId: string): void {
   const db = openDb(dataDir);
   try {
     db.prepare(
-      `INSERT INTO source_items
+      `INSERT INTO tracker_items
          (id, adapter_kind, external_id, external_key, url, title,
           status, metadata_json, last_observed_at, goal_id,
           created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      sourceItemId,
+      trackerItemId,
       "linear",
-      `ext-${sourceItemId}`,
-      `KEY-${sourceItemId}`,
-      `https://linear.app/example/issue/${sourceItemId}`,
+      `ext-${trackerItemId}`,
+      `KEY-${trackerItemId}`,
+      `https://linear.app/example/issue/${trackerItemId}`,
       "evidence list source item",
       "open",
       "{}",
       1,
       null,
       1,
-      1
+      1,
     );
   } finally {
     db.close();
@@ -103,8 +103,8 @@ function seedRecords(
     summary: string;
     ingestKey: string;
     goalId?: string | null;
-    sourceItemId?: string | null;
-  }>
+    trackerItemId?: string | null;
+  }>,
 ): void {
   const db = openDb(dataDir);
   try {
@@ -116,7 +116,7 @@ function seedRecords(
         summary: record.summary,
         ingestKey: record.ingestKey,
         goalId: record.goalId ?? null,
-        sourceItemId: record.sourceItemId ?? null
+        trackerItemId: record.trackerItemId ?? null,
       });
     }
   } finally {
@@ -133,11 +133,11 @@ describe("momentum evidence list", () => {
       "extra",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      "Unexpected argument for evidence list: extra"
+      "Unexpected argument for evidence list: extra",
     );
   });
 
@@ -148,20 +148,21 @@ describe("momentum evidence list", () => {
       "list",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: true,
       command: "evidence list",
+      schemaVersion: 2,
       goalId: null,
-      sourceItemId: null,
+      trackerItemId: null,
       source: null,
       type: null,
       limit: null,
       count: 0,
-      records: []
+      records: [],
     });
   });
 
@@ -173,22 +174,22 @@ describe("momentum evidence list", () => {
         type: "plan_created",
         occurredAt: 1000,
         summary: "plan created",
-        ingestKey: "agent-workflow:run-1:plan_created"
+        ingestKey: "agent-workflow:run-1:plan_created",
       },
       {
         source: "agent-workflow",
         type: "merge_complete",
         occurredAt: 3000,
         summary: "merge complete",
-        ingestKey: "agent-workflow:run-1:merge-cleanup:complete"
+        ingestKey: "agent-workflow:run-1:merge-cleanup:complete",
       },
       {
         source: "agent-workflow",
         type: "implementation_complete",
         occurredAt: 2000,
         summary: "implementation complete",
-        ingestKey: "agent-workflow:run-1:implementation:complete"
-      }
+        ingestKey: "agent-workflow:run-1:implementation:complete",
+      },
     ]);
 
     const result = await run([
@@ -196,7 +197,7 @@ describe("momentum evidence list", () => {
       "list",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -207,9 +208,11 @@ describe("momentum evidence list", () => {
     expect(payload.records.map((r) => r.type)).toEqual([
       "plan_created",
       "implementation_complete",
-      "merge_complete"
+      "merge_complete",
     ]);
-    expect(payload.records.map((r) => r.occurredAt)).toEqual([1000, 2000, 3000]);
+    expect(payload.records.map((r) => r.occurredAt)).toEqual([
+      1000, 2000, 3000,
+    ]);
   });
 
   it("surfaces typed runId/stepId linkage in list records and text", async () => {
@@ -223,14 +226,14 @@ describe("momentum evidence list", () => {
         summary: "wf impl complete",
         ingestKey: "agent-workflow:cwfp-listlink001:implementation:complete",
         runId: "cwfp-listlink001",
-        stepId: "implementation"
+        stepId: "implementation",
       });
       ingestEvidenceRecord(db, {
         source: "linear",
         type: "issue_observed",
         occurredAt: 1000,
         summary: "non-workflow evidence",
-        ingestKey: "linear:issue-1:observed"
+        ingestKey: "linear:issue-1:observed",
       });
     } finally {
       db.close();
@@ -241,7 +244,7 @@ describe("momentum evidence list", () => {
       "list",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(json.code).toBe(0);
     const payload = JSON.parse(json.stdout) as {
@@ -254,12 +257,12 @@ describe("momentum evidence list", () => {
     const byType = new Map(payload.records.map((r) => [r.type, r]));
     expect(byType.get("implementation_complete")).toMatchObject({
       runId: "cwfp-listlink001",
-      stepId: "implementation"
+      stepId: "implementation",
     });
     // Non-workflow evidence keeps null typed linkage.
     expect(byType.get("issue_observed")).toMatchObject({
       runId: null,
-      stepId: null
+      stepId: null,
     });
 
     const text = await run(["evidence", "list", "--data-dir", dataDir]);
@@ -279,7 +282,7 @@ describe("momentum evidence list", () => {
         occurredAt: 1000,
         summary: "goal-a plan",
         ingestKey: "agent-workflow:goal-a:plan_created",
-        goalId: "goal-a"
+        goalId: "goal-a",
       },
       {
         source: "agent-workflow",
@@ -287,15 +290,15 @@ describe("momentum evidence list", () => {
         occurredAt: 1001,
         summary: "goal-b plan",
         ingestKey: "agent-workflow:goal-b:plan_created",
-        goalId: "goal-b"
+        goalId: "goal-b",
       },
       {
         source: "agent-workflow",
         type: "plan_created",
         occurredAt: 1002,
         summary: "unlinked plan",
-        ingestKey: "agent-workflow:loose:plan_created"
-      }
+        ingestKey: "agent-workflow:loose:plan_created",
+      },
     ]);
 
     const result = await run([
@@ -305,7 +308,7 @@ describe("momentum evidence list", () => {
       "goal-a",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -328,7 +331,7 @@ describe("momentum evidence list", () => {
       "missing-goal",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -336,14 +339,14 @@ describe("momentum evidence list", () => {
       ok: false,
       command: "evidence list",
       code: "goal_not_found",
-      goalId: "missing-goal"
+      goalId: "missing-goal",
     });
   });
 
-  it("filters by --source-item and rejects missing source items", async () => {
+  it("filters by --tracker-item and rejects missing source items", async () => {
     const dataDir = makeTempDir();
-    seedSourceItem(dataDir, "si-1");
-    seedSourceItem(dataDir, "si-2");
+    seedTrackerItem(dataDir, "si-1");
+    seedTrackerItem(dataDir, "si-2");
     seedRecords(dataDir, [
       {
         source: "agent-workflow",
@@ -351,7 +354,7 @@ describe("momentum evidence list", () => {
         occurredAt: 1000,
         summary: "si-1 plan",
         ingestKey: "agent-workflow:si-1:plan_created",
-        sourceItemId: "si-1"
+        trackerItemId: "si-1",
       },
       {
         source: "agent-workflow",
@@ -359,45 +362,48 @@ describe("momentum evidence list", () => {
         occurredAt: 1001,
         summary: "si-2 plan",
         ingestKey: "agent-workflow:si-2:plan_created",
-        sourceItemId: "si-2"
-      }
+        trackerItemId: "si-2",
+      },
     ]);
 
     const ok = await run([
       "evidence",
       "list",
-      "--source-item",
+      "--tracker-item",
       "si-2",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(ok.code).toBe(0);
     const okPayload = JSON.parse(ok.stdout) as {
-      sourceItemId: string | null;
+      trackerItemId: string | null;
       count: number;
-      records: Array<{ sourceItemId: string | null }>;
+      records: Array<{ trackerItemId: string | null }>;
     };
-    expect(okPayload.sourceItemId).toBe("si-2");
+    expect(okPayload.trackerItemId).toBe("si-2");
     expect(okPayload.count).toBe(1);
-    expect(okPayload.records[0]?.sourceItemId).toBe("si-2");
+    expect(okPayload.records[0]?.trackerItemId).toBe("si-2");
 
     const missing = await run([
       "evidence",
       "list",
-      "--source-item",
+      "--tracker-item",
       "si-missing",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(missing.code).toBe(1);
-    const missingPayload = JSON.parse(missing.stderr) as Record<string, unknown>;
+    const missingPayload = JSON.parse(missing.stderr) as Record<
+      string,
+      unknown
+    >;
     expect(missingPayload).toMatchObject({
       ok: false,
       command: "evidence list",
-      code: "source_item_not_found",
-      sourceItemId: "si-missing"
+      code: "tracker_item_not_found",
+      trackerItemId: "si-missing",
     });
   });
 
@@ -409,22 +415,22 @@ describe("momentum evidence list", () => {
         type: "plan_created",
         occurredAt: 1000,
         summary: "wf plan",
-        ingestKey: "agent-workflow:run-1:plan_created"
+        ingestKey: "agent-workflow:run-1:plan_created",
       },
       {
         source: "agent-workflow",
         type: "merge_complete",
         occurredAt: 2000,
         summary: "wf merge",
-        ingestKey: "agent-workflow:run-1:merge-cleanup:complete"
+        ingestKey: "agent-workflow:run-1:merge-cleanup:complete",
       },
       {
         source: "linear",
         type: "issue_observed",
         occurredAt: 3000,
         summary: "linear observed",
-        ingestKey: "linear:issue-1:observed"
-      }
+        ingestKey: "linear:issue-1:observed",
+      },
     ]);
 
     const sourceOnly = await run([
@@ -434,7 +440,7 @@ describe("momentum evidence list", () => {
       "linear",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(sourceOnly.code).toBe(0);
     const sourcePayload = JSON.parse(sourceOnly.stdout) as {
@@ -453,7 +459,7 @@ describe("momentum evidence list", () => {
       "plan_created",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(typeOnly.code).toBe(0);
     const typePayload = JSON.parse(typeOnly.stdout) as {
@@ -474,22 +480,22 @@ describe("momentum evidence list", () => {
         type: "plan_created",
         occurredAt: 1000,
         summary: "first",
-        ingestKey: "agent-workflow:run-1:plan_created"
+        ingestKey: "agent-workflow:run-1:plan_created",
       },
       {
         source: "agent-workflow",
         type: "preflight_complete",
         occurredAt: 1100,
         summary: "second",
-        ingestKey: "agent-workflow:run-1:preflight:complete"
+        ingestKey: "agent-workflow:run-1:preflight:complete",
       },
       {
         source: "agent-workflow",
         type: "implementation_complete",
         occurredAt: 1200,
         summary: "third",
-        ingestKey: "agent-workflow:run-1:implementation:complete"
-      }
+        ingestKey: "agent-workflow:run-1:implementation:complete",
+      },
     ]);
 
     const result = await run([
@@ -499,7 +505,7 @@ describe("momentum evidence list", () => {
       "2",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -521,7 +527,7 @@ describe("momentum evidence list", () => {
       "abc",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("Invalid value for --limit: abc");
@@ -535,20 +541,15 @@ describe("momentum evidence list", () => {
         type: "plan_created",
         occurredAt: 1700000000000,
         summary: "wf plan",
-        ingestKey: "agent-workflow:run-1:plan_created"
-      }
+        ingestKey: "agent-workflow:run-1:plan_created",
+      },
     ]);
 
-    const result = await run([
-      "evidence",
-      "list",
-      "--data-dir",
-      dataDir
-    ]);
+    const result = await run(["evidence", "list", "--data-dir", dataDir]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Evidence records: 1");
     expect(result.stdout).toContain("Goal: (any)");
-    expect(result.stdout).toContain("Source item: (any)");
+    expect(result.stdout).toContain("Tracker item: (any)");
     expect(result.stdout).toContain("Source: (any)");
     expect(result.stdout).toContain("Type: (any)");
     expect(result.stdout).toContain(`Data dir: ${dataDir}`);

@@ -5,15 +5,24 @@ import {
   buildProjectRollup,
   type ProjectRollup,
   type ProjectRollupFilters,
-  type ProjectRollupOptions
+  type ProjectRollupOptions,
 } from "../../core/repo/project-rollup.js";
 import {
   emitProjectStatusFailure,
-  emitProjectStatusSuccess
+  emitProjectStatusSuccess,
 } from "../../renderers/project.js";
 
 type ParsedFlags = {
-  args: string[]; json: boolean; dataDir?: string; source?: string; project?: string; staleThresholdHours?: number; intentStaleThresholdDays?: number; limit?: number; milestone?: string;
+  args: string[];
+  json: boolean;
+  dataDir?: string;
+  adapter?: string;
+  source?: string;
+  project?: string;
+  staleThresholdHours?: number;
+  intentStaleThresholdDays?: number;
+  limit?: number;
+  milestone?: string;
 };
 
 export function project(parsed: ParsedFlags, io: CliIo): number {
@@ -22,7 +31,7 @@ export function project(parsed: ParsedFlags, io: CliIo): number {
     return usageError(
       "Missing required subcommand for project. Expected: status.",
       parsed,
-      io
+      io,
     );
   }
   if (subcommand === "status") {
@@ -36,7 +45,15 @@ function projectStatus(parsed: ParsedFlags, io: CliIo): number {
     return usageError(
       `Unexpected argument for project status: ${parsed.args[2]}`,
       parsed,
-      io
+      io,
+    );
+  }
+
+  if (parsed.source !== undefined) {
+    return usageError(
+      "Unknown flag for project status: --source. Use --adapter to filter by tracker adapter.",
+      parsed,
+      io,
     );
   }
 
@@ -50,12 +67,12 @@ function projectStatus(parsed: ParsedFlags, io: CliIo): number {
   } catch (err) {
     return emitProjectStatusFailure(parsed, io, {
       code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err)
+      message: err instanceof Error ? err.message : String(err),
     });
   }
 
   const filters: ProjectRollupFilters = {};
-  if (parsed.source !== undefined) filters.adapterKind = parsed.source;
+  if (parsed.adapter !== undefined) filters.adapterKind = parsed.adapter;
   if (parsed.project !== undefined) {
     filters.projectId = parsed.project;
     filters.projectName = parsed.project;
@@ -68,12 +85,12 @@ function projectStatus(parsed: ParsedFlags, io: CliIo): number {
   const options: ProjectRollupOptions = { filters };
   if (parsed.staleThresholdHours !== undefined) {
     options.reconciliationStaleThresholdMs = Math.round(
-      parsed.staleThresholdHours * 60 * 60 * 1000
+      parsed.staleThresholdHours * 60 * 60 * 1000,
     );
   }
   if (parsed.intentStaleThresholdDays !== undefined) {
     options.intentStaleThresholdMs = Math.round(
-      parsed.intentStaleThresholdDays * 24 * 60 * 60 * 1000
+      parsed.intentStaleThresholdDays * 24 * 60 * 60 * 1000,
     );
   }
 

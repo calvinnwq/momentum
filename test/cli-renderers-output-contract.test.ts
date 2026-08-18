@@ -2,144 +2,133 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { runCli } from "../src/cli.js";
 import { evidenceRecordToJsonShape } from "../src/renderers/evidence.js";
 import {
   intentApplyAuditToJsonShape,
-  updateIntentToJsonShape
+  updateIntentToJsonShape,
 } from "../src/renderers/intent.js";
-import { sourceItemToJsonShape } from "../src/renderers/source.js";
+import { trackerItemToJsonShape } from "../src/renderers/tracker.js";
 import type { EvidenceRecord } from "../src/core/evidence/records.js";
 import type { IntentApplyAudit } from "../src/core/intent/apply-audits.js";
-import type { SourceItem } from "../src/core/source/items.js";
+import type { TrackerItem } from "../src/core/tracker/items.js";
 import type { UpdateIntent } from "../src/core/intent/update-intents.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
+const tempRoots: string[] = [];
+
+afterEach(() => {
+  while (tempRoots.length > 0) {
+    const dir = tempRoots.pop();
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 type CliResult = { code: number; stdout: string; stderr: string };
 
 async function run(args: string[]): Promise<CliResult> {
   let stdout = "";
   let stderr = "";
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-renderer-home-"));
+  const home = fs.mkdtempSync(
+    path.join(os.tmpdir(), "momentum-renderer-home-"),
+  );
+  tempRoots.push(home);
   const code = await runCli(args, {
     stdout: { write: (chunk: string) => ((stdout += chunk), true) },
     stderr: { write: (chunk: string) => ((stderr += chunk), true) },
-    env: { ...process.env, HOME: home }
+    env: {
+      ...process.env,
+      HOME: home,
+      MOMENTUM_HOME: path.join(home, ".momentum"),
+    },
   });
   return { code, stdout, stderr };
 }
 
-function readFile(relative: string): string {
-  return fs.readFileSync(path.join(repoRoot, relative), "utf8");
-}
-
 describe("shared renderer output contracts", () => {
-  it("keeps reusable JSON-shape renderers out of sibling command families", () => {
-    const commandModules = [
-      "src/commands/evidence/index.ts",
-      "src/commands/project/index.ts",
-      "src/commands/source/index.ts",
-      "src/commands/intent/index.ts"
+  it("renders command families and compatibility surfaces through public CLI envelopes", async () => {
+    const cases: Array<{
+      args: string[];
+      code: number;
+      stream: "stdout" | "stderr";
+      expected: Record<string, unknown>;
+    }> = [
+      {
+        args: ["tracker", "list", "--json"],
+        code: 0,
+        stream: "stdout",
+        expected: {
+          ok: true,
+          command: "tracker list",
+          schemaVersion: 2,
+          items: [],
+          count: 0,
+        },
+      },
+      {
+        args: ["evidence", "list", "--json"],
+        code: 0,
+        stream: "stdout",
+        expected: {
+          ok: true,
+          command: "evidence list",
+          schemaVersion: 2,
+          records: [],
+          count: 0,
+        },
+      },
+      {
+        args: ["intent", "list", "--json"],
+        code: 0,
+        stream: "stdout",
+        expected: {
+          ok: true,
+          command: "intent list",
+          schemaVersion: 2,
+          intents: [],
+          count: 0,
+        },
+      },
+      {
+        args: ["daemon", "status", "--json"],
+        code: 0,
+        stream: "stdout",
+        expected: { ok: true, command: "daemon status", hasRun: false },
+      },
+      {
+        args: ["recovery", "clear", "missing-goal", "--json"],
+        code: 1,
+        stream: "stderr",
+        expected: {
+          ok: false,
+          command: "recovery clear",
+          code: "goal_not_found",
+        },
+      },
+      {
+        args: ["doctor", "--json"],
+        code: 0,
+        stream: "stdout",
+        expected: { ok: true, command: "doctor" },
+      },
     ];
 
-    for (const modulePath of commandModules) {
-      const source = readFile(modulePath);
-      expect(
-        source,
-        `${modulePath} must import reusable render shapes from src/renderers instead of sibling command families`
-      ).not.toMatch(/from "\.\.\/(?:evidence|intent|project|source|workflow|goal)\/index\.js"/);
-    }
-
-    for (const rendererPath of [
-      "src/renderers/evidence.ts",
-      "src/renderers/intent.ts",
-      "src/renderers/source.ts"
-    ]) {
-      expect(
-        fs.existsSync(path.join(repoRoot, rendererPath)),
-        `${rendererPath} should own reusable JSON output shapes`
-      ).toBe(true);
-    }
-  });
-
-  it("keeps command-family renderer helpers in src/renderers modules", () => {
-    const commandModules = [
-      "src/commands/workflow/index.ts",
-      "src/commands/project/index.ts",
-      "src/commands/intent/index.ts",
-      "src/commands/source/index.ts",
-      "src/commands/evidence/index.ts"
-    ];
-
-    for (const modulePath of commandModules) {
-      const source = readFile(modulePath);
-      expect(
-        source,
-        `${modulePath} should orchestrate commands and call src/renderers for text helpers`
-      ).not.toMatch(/\bfunction\s+render[A-Z]/);
-      expect(
-        source,
-        `${modulePath} should call src/renderers for JSON output shapes`
-      ).not.toMatch(/\bfunction\s+\w+ToJsonShape\b/);
-      expect(
-        source,
-        `${modulePath} should call src/renderers for command-family emit helpers`
-      ).not.toMatch(/\bfunction\s+emit[A-Z]/);
-      expect(
-        source,
-        `${modulePath} should route stdout/stderr writes through src/renderers`
-      ).not.toMatch(/\bwrite(?:Json)?\(/);
-    }
-
-    for (const rendererPath of [
-      "src/renderers/workflow.ts",
-      "src/renderers/project.ts",
-      "src/renderers/intent.ts",
-      "src/renderers/source.ts",
-      "src/renderers/evidence.ts"
-    ]) {
-      expect(
-        fs.existsSync(path.join(repoRoot, rendererPath)),
-        `${rendererPath} should own command-family output contracts`
-      ).toBe(true);
-    }
-  });
-
-  it("keeps remaining inline CLI command surfaces delegated to renderers", () => {
-    const source = readFile("src/cli.ts");
-
-    for (const helperName of [
-      "emitRecoveryClear",
-      "emitDaemonStopSuccess",
-      "emitDaemonStopFailure",
-      "emitDaemonStartSuccess",
-      "emitDaemonStartLoopResult",
-      "emitDaemonStartFailure",
-      "emitDaemonStatus"
-    ]) {
-      expect(
-        source,
-        `src/cli.ts should call ${helperName} from src/renderers instead of defining it inline`
-      ).not.toMatch(new RegExp(`function\\s+${helperName}\\b`));
-    }
-
-    for (const rendererPath of [
-      "src/renderers/recovery.ts",
-      "src/renderers/daemon.ts",
-      "src/renderers/doctor.ts"
-    ]) {
-      expect(
-        fs.existsSync(path.join(repoRoot, rendererPath)),
-        `${rendererPath} should own output contracts for remaining CLI surfaces`
-      ).toBe(true);
+    for (const spec of cases) {
+      const result = await run(spec.args);
+      expect(result.code, spec.args.join(" ")).toBe(spec.code);
+      const selected = spec.stream === "stdout" ? result.stdout : result.stderr;
+      const other = spec.stream === "stdout" ? result.stderr : result.stdout;
+      expect(other, `${spec.args.join(" ")} other stream`).toBe("");
+      expect(JSON.parse(selected), spec.args.join(" ")).toMatchObject(
+        spec.expected,
+      );
     }
   });
 
   it("preserves reusable JSON field contracts for source, evidence, intent, and apply audit shapes", () => {
-    const sourceItem: SourceItem = {
+    const trackerItem: TrackerItem = {
       id: "src-1",
       adapterKind: "linear",
       externalId: "lin-1",
@@ -151,7 +140,7 @@ describe("shared renderer output contracts", () => {
       lastObservedAt: 10,
       goalId: "goal-1",
       createdAt: 11,
-      updatedAt: 12
+      updatedAt: 12,
     };
     const evidence: EvidenceRecord = {
       id: "ev-1",
@@ -164,12 +153,12 @@ describe("shared renderer output contracts", () => {
       summary: "Step succeeded",
       metadata: { runId: "run-1" },
       goalId: "goal-1",
-      sourceItemId: "src-1",
+      trackerItemId: "src-1",
       runId: "run-1",
       stepId: "step-1",
       ingestKey: "workflow:run-1:step-1",
       createdAt: 21,
-      updatedAt: 22
+      updatedAt: 22,
     };
     const intent: UpdateIntent = {
       id: "intent-1",
@@ -179,7 +168,7 @@ describe("shared renderer output contracts", () => {
       payload: { status: "Done" },
       reason: "Goal completed",
       goalId: "goal-1",
-      sourceItemId: "src-1",
+      trackerItemId: "src-1",
       evidenceRecordId: "ev-1",
       status: "pending",
       idempotencyKey: "intent-key",
@@ -190,7 +179,7 @@ describe("shared renderer output contracts", () => {
       updatedAt: 32,
       appliedAt: null,
       skippedAt: null,
-      canceledAt: null
+      canceledAt: null,
     };
     const audit: IntentApplyAudit = {
       id: "audit-1",
@@ -201,7 +190,7 @@ describe("shared renderer output contracts", () => {
         externalId: "lin-1",
         externalKey: "NGX-1",
         url: "https://linear.example/NGX-1",
-        title: "Renderer shape"
+        title: "Renderer shape",
       },
       requestedAt: 40,
       finishedAt: 41,
@@ -219,17 +208,17 @@ describe("shared renderer output contracts", () => {
       externalRefs: {
         commentId: "comment-1",
         commentUrl: "https://linear.example/comment-1",
-        stateTransitionId: "transition-1"
+        stateTransitionId: "transition-1",
       },
       reconcile: {
         status: "matched",
-        warning: null
+        warning: null,
       },
       createdAt: 42,
-      updatedAt: 43
+      updatedAt: 43,
     };
 
-    expect(sourceItemToJsonShape(sourceItem)).toEqual({
+    expect(trackerItemToJsonShape(trackerItem)).toEqual({
       id: "src-1",
       adapterKind: "linear",
       externalId: "lin-1",
@@ -241,7 +230,7 @@ describe("shared renderer output contracts", () => {
       lastObservedAt: 10,
       goalId: "goal-1",
       createdAt: 11,
-      updatedAt: 12
+      updatedAt: 12,
     });
     expect(evidenceRecordToJsonShape(evidence)).toEqual({
       id: "ev-1",
@@ -254,12 +243,12 @@ describe("shared renderer output contracts", () => {
       summary: "Step succeeded",
       metadata: { runId: "run-1" },
       goalId: "goal-1",
-      sourceItemId: "src-1",
+      trackerItemId: "src-1",
       runId: "run-1",
       stepId: "step-1",
       ingestKey: "workflow:run-1:step-1",
       createdAt: 21,
-      updatedAt: 22
+      updatedAt: 22,
     });
     expect(updateIntentToJsonShape(intent)).toEqual({
       id: "intent-1",
@@ -269,7 +258,7 @@ describe("shared renderer output contracts", () => {
       payload: { status: "Done" },
       reason: "Goal completed",
       goalId: "goal-1",
-      sourceItemId: "src-1",
+      trackerItemId: "src-1",
       evidenceRecordId: "ev-1",
       status: "pending",
       idempotencyKey: "intent-key",
@@ -280,7 +269,7 @@ describe("shared renderer output contracts", () => {
       updatedAt: 32,
       appliedAt: null,
       skippedAt: null,
-      canceledAt: null
+      canceledAt: null,
     });
     expect(intentApplyAuditToJsonShape(audit)).toEqual({
       id: "audit-1",
@@ -290,7 +279,7 @@ describe("shared renderer output contracts", () => {
         externalId: "lin-1",
         externalKey: "NGX-1",
         url: "https://linear.example/NGX-1",
-        title: "Renderer shape"
+        title: "Renderer shape",
       },
       requestedAt: 40,
       finishedAt: 41,
@@ -308,11 +297,11 @@ describe("shared renderer output contracts", () => {
       externalRefs: {
         commentId: "comment-1",
         commentUrl: "https://linear.example/comment-1",
-        stateTransitionId: "transition-1"
+        stateTransitionId: "transition-1",
       },
       reconcile: { status: "matched", warning: null },
       createdAt: 42,
-      updatedAt: 43
+      updatedAt: 43,
     });
   });
 
@@ -326,23 +315,23 @@ describe("shared renderer output contracts", () => {
       command: "workflow run decide",
       code: "action_required",
       gateId: "gate-1",
-      message: "Missing required --action <action> for workflow run decide."
+      message: "Missing required --action <action> for workflow run decide.",
     });
   });
 
   it("preserves human usage rendering through the shared CLI output renderer", async () => {
-    const result = await run(["source"]);
+    const result = await run(["tracker"]);
 
     expect(result.code).toBe(2);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("Missing required subcommand for source.");
+    expect(result.stderr).toContain("Missing required subcommand for tracker.");
     expect(result.stderr).toContain("Momentum\n\nUsage:\n");
-    expect(result.stderr).toContain("  momentum source list");
+    expect(result.stderr).toContain("  momentum tracker list");
   });
 
   it("does not add repo-local Codex skill files for renderer extraction", () => {
     expect(
-      fs.existsSync(path.join(repoRoot, ".agents/skills/no-mistakes/SKILL.md"))
+      fs.existsSync(path.join(repoRoot, ".agents/skills/no-mistakes/SKILL.md")),
     ).toBe(false);
   });
 });

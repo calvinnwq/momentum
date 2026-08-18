@@ -11,7 +11,7 @@
  *   1. Validate input and load the pending intent.
  *   2. Refuse when no repo context, when MOMENTUM.md fails to load, or when
  *      the effective `intent_apply_policy` is not `external_apply_allowed`.
- *   3. Resolve adapter and intent-type support; resolve source/evidence context
+ *   3. Resolve adapter and intent-type support; resolve tracker/evidence context
  *      and the external target reference.
  *   4. Refuse when the adapter's credential env var is missing.
  *   5. Render the adapter preview (idempotency marker + comment body).
@@ -42,7 +42,7 @@ import {
   type IntentApplyAudit,
   type IntentApplyAuditReconcile,
   type UpdateIntentApplyAuditReconcileInput,
-  type UpdateIntentApplyAuditReconcileResult
+  type UpdateIntentApplyAuditReconcileResult,
 } from "./apply-audits.js";
 import type { MomentumDb } from "../../adapters/db.js";
 import {
@@ -55,7 +55,7 @@ import {
   type ExternalUpdateAdapterPreview,
   type ExternalUpdateAdapterPreviewResult,
   type ExternalUpdateAdapterTarget,
-  type ExternalUpdateMutationKind
+  type ExternalUpdateMutationKind,
 } from "../../adapters/external-update-adapter.js";
 import { getEvidenceRecordById } from "../evidence/records.js";
 import {
@@ -65,11 +65,11 @@ import {
   type LinearExternalUpdateInput,
   type LinearExternalUpdateResult,
   type LinearExternalUpdateResultCode,
-  type LinearStatusMutationConfig
+  type LinearStatusMutationConfig,
 } from "../../adapters/linear-external-update-client.js";
 import {
   buildLinearIssueRefreshClient,
-  type LinearIssueRefreshClient
+  type LinearIssueRefreshClient,
 } from "../../adapters/linear-issue-refresh.js";
 import {
   DEFAULT_INTENT_APPLY_POLICY,
@@ -77,19 +77,19 @@ import {
   resolveIntentApplyPolicy,
   type MomentumPolicyLoadResult,
   type PolicyEffectiveFieldSource,
-  type UpdateIntentApplyPolicy
+  type UpdateIntentApplyPolicy,
 } from "./policy.js";
 import { preflightLinearExternalApplyAuth } from "./external-apply-preflight.js";
-import { getSourceItemById } from "../source/items.js";
+import { getTrackerItemById } from "../tracker/items.js";
 import {
   reconcileAfterExternalApply,
-  type PostApplyReconcileOutcomeCode
+  type PostApplyReconcileOutcomeCode,
 } from "./post-apply-reconcile.js";
 import {
   getUpdateIntentById,
   markUpdateIntentApplied as markUpdateIntentAppliedFn,
   type UpdateIntent,
-  type UpdateIntentDecisionResult
+  type UpdateIntentDecisionResult,
 } from "./update-intents.js";
 
 export const LINEAR_API_KEY_ENV_VAR = "LINEAR_API_KEY";
@@ -131,7 +131,7 @@ export const EXECUTE_EXTERNAL_APPLY_ERROR_CODES = Object.freeze([
   "malformed_response",
   "validation_failed",
   "adapter_threw",
-  "audit_incomplete"
+  "audit_incomplete",
 ] as const);
 
 export type ExecuteExternalApplyErrorCode =
@@ -143,30 +143,30 @@ export type ExecuteExternalApplyDeps = {
   adapters?: ReadonlyMap<string, ExternalUpdateAdapter>;
   loadPolicy?: (repoPath: string) => MomentumPolicyLoadResult;
   buildLinearClient?: (
-    env: ExecuteExternalApplyEnv
+    env: ExecuteExternalApplyEnv,
   ) => LinearExternalUpdateClient;
   buildLinearRefreshClient?: (
-    env: ExecuteExternalApplyEnv
+    env: ExecuteExternalApplyEnv,
   ) => LinearIssueRefreshClient | null;
   claimIntentApply?: (
     db: MomentumDb,
-    input: ClaimIntentApplyInput
+    input: ClaimIntentApplyInput,
   ) => ClaimIntentApplyResult;
   finalizeIntentApply?: (
     db: MomentumDb,
-    input: FinalizeIntentApplyInput
+    input: FinalizeIntentApplyInput,
   ) => FinalizeIntentApplyResult;
   updateIntentApplyAuditReconcile?: (
     db: MomentumDb,
-    input: UpdateIntentApplyAuditReconcileInput
+    input: UpdateIntentApplyAuditReconcileInput,
   ) => UpdateIntentApplyAuditReconcileResult;
   previewExternalUpdate?: (
     input: ExternalUpdateAdapterInput,
-    options: { adapters?: ReadonlyMap<string, ExternalUpdateAdapter> }
+    options: { adapters?: ReadonlyMap<string, ExternalUpdateAdapter> },
   ) => ExternalUpdateAdapterPreviewResult;
   markUpdateIntentApplied?: (
     db: MomentumDb,
-    input: { intentId: string; decisionReason: string; now?: number }
+    input: { intentId: string; decisionReason: string; now?: number },
   ) => UpdateIntentDecisionResult;
   now?: () => number;
 };
@@ -246,8 +246,7 @@ export type ExecuteExternalApplyFailure = {
 };
 
 export type ExecuteExternalApplyResult =
-  | ExecuteExternalApplySuccess
-  | ExecuteExternalApplyFailure;
+  ExecuteExternalApplySuccess | ExecuteExternalApplyFailure;
 
 /**
  * Execute the two-phase external apply path for a single pending intent.
@@ -257,7 +256,7 @@ export type ExecuteExternalApplyResult =
  * when the call refuses early.
  */
 export async function executeExternalApply(
-  input: ExecuteExternalApplyInput
+  input: ExecuteExternalApplyInput,
 ): Promise<ExecuteExternalApplyResult> {
   const deps = input.deps ?? {};
   const env = input.env ?? {};
@@ -268,8 +267,7 @@ export async function executeExternalApply(
   const markAppliedFn =
     deps.markUpdateIntentApplied ?? markUpdateIntentAppliedFn;
   const loadPolicyFn = deps.loadPolicy ?? loadMomentumPolicyFn;
-  const buildLinearClient =
-    deps.buildLinearClient ?? defaultBuildLinearClient;
+  const buildLinearClient = deps.buildLinearClient ?? defaultBuildLinearClient;
   const buildLinearRefreshClient =
     deps.buildLinearRefreshClient ?? defaultBuildLinearRefreshClient;
   const updateReconcileFn =
@@ -285,7 +283,9 @@ export async function executeExternalApply(
     typeof input.operatorReason !== "string" ||
     input.operatorReason.trim().length === 0
   ) {
-    throw new Error("executeExternalApply requires a non-empty operatorReason.");
+    throw new Error(
+      "executeExternalApply requires a non-empty operatorReason.",
+    );
   }
 
   const intent = getUpdateIntentById(input.db, input.intentId);
@@ -301,9 +301,9 @@ export async function executeExternalApply(
         target: emptyTarget(),
         applyPolicy: {
           value: DEFAULT_INTENT_APPLY_POLICY,
-          source: "builtin_default"
-        }
-      }
+          source: "builtin_default",
+        },
+      },
     });
   }
 
@@ -317,8 +317,8 @@ export async function executeExternalApply(
       externalId: intent.targetExternalId,
       externalKey: null as string | null,
       url: null as string | null,
-      title: null as string | null
-    }
+      title: null as string | null,
+    },
   };
 
   if (intent.status !== "pending") {
@@ -330,15 +330,15 @@ export async function executeExternalApply(
         ...intentBaseContext,
         applyPolicy: {
           value: DEFAULT_INTENT_APPLY_POLICY,
-          source: "builtin_default"
-        }
-      }
+          source: "builtin_default",
+        },
+      },
     });
   }
 
   const policyResolution = resolvePolicy({
     repoPath: input.repoPath,
-    loadPolicyFn
+    loadPolicyFn,
   });
   if (!policyResolution.ok) {
     return earlyFailure({
@@ -347,8 +347,8 @@ export async function executeExternalApply(
       intent,
       contextBase: {
         ...intentBaseContext,
-        applyPolicy: policyResolution.applyPolicy
-      }
+        applyPolicy: policyResolution.applyPolicy,
+      },
     });
   }
 
@@ -359,8 +359,8 @@ export async function executeExternalApply(
       intent,
       contextBase: {
         ...intentBaseContext,
-        applyPolicy: policyResolution.applyPolicy
-      }
+        applyPolicy: policyResolution.applyPolicy,
+      },
     });
   }
 
@@ -373,19 +373,20 @@ export async function executeExternalApply(
       intent,
       contextBase: {
         ...intentBaseContext,
-        applyPolicy: policyResolution.applyPolicy
-      }
+        applyPolicy: policyResolution.applyPolicy,
+      },
     });
   }
 
-  const sourceItem = intent.sourceItemId
-    ? getSourceItemById(input.db, intent.sourceItemId)
+  const trackerItem = intent.trackerItemId
+    ? getTrackerItemById(input.db, intent.trackerItemId)
     : null;
   const evidenceRecord = intent.evidenceRecordId
     ? getEvidenceRecordById(input.db, intent.evidenceRecordId)
     : null;
 
-  const targetExternalId = intent.targetExternalId ?? sourceItem?.externalId ?? null;
+  const targetExternalId =
+    intent.targetExternalId ?? trackerItem?.externalId ?? null;
   if (typeof targetExternalId !== "string" || targetExternalId.length === 0) {
     return earlyFailure({
       code: "target_missing",
@@ -393,17 +394,17 @@ export async function executeExternalApply(
       intent,
       contextBase: {
         ...intentBaseContext,
-        applyPolicy: policyResolution.applyPolicy
-      }
+        applyPolicy: policyResolution.applyPolicy,
+      },
     });
   }
 
   const target: ExternalUpdateAdapterTarget = {
     adapterKind: intent.adapterKind,
     externalId: targetExternalId,
-    externalKey: sourceItem?.externalKey ?? null,
-    url: sourceItem?.url ?? null,
-    title: sourceItem?.title ?? null
+    externalKey: trackerItem?.externalKey ?? null,
+    url: trackerItem?.url ?? null,
+    title: trackerItem?.title ?? null,
   };
 
   const enrichedContextBase = {
@@ -413,8 +414,8 @@ export async function executeExternalApply(
       externalId: target.externalId,
       externalKey: target.externalKey,
       url: target.url,
-      title: target.title
-    }
+      title: target.title,
+    },
   };
 
   const authResult = checkAdapterAuth(adapter.kind, env);
@@ -425,14 +426,14 @@ export async function executeExternalApply(
       intent,
       contextBase: {
         ...enrichedContextBase,
-        applyPolicy: policyResolution.applyPolicy
-      }
+        applyPolicy: policyResolution.applyPolicy,
+      },
     });
   }
 
   const statusMutationResolution = resolveStatusMutationConfig({
     intent,
-    explicitStatusMutation: input.statusMutation ?? null
+    explicitStatusMutation: input.statusMutation ?? null,
   });
   if (!statusMutationResolution.ok) {
     return earlyFailure({
@@ -441,8 +442,8 @@ export async function executeExternalApply(
       intent,
       contextBase: {
         ...enrichedContextBase,
-        applyPolicy: policyResolution.applyPolicy
-      }
+        applyPolicy: policyResolution.applyPolicy,
+      },
     });
   }
 
@@ -451,20 +452,21 @@ export async function executeExternalApply(
   const adapterInput: ExternalUpdateAdapterInput = {
     intent,
     target,
-    sourceItem: sourceItem ?? null,
+    trackerItem: trackerItem ?? null,
     evidenceRecord: evidenceRecord ?? null,
     operator: {
       reason: input.operatorReason,
-      actor: input.operatorActor ?? null
+      actor: input.operatorActor ?? null,
     },
     policy: {
       intentApplyPolicy: policyResolution.applyPolicy.value,
-      allowStatusMutation
-    }
+      allowStatusMutation,
+    },
   };
 
-  const previewOptions: { adapters?: ReadonlyMap<string, ExternalUpdateAdapter> } =
-    deps.adapters ? { adapters: deps.adapters } : {};
+  const previewOptions: {
+    adapters?: ReadonlyMap<string, ExternalUpdateAdapter>;
+  } = deps.adapters ? { adapters: deps.adapters } : {};
   const previewResult = previewFn(adapterInput, previewOptions);
   if (!previewResult.ok) {
     return earlyFailure({
@@ -473,8 +475,8 @@ export async function executeExternalApply(
       intent,
       contextBase: {
         ...enrichedContextBase,
-        applyPolicy: policyResolution.applyPolicy
-      }
+        applyPolicy: policyResolution.applyPolicy,
+      },
     });
   }
   const preview = previewResult.preview;
@@ -487,7 +489,7 @@ export async function executeExternalApply(
       externalId: target.externalId,
       externalKey: target.externalKey,
       url: target.url,
-      title: target.title
+      title: target.title,
     },
     operatorReason: input.operatorReason,
     operatorActor: input.operatorActor ?? null,
@@ -496,7 +498,7 @@ export async function executeExternalApply(
     mutationKind: preview.mutationKind,
     previewSummary: preview.summary,
     idempotencyMarker: preview.idempotencyMarker,
-    now: now()
+    now: now(),
   });
 
   if (!claim.ok) {
@@ -514,8 +516,8 @@ export async function executeExternalApply(
         ...enrichedContextBase,
         applyPolicy: policyResolution.applyPolicy,
         mutationKind: preview.mutationKind,
-        allowStatusMutation
-      }
+        allowStatusMutation,
+      },
     });
   }
 
@@ -527,7 +529,7 @@ export async function executeExternalApply(
     : null;
   const applyInput: LinearExternalUpdateInput = {
     preview,
-    statusMutation
+    statusMutation,
   };
 
   let externalResult: LinearExternalUpdateResult;
@@ -542,7 +544,7 @@ export async function executeExternalApply(
       resultStatus: "failed",
       resultCode: "adapter_threw",
       resultMessage: message,
-      now: now()
+      now: now(),
     });
     if (!finalize.ok) {
       finalize = markIntentApplyAuditIncompleteFn(input.db, {
@@ -551,15 +553,16 @@ export async function executeExternalApply(
         resultMessage: `External apply client threw, then audit finalize failed: ${finalize.message}`,
         reconcile: {
           status: "deferred",
-          warning: "external write failed; audit finalize failed"
+          warning: "external write failed; audit finalize failed",
         },
-        now: now()
+        now: now(),
       });
     }
     return buildExternalFailure({
-      code: finalize.ok && finalize.audit.lifecycleState === "audit_incomplete"
-        ? "audit_incomplete"
-        : "adapter_threw",
+      code:
+        finalize.ok && finalize.audit.lifecycleState === "audit_incomplete"
+          ? "audit_incomplete"
+          : "adapter_threw",
       message:
         finalize.ok && finalize.audit.lifecycleState === "audit_incomplete"
           ? `External apply client threw and audit finalize failed for intent ${intent.id}; intent is blocked from further apply.`
@@ -572,8 +575,8 @@ export async function executeExternalApply(
         applyPolicy: policyResolution.applyPolicy,
         mutationKind: preview.mutationKind,
         allowStatusMutation,
-        idempotencyMarker: preview.idempotencyMarker
-      }
+        idempotencyMarker: preview.idempotencyMarker,
+      },
     });
   }
 
@@ -586,9 +589,9 @@ export async function executeExternalApply(
       resultMessage: externalResult.error,
       externalRefs: {
         commentId: externalResult.partial?.comment?.id ?? null,
-        commentUrl: externalResult.partial?.comment?.url ?? null
+        commentUrl: externalResult.partial?.comment?.url ?? null,
       },
-      now: now()
+      now: now(),
     });
     if (!finalize.ok) {
       finalize = markIntentApplyAuditIncompleteFn(input.db, {
@@ -598,19 +601,20 @@ export async function executeExternalApply(
         externalRefs: {
           commentId: externalResult.partial?.comment?.id ?? null,
           commentUrl: externalResult.partial?.comment?.url ?? null,
-          stateTransitionId: null
+          stateTransitionId: null,
         },
         reconcile: {
           status: "deferred",
-          warning: "external write failed; audit finalize failed"
+          warning: "external write failed; audit finalize failed",
         },
-        now: now()
+        now: now(),
       });
     }
     return buildExternalFailure({
-      code: finalize.ok && finalize.audit.lifecycleState === "audit_incomplete"
-        ? "audit_incomplete"
-        : mapLinearErrorCode(externalResult.code),
+      code:
+        finalize.ok && finalize.audit.lifecycleState === "audit_incomplete"
+          ? "audit_incomplete"
+          : mapLinearErrorCode(externalResult.code),
       message:
         finalize.ok && finalize.audit.lifecycleState === "audit_incomplete"
           ? `External write failed and audit finalize failed for intent ${intent.id}; intent is blocked from further apply.`
@@ -623,9 +627,12 @@ export async function executeExternalApply(
         applyPolicy: policyResolution.applyPolicy,
         mutationKind: preview.mutationKind,
         allowStatusMutation,
-        idempotencyMarker: preview.idempotencyMarker
+        idempotencyMarker: preview.idempotencyMarker,
       },
-      external: externalRefsFromError(externalResult, preview.idempotencyMarker)
+      external: externalRefsFromError(
+        externalResult,
+        preview.idempotencyMarker,
+      ),
     });
   }
 
@@ -637,18 +644,19 @@ export async function executeExternalApply(
     lifecycleState: "succeeded",
     resultStatus: "succeeded",
     resultCode: successResultCode,
-    resultMessage: successResultCode === "already_applied"
-      ? "External write already present; replay no-op."
-      : "External write succeeded.",
+    resultMessage:
+      successResultCode === "already_applied"
+        ? "External write already present; replay no-op."
+        : "External write succeeded.",
     externalRefs: {
       commentId: externalResult.comment.id,
       commentUrl: externalResult.comment.url,
       stateTransitionId: externalResult.status.transitioned
         ? externalResult.status.nextStateId
-        : null
+        : null,
     },
     reconcile: pendingReconcile(),
-    now: now()
+    now: now(),
   });
 
   if (!finalizeSucceeded.ok) {
@@ -665,13 +673,13 @@ export async function executeExternalApply(
         commentUrl: externalResult.comment.url,
         stateTransitionId: externalResult.status.transitioned
           ? externalResult.status.nextStateId
-          : null
+          : null,
       },
       reconcile: {
         status: "deferred",
-        warning: "external write applied; audit finalize failed"
+        warning: "external write applied; audit finalize failed",
       },
-      now: now()
+      now: now(),
     });
 
     return buildExternalFailure({
@@ -690,10 +698,10 @@ export async function executeExternalApply(
         idempotencyMarker: preview.idempotencyMarker,
         reconcileOverride: {
           status: "deferred",
-          warning: "external write applied; audit finalize failed"
-        }
+          warning: "external write applied; audit finalize failed",
+        },
       },
-      external: externalSummary(externalResult)
+      external: externalSummary(externalResult),
     });
   }
 
@@ -704,7 +712,7 @@ export async function executeExternalApply(
   const markApplied = markAppliedFn(input.db, {
     intentId: intent.id,
     decisionReason,
-    now: now()
+    now: now(),
   });
 
   if (!markApplied.ok) {
@@ -722,7 +730,7 @@ export async function executeExternalApply(
         idempotencyMarker: preview.idempotencyMarker,
         refreshClient,
         updateReconcileFn,
-        now
+        now,
       });
       return buildExternalSuccess({
         intent: currentIntent,
@@ -733,7 +741,7 @@ export async function executeExternalApply(
         preview,
         audit: reconciled.audit,
         externalResult,
-        reconcile: reconciled.reconcile
+        reconcile: reconciled.reconcile,
       });
     }
     const incomplete = markIntentApplyAuditIncompleteFn(input.db, {
@@ -745,13 +753,13 @@ export async function executeExternalApply(
         commentUrl: externalResult.comment.url,
         stateTransitionId: externalResult.status.transitioned
           ? externalResult.status.nextStateId
-          : null
+          : null,
       },
       reconcile: {
         status: "deferred",
-        warning: "external write applied; intent transition failed"
+        warning: "external write applied; intent transition failed",
       },
-      now: now()
+      now: now(),
     });
     return buildExternalFailure({
       code: "audit_incomplete",
@@ -767,10 +775,10 @@ export async function executeExternalApply(
         idempotencyMarker: preview.idempotencyMarker,
         reconcileOverride: {
           status: "deferred",
-          warning: "external write applied; intent transition failed"
-        }
+          warning: "external write applied; intent transition failed",
+        },
       },
-      external: externalSummary(externalResult)
+      external: externalSummary(externalResult),
     });
   }
 
@@ -782,7 +790,7 @@ export async function executeExternalApply(
     idempotencyMarker: preview.idempotencyMarker,
     refreshClient,
     updateReconcileFn,
-    now
+    now,
   });
 
   const successContext: ExecuteExternalApplyContext = {
@@ -795,13 +803,13 @@ export async function executeExternalApply(
       externalId: target.externalId,
       externalKey: target.externalKey,
       url: target.url,
-      title: target.title
+      title: target.title,
     },
     applyPolicy: policyResolution.applyPolicy,
     allowStatusMutation,
     mutationKind: preview.mutationKind,
     auditId: reconciled.audit.id,
-    reconcile: reconciled.reconcile
+    reconcile: reconciled.reconcile,
   };
 
   return {
@@ -810,7 +818,7 @@ export async function executeExternalApply(
     context: successContext,
     intent: markApplied.intent,
     audit: reconciled.audit,
-    external: externalSummary(externalResult)
+    external: externalSummary(externalResult),
   };
 }
 
@@ -836,14 +844,14 @@ function resolveStatusMutationConfig(input: {
     return {
       ok: false,
       message:
-        'Linear status_update payload requires a non-empty "state" or "stateId".'
+        'Linear status_update payload requires a non-empty "state" or "stateId".',
     };
   }
   if (stateName !== null && stateId !== null) {
     return {
       ok: false,
       message:
-        'Linear status_update payload must not include both "state" and "stateId".'
+        'Linear status_update payload must not include both "state" and "stateId".',
     };
   }
   if (stateId !== null) {
@@ -851,7 +859,7 @@ function resolveStatusMutationConfig(input: {
   }
   return {
     ok: true,
-    statusMutation: { kind: "by_name", stateName: stateName as string }
+    statusMutation: { kind: "by_name", stateName: stateName as string },
   };
 }
 
@@ -876,13 +884,13 @@ function buildExternalSuccess(args: {
       externalId: args.target.externalId,
       externalKey: args.target.externalKey,
       url: args.target.url,
-      title: args.target.title
+      title: args.target.title,
     },
     applyPolicy: args.policyResolution.applyPolicy,
     allowStatusMutation: args.allowStatusMutation,
     mutationKind: args.preview.mutationKind,
     auditId: args.audit.id,
-    reconcile: args.reconcile ?? pendingReconcile()
+    reconcile: args.reconcile ?? pendingReconcile(),
   };
 
   return {
@@ -891,7 +899,7 @@ function buildExternalSuccess(args: {
     context: successContext,
     intent: args.intent,
     audit: args.audit,
-    external: externalSummary(args.externalResult)
+    external: externalSummary(args.externalResult),
   };
 }
 
@@ -904,10 +912,13 @@ async function reconcileSuccessfulExternalApply(args: {
   refreshClient: LinearIssueRefreshClient | null;
   updateReconcileFn: (
     db: MomentumDb,
-    input: UpdateIntentApplyAuditReconcileInput
+    input: UpdateIntentApplyAuditReconcileInput,
   ) => UpdateIntentApplyAuditReconcileResult;
   now: () => number;
-}): Promise<{ audit: IntentApplyAudit; reconcile: ExecuteExternalApplyReconcile }> {
+}): Promise<{
+  audit: IntentApplyAudit;
+  reconcile: ExecuteExternalApplyReconcile;
+}> {
   const outcome = await reconcileAfterExternalApply({
     db: args.db,
     adapterKind: args.adapter.kind,
@@ -916,18 +927,18 @@ async function reconcileSuccessfulExternalApply(args: {
     url: args.target.url,
     idempotencyMarker: args.idempotencyMarker,
     client: args.refreshClient,
-    now: args.now
+    now: args.now,
   });
   const reconcile: IntentApplyAuditReconcile = {
     status: outcome.code,
-    warning: outcome.code === "success" ? null : outcome.detail
+    warning: outcome.code === "success" ? null : outcome.detail,
   };
   let updated: UpdateIntentApplyAuditReconcileResult;
   try {
     updated = args.updateReconcileFn(args.db, {
       auditId: args.audit.id,
       reconcile,
-      now: args.now()
+      now: args.now(),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -935,8 +946,8 @@ async function reconcileSuccessfulExternalApply(args: {
       audit: args.audit,
       reconcile: {
         status: "post_apply_reconcile_failed",
-        warning: `Post-apply reconcile completed with ${outcome.code}, but audit reconcile update threw: ${message}`
-      }
+        warning: `Post-apply reconcile completed with ${outcome.code}, but audit reconcile update threw: ${message}`,
+      },
     };
   }
   if (!updated.ok) {
@@ -944,16 +955,16 @@ async function reconcileSuccessfulExternalApply(args: {
       audit: args.audit,
       reconcile: {
         status: "post_apply_reconcile_failed",
-        warning: `Post-apply reconcile completed with ${outcome.code}, but audit reconcile update failed: ${updated.message}`
-      }
+        warning: `Post-apply reconcile completed with ${outcome.code}, but audit reconcile update failed: ${updated.message}`,
+      },
     };
   }
   return {
     audit: updated.audit,
     reconcile: {
       status: reconcile.status as ExecuteExternalApplyReconcile["status"],
-      warning: reconcile.warning
-    }
+      warning: reconcile.warning,
+    },
   };
 }
 
@@ -962,34 +973,34 @@ function pendingReconcile(): ExecuteExternalApplyReconcile {
 }
 
 export function defaultBuildLinearClient(
-  env: ExecuteExternalApplyEnv
+  env: ExecuteExternalApplyEnv,
 ): LinearExternalUpdateClient {
   const endpointOverride = readEndpointOverride(
     env,
-    LINEAR_EXTERNAL_UPDATE_ENDPOINT_ENV_VAR
+    LINEAR_EXTERNAL_UPDATE_ENDPOINT_ENV_VAR,
   );
   const options: {
     apiKey: string | null;
     endpoint?: string;
   } = {
-    apiKey: env[LINEAR_API_KEY_ENV_VAR] ?? null
+    apiKey: env[LINEAR_API_KEY_ENV_VAR] ?? null,
   };
   if (endpointOverride !== null) options.endpoint = endpointOverride;
   return buildLinearExternalUpdateClient(options);
 }
 
 export function defaultBuildLinearRefreshClient(
-  env: ExecuteExternalApplyEnv
+  env: ExecuteExternalApplyEnv,
 ): LinearIssueRefreshClient {
   const endpointOverride = readEndpointOverride(
     env,
-    LINEAR_REFRESH_ENDPOINT_ENV_VAR
+    LINEAR_REFRESH_ENDPOINT_ENV_VAR,
   );
   const options: {
     apiKey: string | null;
     endpoint?: string;
   } = {
-    apiKey: env[LINEAR_API_KEY_ENV_VAR] ?? null
+    apiKey: env[LINEAR_API_KEY_ENV_VAR] ?? null,
   };
   if (endpointOverride !== null) options.endpoint = endpointOverride;
   return buildLinearIssueRefreshClient(options);
@@ -997,7 +1008,7 @@ export function defaultBuildLinearRefreshClient(
 
 function readEndpointOverride(
   env: ExecuteExternalApplyEnv,
-  name: string
+  name: string,
 ): string | null {
   const raw = env[name];
   if (typeof raw !== "string") return null;
@@ -1013,14 +1024,14 @@ function optionalNonEmptyString(value: unknown): string | null {
 
 function checkAdapterAuth(
   adapterKind: string,
-  env: ExecuteExternalApplyEnv
+  env: ExecuteExternalApplyEnv,
 ): { ok: true } | { ok: false; message: string } {
   if (adapterKind === "linear") {
     const preflight = preflightLinearExternalApplyAuth({ env });
     if (!preflight.ok) {
       return {
         ok: false,
-        message: `${preflight.message} ${preflight.action}`
+        message: `${preflight.message} ${preflight.action}`,
       };
     }
     return { ok: true };
@@ -1053,8 +1064,8 @@ function resolvePolicy(args: {
         "External apply requires a repo context with MOMENTUM.md; pass --repo or run inside a configured repo.",
       applyPolicy: {
         value: DEFAULT_INTENT_APPLY_POLICY,
-        source: "missing_repo"
-      }
+        source: "missing_repo",
+      },
     };
   }
   const loadResult = loadPolicyFn(repoPath);
@@ -1065,8 +1076,8 @@ function resolvePolicy(args: {
       message: `Failed to load MOMENTUM.md: ${loadResult.error}`,
       applyPolicy: {
         value: DEFAULT_INTENT_APPLY_POLICY,
-        source: "builtin_default"
-      }
+        source: "builtin_default",
+      },
     };
   }
   if (loadResult.present === false) {
@@ -1074,8 +1085,8 @@ function resolvePolicy(args: {
       ok: true,
       applyPolicy: {
         value: DEFAULT_INTENT_APPLY_POLICY,
-        source: "builtin_default"
-      }
+        source: "builtin_default",
+      },
     };
   }
   const resolved = resolveIntentApplyPolicy(loadResult.policy.config);
@@ -1083,30 +1094,33 @@ function resolvePolicy(args: {
     ok: true,
     applyPolicy: {
       value: resolved.value,
-      source: resolved.source
-    }
+      source: resolved.source,
+    },
   };
 }
 
 function identifyUnsupportedReason(
   intent: UpdateIntent,
-  adapters: ReadonlyMap<string, ExternalUpdateAdapter> | undefined
-): { code: "unsupported_adapter" | "unsupported_intent_type"; message: string } {
+  adapters: ReadonlyMap<string, ExternalUpdateAdapter> | undefined,
+): {
+  code: "unsupported_adapter" | "unsupported_intent_type";
+  message: string;
+} {
   const adapter = getExternalUpdateAdapter(intent.adapterKind, adapters);
   if (!adapter) {
     return {
       code: "unsupported_adapter",
-      message: `External update adapter "${intent.adapterKind}" is not supported for external apply.`
+      message: `External update adapter "${intent.adapterKind}" is not supported for external apply.`,
     };
   }
   return {
     code: "unsupported_intent_type",
-    message: `External update adapter "${intent.adapterKind}" does not support intent type "${intent.intentType}".`
+    message: `External update adapter "${intent.adapterKind}" does not support intent type "${intent.intentType}".`,
   };
 }
 
 function mapAdapterErrorCode(
-  error: ExternalUpdateAdapterError
+  error: ExternalUpdateAdapterError,
 ): ExecuteExternalApplyErrorCode {
   switch (error.code) {
     case "unsupported_adapter":
@@ -1137,7 +1151,7 @@ function mapAdapterErrorCode(
 }
 
 function mapLinearErrorCode(
-  code: LinearExternalUpdateResultCode
+  code: LinearExternalUpdateResultCode,
 ): ExecuteExternalApplyErrorCode {
   switch (code) {
     case "auth_unavailable":
@@ -1169,7 +1183,7 @@ function emptyTarget(): ExecuteExternalApplyTarget {
     externalId: null,
     externalKey: null,
     url: null,
-    title: null
+    title: null,
   };
 }
 
@@ -1204,8 +1218,8 @@ function earlyFailure(args: {
     auditId: null,
     reconcile: args.contextBase.reconcileOverride ?? {
       status: null,
-      warning: null
-    }
+      warning: null,
+    },
   };
   return {
     ok: false,
@@ -1214,7 +1228,7 @@ function earlyFailure(args: {
     context,
     intent: args.intent ?? null,
     audit: null,
-    external: null
+    external: null,
   };
 }
 
@@ -1240,8 +1254,8 @@ function buildExternalFailure(args: {
     auditId: resolvedAudit.id,
     reconcile: args.contextBase.reconcileOverride ?? {
       status: null,
-      warning: null
-    }
+      warning: null,
+    },
   };
   return {
     ok: false,
@@ -1250,12 +1264,12 @@ function buildExternalFailure(args: {
     context,
     intent: args.intent,
     audit: resolvedAudit,
-    external: args.external ?? null
+    external: args.external ?? null,
   };
 }
 
 function externalSummary(
-  result: LinearExternalUpdateResult & { ok: true }
+  result: LinearExternalUpdateResult & { ok: true },
 ): ExecuteExternalApplyExternalResult {
   return {
     alreadyApplied: result.alreadyApplied,
@@ -1267,12 +1281,12 @@ function externalSummary(
     statusTransitioned: result.status.transitioned,
     nextStateId: result.status.nextStateId,
     nextStateName: result.status.nextStateName,
-    idempotencyMarker: result.idempotencyMarker
+    idempotencyMarker: result.idempotencyMarker,
   };
 }
 
 function externalApplyResultCode(
-  result: LinearExternalUpdateResult & { ok: true }
+  result: LinearExternalUpdateResult & { ok: true },
 ): ExecuteExternalApplySuccess["resultCode"] {
   return result.alreadyApplied && !result.status.transitioned
     ? "already_applied"
@@ -1281,7 +1295,7 @@ function externalApplyResultCode(
 
 function externalRefsFromError(
   error: LinearExternalUpdateError,
-  idempotencyMarker: string
+  idempotencyMarker: string,
 ): ExecuteExternalApplyExternalResult | null {
   if (!error.partial) return null;
   return {
@@ -1294,6 +1308,6 @@ function externalRefsFromError(
     statusTransitioned: false,
     nextStateId: null,
     nextStateName: null,
-    idempotencyMarker
+    idempotencyMarker,
   };
 }

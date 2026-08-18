@@ -279,7 +279,7 @@ function makeIntent(): UpdateIntent {
     payload: { kind: "comment" },
     reason: "test intent",
     goalId: null,
-    sourceItemId: null,
+    trackerItemId: null,
     evidenceRecordId: null,
     status: "applied",
     idempotencyKey: "idem-1",

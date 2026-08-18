@@ -6,32 +6,43 @@ import {
   listEvidenceRecords,
   type EvidenceRecord,
   type EvidenceRecordIngestInput,
-  type ListEvidenceRecordsOptions
+  type ListEvidenceRecordsOptions,
 } from "../../core/evidence/records.js";
 import { parseWorkflowArtifact } from "../../core/evidence/workflow.js";
-import { getSourceItemById } from "../../core/source/items.js";
+import { getTrackerItemById } from "../../core/tracker/items.js";
 import {
   emitEvidenceIngestFailure,
   emitEvidenceIngestSuccess,
   emitEvidenceList,
-  emitEvidenceListFailure
+  emitEvidenceListFailure,
 } from "../../renderers/evidence.js";
 import {
-  evaluateGoalForSourceSatisfiedIntents,
-  type EvaluateGoalForSourceSatisfiedIntentResult
-} from "../../core/source/update-intent-generator.js";
+  evaluateGoalForTrackerSatisfiedIntents,
+  type EvaluateGoalForTrackerSatisfiedIntentResult,
+} from "../../core/tracker/update-intent-generator.js";
 
 type ParsedFlags = {
-  args: string[]; json: boolean; dataDir?: string; goal?: string; path?: string; sourceItem?: string; source?: string; evidenceType?: string; limit?: number;
+  args: string[];
+  json: boolean;
+  dataDir?: string;
+  goal?: string;
+  path?: string;
+  trackerItem?: string;
+  source?: string;
+  evidenceType?: string;
+  limit?: number;
 };
 
-export function evidence(parsed: ParsedFlags, io: CliIo): number | Promise<number> {
+export function evidence(
+  parsed: ParsedFlags,
+  io: CliIo,
+): number | Promise<number> {
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
       "Missing required subcommand for evidence. Expected: ingest, list.",
       parsed,
-      io
+      io,
     );
   }
   if (subcommand === "ingest") {
@@ -48,13 +59,13 @@ function evidenceIngest(parsed: ParsedFlags, io: CliIo): number {
     return usageError(
       `Unexpected argument for evidence ingest: ${parsed.args[2]}`,
       parsed,
-      io
+      io,
     );
   }
   if (parsed.path === undefined || parsed.path.length === 0) {
     return emitEvidenceIngestFailure(parsed, io, {
       code: "path_required",
-      message: "Missing required --path <file-or-dir> for evidence ingest."
+      message: "Missing required --path <file-or-dir> for evidence ingest.",
     });
   }
   const artifactPath = parsed.path;
@@ -70,7 +81,7 @@ function evidenceIngest(parsed: ParsedFlags, io: CliIo): number {
     return emitEvidenceIngestFailure(parsed, io, {
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
-      path: artifactPath
+      path: artifactPath,
     });
   }
 
@@ -78,8 +89,8 @@ function evidenceIngest(parsed: ParsedFlags, io: CliIo): number {
   if (parsed.goal !== undefined && parsed.goal.length > 0) {
     parseOptions.goalId = parsed.goal;
   }
-  if (parsed.sourceItem !== undefined && parsed.sourceItem.length > 0) {
-    parseOptions.sourceItemId = parsed.sourceItem;
+  if (parsed.trackerItem !== undefined && parsed.trackerItem.length > 0) {
+    parseOptions.trackerItemId = parsed.trackerItem;
   }
 
   const db = openDb(dataDir);
@@ -94,24 +105,24 @@ function evidenceIngest(parsed: ParsedFlags, io: CliIo): number {
           message: `Goal not found: ${parseOptions.goalId}`,
           dataDir,
           goalId: parseOptions.goalId,
-          path: artifactPath
+          path: artifactPath,
         });
       }
     }
     if (
-      parseOptions.sourceItemId !== undefined &&
-      parseOptions.sourceItemId !== null
+      parseOptions.trackerItemId !== undefined &&
+      parseOptions.trackerItemId !== null
     ) {
       const itemRow = db
-        .prepare("SELECT id FROM source_items WHERE id = ?")
-        .get(parseOptions.sourceItemId) as { id: string } | undefined;
+        .prepare("SELECT id FROM tracker_items WHERE id = ?")
+        .get(parseOptions.trackerItemId) as { id: string } | undefined;
       if (!itemRow) {
         return emitEvidenceIngestFailure(parsed, io, {
-          code: "source_item_not_found",
-          message: `Source item not found: ${parseOptions.sourceItemId}`,
+          code: "tracker_item_not_found",
+          message: `Tracker item not found: ${parseOptions.trackerItemId}`,
           dataDir,
-          sourceItemId: parseOptions.sourceItemId,
-          path: artifactPath
+          trackerItemId: parseOptions.trackerItemId,
+          path: artifactPath,
         });
       }
     }
@@ -127,7 +138,10 @@ function evidenceIngest(parsed: ParsedFlags, io: CliIo): number {
 
     for (const input of parseResult.records) {
       try {
-        const result = ingestEvidenceRecord(db, input as EvidenceRecordIngestInput);
+        const result = ingestEvidenceRecord(
+          db,
+          input as EvidenceRecordIngestInput,
+        );
         if (result.created) {
           created.push(result.record);
         } else {
@@ -137,26 +151,26 @@ function evidenceIngest(parsed: ParsedFlags, io: CliIo): number {
         errors.push({
           ingestKey: input.ingestKey,
           type: input.type,
-          message: err instanceof Error ? err.message : String(err)
+          message: err instanceof Error ? err.message : String(err),
         });
       }
     }
     const intentEvaluations = evaluateIntentsForEvidenceRecords(db, [
       ...created,
-      ...skipped
+      ...skipped,
     ]);
 
     return emitEvidenceIngestSuccess(parsed, io, {
       dataDir,
       artifactPath,
       goalId: parseOptions.goalId ?? null,
-      sourceItemId: parseOptions.sourceItemId ?? null,
+      trackerItemId: parseOptions.trackerItemId ?? null,
       observed: parseResult.records.length,
       created,
       skipped,
       intentEvaluations,
       diagnostics: parseResult.diagnostics,
-      errors
+      errors,
     });
   } finally {
     db.close();
@@ -165,23 +179,23 @@ function evidenceIngest(parsed: ParsedFlags, io: CliIo): number {
 
 function evaluateIntentsForEvidenceRecords(
   db: MomentumDb,
-  records: readonly EvidenceRecord[]
-): EvaluateGoalForSourceSatisfiedIntentResult[] {
+  records: readonly EvidenceRecord[],
+): EvaluateGoalForTrackerSatisfiedIntentResult[] {
   const goalIds = new Set<string>();
   for (const record of records) {
     if (record.goalId) {
       goalIds.add(record.goalId);
       continue;
     }
-    if (record.sourceItemId) {
-      const sourceItem = getSourceItemById(db, record.sourceItemId);
-      if (sourceItem?.goalId) goalIds.add(sourceItem.goalId);
+    if (record.trackerItemId) {
+      const trackerItem = getTrackerItemById(db, record.trackerItemId);
+      if (trackerItem?.goalId) goalIds.add(trackerItem.goalId);
     }
   }
   return [...goalIds]
     .sort()
     .flatMap((goalId) =>
-      evaluateGoalForSourceSatisfiedIntents(db, { goalId })
+      evaluateGoalForTrackerSatisfiedIntents(db, { goalId }),
     );
 }
 
@@ -190,7 +204,7 @@ function evidenceList(parsed: ParsedFlags, io: CliIo): number {
     return usageError(
       `Unexpected argument for evidence list: ${parsed.args[2]}`,
       parsed,
-      io
+      io,
     );
   }
 
@@ -204,7 +218,7 @@ function evidenceList(parsed: ParsedFlags, io: CliIo): number {
   } catch (err) {
     return emitEvidenceListFailure(parsed, io, {
       code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err)
+      message: err instanceof Error ? err.message : String(err),
     });
   }
 
@@ -212,8 +226,8 @@ function evidenceList(parsed: ParsedFlags, io: CliIo): number {
   if (parsed.goal !== undefined && parsed.goal.length > 0) {
     filters.goalId = parsed.goal;
   }
-  if (parsed.sourceItem !== undefined && parsed.sourceItem.length > 0) {
-    filters.sourceItemId = parsed.sourceItem;
+  if (parsed.trackerItem !== undefined && parsed.trackerItem.length > 0) {
+    filters.trackerItemId = parsed.trackerItem;
   }
   if (parsed.source !== undefined && parsed.source.length > 0) {
     filters.source = parsed.source;
@@ -237,20 +251,20 @@ function evidenceList(parsed: ParsedFlags, io: CliIo): number {
           code: "goal_not_found",
           message: `Goal not found: ${filters.goalId}`,
           dataDir,
-          goalId: filters.goalId
+          goalId: filters.goalId,
         });
       }
     }
-    if (filters.sourceItemId !== undefined && filters.sourceItemId !== null) {
+    if (filters.trackerItemId !== undefined && filters.trackerItemId !== null) {
       const itemRow = db
-        .prepare("SELECT id FROM source_items WHERE id = ?")
-        .get(filters.sourceItemId) as { id: string } | undefined;
+        .prepare("SELECT id FROM tracker_items WHERE id = ?")
+        .get(filters.trackerItemId) as { id: string } | undefined;
       if (!itemRow) {
         return emitEvidenceListFailure(parsed, io, {
-          code: "source_item_not_found",
-          message: `Source item not found: ${filters.sourceItemId}`,
+          code: "tracker_item_not_found",
+          message: `Tracker item not found: ${filters.trackerItemId}`,
           dataDir,
-          sourceItemId: filters.sourceItemId
+          trackerItemId: filters.trackerItemId,
         });
       }
     }

@@ -12,7 +12,7 @@ import {
   listUpdateIntents,
   markUpdateIntentApplied,
   markUpdateIntentSkipped,
-  type CreateUpdateIntentInput
+  type CreateUpdateIntentInput,
 } from "../src/core/intent/update-intents.js";
 
 const tempRoots: string[] = [];
@@ -31,7 +31,7 @@ function makeTempDir(prefix = "momentum-update-intents-"): string {
 }
 
 function baseInput(
-  overrides: Partial<CreateUpdateIntentInput> = {}
+  overrides: Partial<CreateUpdateIntentInput> = {},
 ): CreateUpdateIntentInput {
   return {
     adapterKind: "linear",
@@ -39,9 +39,8 @@ function baseInput(
     intentType: "source_satisfied",
     payload: { status: "Done", note: "verified" },
     reason: "Goal completed with verification evidence.",
-    idempotencyKey:
-      "linear:NGX-test:source_satisfied:goal-test:evidence-test",
-    ...overrides
+    idempotencyKey: "linear:NGX-test:source_satisfied:goal-test:evidence-test",
+    ...overrides,
   };
 }
 
@@ -49,30 +48,30 @@ function insertGoal(db: MomentumDb, id: string): void {
   db.prepare(
     `INSERT INTO goals
        (id, title, branch, artifact_dir, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(id, `Goal ${id}`, `momentum/${id}`, `/tmp/${id}`, 1, 1);
 }
 
-function insertSourceItem(db: MomentumDb, id: string): void {
+function insertTrackerItem(db: MomentumDb, id: string): void {
   db.prepare(
-    `INSERT INTO source_items
+    `INSERT INTO tracker_items
        (id, adapter_kind, external_id, external_key, url, title,
         status, metadata_json, last_observed_at, goal_id,
         created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     "linear",
     `ext-${id}`,
     id,
     `https://linear.app/example/issue/${id}`,
-    `SourceItem ${id}`,
+    `TrackerItem ${id}`,
     "open",
     "{}",
     1,
     null,
     1,
-    1
+    1,
   );
 }
 
@@ -80,9 +79,9 @@ function insertEvidenceRecord(db: MomentumDb, id: string): void {
   db.prepare(
     `INSERT INTO evidence_records
        (id, source, type, format_version, artifact_path, external_id,
-        occurred_at, summary, metadata_json, goal_id, source_item_id,
+        occurred_at, summary, metadata_json, goal_id, tracker_item_id,
         ingest_key, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     "agent-workflow",
@@ -97,7 +96,7 @@ function insertEvidenceRecord(db: MomentumDb, id: string): void {
     null,
     `ingest:${id}`,
     1,
-    1
+    1,
   );
 }
 
@@ -113,14 +112,14 @@ describe("update intent storage", () => {
       expect(result.intent.intentType).toBe("source_satisfied");
       expect(result.intent.payload).toEqual({
         status: "Done",
-        note: "verified"
+        note: "verified",
       });
       expect(result.intent.reason).toBe(
-        "Goal completed with verification evidence."
+        "Goal completed with verification evidence.",
       );
       expect(result.intent.status).toBe("pending");
       expect(result.intent.idempotencyKey).toBe(
-        "linear:NGX-test:source_satisfied:goal-test:evidence-test"
+        "linear:NGX-test:source_satisfied:goal-test:evidence-test",
       );
       expect(result.intent.decisionReason).toBeNull();
       expect(result.intent.errorCode).toBeNull();
@@ -129,7 +128,7 @@ describe("update intent storage", () => {
       expect(result.intent.skippedAt).toBeNull();
       expect(result.intent.canceledAt).toBeNull();
       expect(result.intent.goalId).toBeNull();
-      expect(result.intent.sourceItemId).toBeNull();
+      expect(result.intent.trackerItemId).toBeNull();
       expect(result.intent.evidenceRecordId).toBeNull();
       expect(result.intent.createdAt).toBe(5000);
       expect(result.intent.updatedAt).toBe(5000);
@@ -137,31 +136,31 @@ describe("update intent storage", () => {
 
       expect(getUpdateIntentById(db, result.intent.id)).toEqual(result.intent);
       expect(
-        getUpdateIntentByIdempotencyKey(db, result.intent.idempotencyKey)
+        getUpdateIntentByIdempotencyKey(db, result.intent.idempotencyKey),
       ).toEqual(result.intent);
     } finally {
       db.close();
     }
   });
 
-  it("links optional goal/source-item/evidence ids and round-trips empty payload as {}", () => {
+  it("links optional goal/tracker-item/evidence ids and round-trips empty payload as {}", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-A");
-      insertSourceItem(db, "si-A");
+      insertTrackerItem(db, "si-A");
       insertEvidenceRecord(db, "evidence_record_A");
 
       const input = baseInput({
         goalId: "goal-A",
-        sourceItemId: "si-A",
-        evidenceRecordId: "evidence_record_A"
+        trackerItemId: "si-A",
+        evidenceRecordId: "evidence_record_A",
       });
       delete input.payload;
       const result = createUpdateIntent(db, input, { now: () => 1234 });
 
       expect(result.intent.payload).toEqual({});
       expect(result.intent.goalId).toBe("goal-A");
-      expect(result.intent.sourceItemId).toBe("si-A");
+      expect(result.intent.trackerItemId).toBe("si-A");
       expect(result.intent.evidenceRecordId).toBe("evidence_record_A");
     } finally {
       db.close();
@@ -176,9 +175,9 @@ describe("update intent storage", () => {
         db,
         baseInput({
           reason: "Different reason on replay",
-          payload: { status: "Done", note: "different" }
+          payload: { status: "Done", note: "different" },
         }),
-        { now: () => 6000 }
+        { now: () => 6000 },
       );
 
       expect(replay.created).toBe(false);
@@ -193,16 +192,16 @@ describe("update intent storage", () => {
     const db = openDb(makeTempDir());
     try {
       expect(() =>
-        createUpdateIntent(db, baseInput({ adapterKind: "" }))
+        createUpdateIntent(db, baseInput({ adapterKind: "" })),
       ).toThrowError(/adapterKind/);
       expect(() =>
-        createUpdateIntent(db, baseInput({ intentType: "" }))
+        createUpdateIntent(db, baseInput({ intentType: "" })),
       ).toThrowError(/intentType/);
       expect(() =>
-        createUpdateIntent(db, baseInput({ reason: "" }))
+        createUpdateIntent(db, baseInput({ reason: "" })),
       ).toThrowError(/reason/);
       expect(() =>
-        createUpdateIntent(db, baseInput({ idempotencyKey: "" }))
+        createUpdateIntent(db, baseInput({ idempotencyKey: "" })),
       ).toThrowError(/idempotencyKey/);
     } finally {
       db.close();
@@ -220,13 +219,13 @@ describe("update intent storage", () => {
   });
 
   describe("listUpdateIntents", () => {
-    it("orders by created_at ASC and filters by status/goal/source-item/adapter/intent_type", () => {
+    it("orders by created_at ASC and filters by status/goal/tracker-item/adapter/intent_type", () => {
       const db = openDb(makeTempDir());
       try {
         insertGoal(db, "goal-x");
         insertGoal(db, "goal-y");
-        insertSourceItem(db, "si-x");
-        insertSourceItem(db, "si-y");
+        insertTrackerItem(db, "si-x");
+        insertTrackerItem(db, "si-y");
 
         const a = createUpdateIntent(
           db,
@@ -235,9 +234,9 @@ describe("update intent storage", () => {
             targetExternalId: "NGX-A",
             intentType: "source_satisfied",
             goalId: "goal-x",
-            sourceItemId: "si-x"
+            trackerItemId: "si-x",
           }),
-          { now: () => 100 }
+          { now: () => 100 },
         );
         const b = createUpdateIntent(
           db,
@@ -246,9 +245,9 @@ describe("update intent storage", () => {
             targetExternalId: "NGX-B",
             intentType: "comment_requested",
             goalId: "goal-y",
-            sourceItemId: "si-y"
+            trackerItemId: "si-y",
           }),
-          { now: () => 200 }
+          { now: () => 200 },
         );
         const c = createUpdateIntent(
           db,
@@ -258,42 +257,43 @@ describe("update intent storage", () => {
             targetExternalId: "pr-1",
             intentType: "source_satisfied",
             goalId: null,
-            sourceItemId: null
+            trackerItemId: null,
           }),
-          { now: () => 300 }
+          { now: () => 300 },
         );
 
         expect(listUpdateIntents(db).map((i) => i.id)).toEqual([
           a.intent.id,
           b.intent.id,
-          c.intent.id
+          c.intent.id,
         ]);
         expect(
-          listUpdateIntents(db, { adapterKind: "linear" }).map((i) => i.id)
+          listUpdateIntents(db, { adapterKind: "linear" }).map((i) => i.id),
         ).toEqual([a.intent.id, b.intent.id]);
         expect(
           listUpdateIntents(db, { intentType: "source_satisfied" }).map(
-            (i) => i.id
-          )
+            (i) => i.id,
+          ),
         ).toEqual([a.intent.id, c.intent.id]);
         expect(
-          listUpdateIntents(db, { goalId: "goal-x" }).map((i) => i.id)
+          listUpdateIntents(db, { goalId: "goal-x" }).map((i) => i.id),
         ).toEqual([a.intent.id]);
         expect(
-          listUpdateIntents(db, { goalId: null }).map((i) => i.id)
+          listUpdateIntents(db, { goalId: null }).map((i) => i.id),
         ).toEqual([c.intent.id]);
         expect(
-          listUpdateIntents(db, { sourceItemId: "si-y" }).map((i) => i.id)
+          listUpdateIntents(db, { trackerItemId: "si-y" }).map((i) => i.id),
         ).toEqual([b.intent.id]);
         expect(
-          listUpdateIntents(db, { status: "pending" }).map((i) => i.id)
+          listUpdateIntents(db, { status: "pending" }).map((i) => i.id),
         ).toEqual([a.intent.id, b.intent.id, c.intent.id]);
         expect(
-          listUpdateIntents(db, { status: "applied" }).map((i) => i.id)
+          listUpdateIntents(db, { status: "applied" }).map((i) => i.id),
         ).toEqual([]);
-        expect(
-          listUpdateIntents(db, { limit: 2 }).map((i) => i.id)
-        ).toEqual([a.intent.id, b.intent.id]);
+        expect(listUpdateIntents(db, { limit: 2 }).map((i) => i.id)).toEqual([
+          a.intent.id,
+          b.intent.id,
+        ]);
       } finally {
         db.close();
       }
@@ -307,26 +307,26 @@ describe("update intent storage", () => {
           db,
           baseInput({
             idempotencyKey: "with-evidence",
-            evidenceRecordId: "evidence_record_link"
+            evidenceRecordId: "evidence_record_link",
           }),
-          { now: () => 10 }
+          { now: () => 10 },
         );
         const unlinked = createUpdateIntent(
           db,
           baseInput({
             idempotencyKey: "without-evidence",
-            evidenceRecordId: null
+            evidenceRecordId: null,
           }),
-          { now: () => 20 }
+          { now: () => 20 },
         );
 
         expect(
           listUpdateIntents(db, {
-            evidenceRecordId: "evidence_record_link"
-          }).map((i) => i.id)
+            evidenceRecordId: "evidence_record_link",
+          }).map((i) => i.id),
         ).toEqual([linked.intent.id]);
         expect(
-          listUpdateIntents(db, { evidenceRecordId: null }).map((i) => i.id)
+          listUpdateIntents(db, { evidenceRecordId: null }).map((i) => i.id),
         ).toEqual([unlinked.intent.id]);
       } finally {
         db.close();
@@ -339,12 +339,12 @@ describe("update intent storage", () => {
       const db = openDb(makeTempDir());
       try {
         const created = createUpdateIntent(db, baseInput(), {
-          now: () => 1000
+          now: () => 1000,
         });
         const result = markUpdateIntentApplied(db, {
           intentId: created.intent.id,
           decisionReason: "Already updated upstream by hand.",
-          now: 2000
+          now: 2000,
         });
 
         expect(result.ok).toBe(true);
@@ -352,7 +352,7 @@ describe("update intent storage", () => {
         expect(result.previousStatus).toBe("pending");
         expect(result.intent.status).toBe("applied");
         expect(result.intent.decisionReason).toBe(
-          "Already updated upstream by hand."
+          "Already updated upstream by hand.",
         );
         expect(result.intent.appliedAt).toBe(2000);
         expect(result.intent.skippedAt).toBeNull();
@@ -368,12 +368,12 @@ describe("update intent storage", () => {
       const db = openDb(makeTempDir());
       try {
         const created = createUpdateIntent(db, baseInput(), {
-          now: () => 1000
+          now: () => 1000,
         });
         const result = markUpdateIntentSkipped(db, {
           intentId: created.intent.id,
           decisionReason: "Source already closed by reviewer.",
-          now: 3000
+          now: 3000,
         });
         expect(result.ok).toBe(true);
         if (!result.ok) return;
@@ -390,12 +390,12 @@ describe("update intent storage", () => {
       const db = openDb(makeTempDir());
       try {
         const created = createUpdateIntent(db, baseInput(), {
-          now: () => 1000
+          now: () => 1000,
         });
         const result = cancelUpdateIntent(db, {
           intentId: created.intent.id,
           decisionReason: "Goal canceled; intent no longer relevant.",
-          now: 4000
+          now: 4000,
         });
         expect(result.ok).toBe(true);
         if (!result.ok) return;
@@ -412,19 +412,19 @@ describe("update intent storage", () => {
       const db = openDb(makeTempDir());
       try {
         const created = createUpdateIntent(db, baseInput(), {
-          now: () => 1000
+          now: () => 1000,
         });
         const first = markUpdateIntentApplied(db, {
           intentId: created.intent.id,
           decisionReason: "Applied out-of-band by operator.",
-          now: 2000
+          now: 2000,
         });
         expect(first.ok).toBe(true);
 
         const replay = markUpdateIntentApplied(db, {
           intentId: created.intent.id,
           decisionReason: "Trying to re-apply",
-          now: 5000
+          now: 5000,
         });
         expect(replay.ok).toBe(false);
         if (replay.ok) return;
@@ -434,7 +434,7 @@ describe("update intent storage", () => {
         const skip = markUpdateIntentSkipped(db, {
           intentId: created.intent.id,
           decisionReason: "Trying to skip",
-          now: 5500
+          now: 5500,
         });
         expect(skip.ok).toBe(false);
         if (skip.ok) return;
@@ -443,7 +443,7 @@ describe("update intent storage", () => {
         const cancel = cancelUpdateIntent(db, {
           intentId: created.intent.id,
           decisionReason: "Trying to cancel",
-          now: 5600
+          now: 5600,
         });
         expect(cancel.ok).toBe(false);
         if (cancel.ok) return;
@@ -465,7 +465,7 @@ describe("update intent storage", () => {
         const result = markUpdateIntentApplied(db, {
           intentId: "update_intent_missing",
           decisionReason: "n/a",
-          now: 1
+          now: 1,
         });
         expect(result.ok).toBe(false);
         if (result.ok) return;
@@ -479,21 +479,21 @@ describe("update intent storage", () => {
       const db = openDb(makeTempDir());
       try {
         const created = createUpdateIntent(db, baseInput(), {
-          now: () => 1000
+          now: () => 1000,
         });
         expect(() =>
           markUpdateIntentApplied(db, {
             intentId: created.intent.id,
             decisionReason: "",
-            now: 1
-          })
+            now: 1,
+          }),
         ).toThrowError(/decisionReason/);
         expect(() =>
           markUpdateIntentSkipped(db, {
             intentId: created.intent.id,
             decisionReason: "valid",
-            now: Number.POSITIVE_INFINITY
-          })
+            now: Number.POSITIVE_INFINITY,
+          }),
         ).toThrowError(/finite/);
       } finally {
         db.close();

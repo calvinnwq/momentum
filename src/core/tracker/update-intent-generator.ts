@@ -1,6 +1,6 @@
 import type { MomentumDb } from "../../adapters/db.js";
 import type { EvidenceRecord } from "../evidence/records.js";
-import { getSourceItemById, type SourceItem } from "./items.js";
+import { getTrackerItemById, type TrackerItem } from "./items.js";
 import {
   createUpdateIntent,
   type UpdateIntent,
@@ -27,7 +27,7 @@ const TERMINAL_GOAL_STATES = new Set([
 ]);
 const COMPLETED_GOAL_STATE = "completed";
 
-const TERMINAL_SOURCE_STATUSES = new Set(
+const TERMINAL_TRACKER_STATUSES = new Set(
   [
     "done",
     "completed",
@@ -42,7 +42,7 @@ const TERMINAL_SOURCE_STATUSES = new Set(
   ].map((value) => value.toLowerCase()),
 );
 
-export type EvaluateGoalForSourceSatisfiedIntentInput = {
+export type EvaluateGoalForTrackerSatisfiedIntentInput = {
   goalId: string;
   verificationEvidenceTypes?: readonly string[];
 };
@@ -50,24 +50,24 @@ export type EvaluateGoalForSourceSatisfiedIntentInput = {
 export type EvidenceInsufficientWarning = {
   goalId: string;
   goalState: string;
-  sourceItemId: string;
-  sourceExternalId: string;
+  trackerItemId: string;
+  trackerExternalId: string;
   adapterKind: string;
   acceptedEvidenceTypes: readonly string[];
   reason: string;
 };
 
-export type EvaluateGoalForSourceSatisfiedIntentResult =
+export type EvaluateGoalForTrackerSatisfiedIntentResult =
   | {
       outcome: "intent_created";
       intent: UpdateIntent;
-      sourceItem: SourceItem;
+      trackerItem: TrackerItem;
       verificationEvidence: EvidenceRecord;
     }
   | {
       outcome: "intent_replayed";
       intent: UpdateIntent;
-      sourceItem: SourceItem;
+      trackerItem: TrackerItem;
       verificationEvidence: EvidenceRecord;
     }
   | {
@@ -77,8 +77,8 @@ export type EvaluateGoalForSourceSatisfiedIntentResult =
   | { outcome: "goal_not_found"; goalId: string }
   | { outcome: "goal_not_terminal"; goalId: string; goalState: string }
   | { outcome: "goal_state_not_completed"; goalId: string; goalState: string }
-  | { outcome: "no_source_link"; goalId: string }
-  | { outcome: "source_already_terminal"; sourceItem: SourceItem };
+  | { outcome: "no_tracker_link"; goalId: string }
+  | { outcome: "tracker_already_terminal"; trackerItem: TrackerItem };
 
 type GoalRow = {
   id: string;
@@ -96,7 +96,7 @@ type EvidenceRow = {
   summary: string;
   metadata_json: string;
   goal_id: string | null;
-  source_item_id: string | null;
+  tracker_item_id: string | null;
   run_id: string | null;
   step_id: string | null;
   ingest_key: string;
@@ -105,26 +105,26 @@ type EvidenceRow = {
 };
 
 /**
- * Inspect a Goal's terminal state, its linked SourceItems, and the goal/source
+ * Inspect a Goal's terminal state, its linked TrackerItems, and the goal/tracker
  * evidence records, then create (or replay) durable `source_satisfied` update
- * intents for every linked open SourceItem with verification evidence. A
- * completed Goal can have multiple linked open SourceItems and therefore
+ * intents for every linked open TrackerItem with verification evidence. A
+ * completed Goal can have multiple linked open TrackerItems and therefore
  * multiple pending intents.
  *
  * Idempotency: the intent's idempotency key is bound to the goal + adapter +
- * source external id, so repeated evaluations after additional evidence
+ * tracker external id, so repeated evaluations after additional evidence
  * ingestion do not duplicate intents.
  *
  * No external write is ever performed; the intent's status stays `pending`.
  */
-export function evaluateGoalForSourceSatisfiedIntents(
+export function evaluateGoalForTrackerSatisfiedIntents(
   db: MomentumDb,
-  input: EvaluateGoalForSourceSatisfiedIntentInput,
+  input: EvaluateGoalForTrackerSatisfiedIntentInput,
   clock: UpdateIntentClock = {},
-): EvaluateGoalForSourceSatisfiedIntentResult[] {
+): EvaluateGoalForTrackerSatisfiedIntentResult[] {
   if (typeof input.goalId !== "string" || input.goalId.length === 0) {
     throw new Error(
-      "evaluateGoalForSourceSatisfiedIntent goalId must be a non-empty string",
+      "evaluateGoalForTrackerSatisfiedIntent goalId must be a non-empty string",
     );
   }
 
@@ -157,69 +157,69 @@ export function evaluateGoalForSourceSatisfiedIntents(
     ];
   }
 
-  const sourceItems = findLinkedSourceItems(db, goal.id);
-  if (sourceItems.length === 0) {
-    return [{ outcome: "no_source_link", goalId: goal.id }];
+  const trackerItems = findLinkedTrackerItems(db, goal.id);
+  if (trackerItems.length === 0) {
+    return [{ outcome: "no_tracker_link", goalId: goal.id }];
   }
-  const openSourceItems = sourceItems.filter(
-    (sourceItem) => !isSourceStatusTerminal(sourceItem.status),
+  const openTrackerItems = trackerItems.filter(
+    (trackerItem) => !isTrackerStatusTerminal(trackerItem.status),
   );
-  if (openSourceItems.length === 0) {
+  if (openTrackerItems.length === 0) {
     return [
-      { outcome: "source_already_terminal", sourceItem: sourceItems[0]! },
+      { outcome: "tracker_already_terminal", trackerItem: trackerItems[0]! },
     ];
   }
 
   const evidenceWarnings: EvidenceInsufficientWarning[] = [];
   const results: Extract<
-    EvaluateGoalForSourceSatisfiedIntentResult,
+    EvaluateGoalForTrackerSatisfiedIntentResult,
     { outcome: "intent_created" | "intent_replayed" }
   >[] = [];
 
-  for (const sourceItem of openSourceItems) {
+  for (const trackerItem of openTrackerItems) {
     const evidence = findEarliestVerificationEvidence(
       db,
       goal.id,
-      sourceItem.id,
+      trackerItem.id,
       acceptedTypes,
     );
     if (!evidence) {
       const warning: EvidenceInsufficientWarning = {
         goalId: goal.id,
         goalState: goal.state,
-        sourceItemId: sourceItem.id,
-        sourceExternalId: sourceItem.externalId,
-        adapterKind: sourceItem.adapterKind,
+        trackerItemId: trackerItem.id,
+        trackerExternalId: trackerItem.externalId,
+        adapterKind: trackerItem.adapterKind,
         acceptedEvidenceTypes: acceptedTypes,
-        reason: `Goal ${goal.id} is completed but has no verification evidence for source item ${sourceItem.externalKey ?? sourceItem.externalId} (accepted types: ${acceptedTypes.join(", ")}).`,
+        reason: `Goal ${goal.id} is completed but has no verification evidence for tracker item ${trackerItem.externalKey ?? trackerItem.externalId} (accepted types: ${acceptedTypes.join(", ")}).`,
       };
       evidenceWarnings.push(warning);
       continue;
     }
 
-    const idempotencyKey = `${sourceItem.adapterKind}:${sourceItem.externalId}:source_satisfied:${goal.id}`;
-    const reason = `Goal completed with verification evidence (${evidence.type}); source item ${sourceItem.externalKey ?? sourceItem.externalId} appears satisfied.`;
+    const idempotencyKey = `${trackerItem.adapterKind}:${trackerItem.externalId}:source_satisfied:${goal.id}`;
+    const reason = `Goal completed with verification evidence (${evidence.type}); tracker item ${trackerItem.externalKey ?? trackerItem.externalId} appears satisfied.`;
     const payload: Record<string, unknown> = {
       goalState: goal.state,
       evidenceType: evidence.type,
       evidenceSource: evidence.source,
       evidenceOccurredAt: evidence.occurredAt,
-      sourceItemId: sourceItem.id,
-      sourceExternalId: sourceItem.externalId,
-      sourceExternalKey: sourceItem.externalKey,
-      sourceCurrentStatus: sourceItem.status,
+      trackerItemId: trackerItem.id,
+      trackerExternalId: trackerItem.externalId,
+      trackerExternalKey: trackerItem.externalKey,
+      trackerCurrentStatus: trackerItem.status,
     };
 
     const created = createUpdateIntent(
       db,
       {
-        adapterKind: sourceItem.adapterKind,
-        targetExternalId: sourceItem.externalId,
+        adapterKind: trackerItem.adapterKind,
+        targetExternalId: trackerItem.externalId,
         intentType: "source_satisfied",
         payload,
         reason,
         goalId: goal.id,
-        sourceItemId: sourceItem.id,
+        trackerItemId: trackerItem.id,
         evidenceRecordId: evidence.id,
         idempotencyKey,
       },
@@ -229,12 +229,12 @@ export function evaluateGoalForSourceSatisfiedIntents(
     results.push({
       outcome: created.created ? "intent_created" : "intent_replayed",
       intent: created.intent,
-      sourceItem,
+      trackerItem,
       verificationEvidence: evidence,
     });
   }
 
-  const warningResults: EvaluateGoalForSourceSatisfiedIntentResult[] =
+  const warningResults: EvaluateGoalForTrackerSatisfiedIntentResult[] =
     evidenceWarnings.map((warning) => ({
       outcome: "evidence_insufficient",
       warning,
@@ -249,37 +249,37 @@ function resolveAcceptedEvidenceTypes(
   if (override === undefined) return DEFAULT_VERIFICATION_EVIDENCE_TYPES;
   if (!Array.isArray(override) || override.length === 0) {
     throw new Error(
-      "evaluateGoalForSourceSatisfiedIntent verificationEvidenceTypes must be a non-empty array of strings",
+      "evaluateGoalForTrackerSatisfiedIntent verificationEvidenceTypes must be a non-empty array of strings",
     );
   }
   for (const value of override) {
     if (typeof value !== "string" || value.length === 0) {
       throw new Error(
-        "evaluateGoalForSourceSatisfiedIntent verificationEvidenceTypes entries must be non-empty strings",
+        "evaluateGoalForTrackerSatisfiedIntent verificationEvidenceTypes entries must be non-empty strings",
       );
     }
   }
   return override;
 }
 
-function findLinkedSourceItems(db: MomentumDb, goalId: string): SourceItem[] {
+function findLinkedTrackerItems(db: MomentumDb, goalId: string): TrackerItem[] {
   const rows = db
     .prepare(
       `SELECT id
-         FROM source_items
+         FROM tracker_items
         WHERE goal_id = ?
         ORDER BY adapter_kind ASC, external_key ASC, external_id ASC`,
     )
     .all(goalId) as { id: string }[];
   return rows
-    .map((row) => getSourceItemById(db, row.id))
-    .filter((sourceItem): sourceItem is SourceItem => sourceItem !== null);
+    .map((row) => getTrackerItemById(db, row.id))
+    .filter((trackerItem): trackerItem is TrackerItem => trackerItem !== null);
 }
 
 function findEarliestVerificationEvidence(
   db: MomentumDb,
   goalId: string,
-  sourceItemId: string,
+  trackerItemId: string,
   acceptedTypes: readonly string[],
 ): EvidenceRecord | null {
   const placeholders = acceptedTypes.map(() => "?").join(", ");
@@ -287,12 +287,12 @@ function findEarliestVerificationEvidence(
     .prepare(
       `SELECT *
          FROM evidence_records
-        WHERE (goal_id = ? OR source_item_id = ?)
+        WHERE (goal_id = ? OR tracker_item_id = ?)
           AND type IN (${placeholders})
         ORDER BY occurred_at ASC, created_at ASC, id ASC
         LIMIT 1`,
     )
-    .get(goalId, sourceItemId, ...acceptedTypes) as EvidenceRow | undefined;
+    .get(goalId, trackerItemId, ...acceptedTypes) as EvidenceRow | undefined;
   if (!row) return null;
   return evidenceRecordFromRow(row);
 }
@@ -309,7 +309,7 @@ function evidenceRecordFromRow(row: EvidenceRow): EvidenceRecord {
     summary: row.summary,
     metadata: parseJsonObject(row.metadata_json),
     goalId: row.goal_id,
-    sourceItemId: row.source_item_id,
+    trackerItemId: row.tracker_item_id,
     runId: row.run_id,
     stepId: row.step_id,
     ingestKey: row.ingest_key,
@@ -326,7 +326,7 @@ function parseJsonObject(json: string): Record<string, unknown> {
   return {};
 }
 
-function isSourceStatusTerminal(status: string | null): boolean {
+function isTrackerStatusTerminal(status: string | null): boolean {
   if (!status) return false;
-  return TERMINAL_SOURCE_STATUSES.has(status.trim().toLowerCase());
+  return TERMINAL_TRACKER_STATUSES.has(status.trim().toLowerCase());
 }

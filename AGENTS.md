@@ -56,7 +56,7 @@ The `doctor --json` marker reports `CLI architecture: parser dispatch, command f
 Long-form milestone history lives in the personal wiki `/Workspaces/Momentum`.
 
 Workflow-first runtime, executor-loop, coding-workflow ownership,
-external-apply, source-adapter, runtime-consolidation, and adapter-test
+external-apply, tracker-adapter, runtime-consolidation, and adapter-test
 coverage contracts are compactly anchored in [`SPEC.md`](SPEC.md). Long-form
 contract rationale lives in the personal wiki `/Workspaces/Momentum`.
 

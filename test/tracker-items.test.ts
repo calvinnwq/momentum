@@ -5,16 +5,16 @@ import path from "node:path";
 
 import { openDb } from "../src/adapters/db.js";
 import {
-  getSourceItemById,
-  linkGoalToSourceItem,
-  listSourceItemSummariesForGoal,
-  listSourceSnapshotsForItem,
-  recordSourceSnapshot,
-  listSourceItems,
-  unlinkGoalFromSourceItem,
-  upsertSourceItem,
-  type SourceItemUpsertInput
-} from "../src/core/source/items.js";
+  getTrackerItemById,
+  linkGoalToTrackerItem,
+  listTrackerItemSummariesForGoal,
+  listTrackerSnapshotsForItem,
+  recordTrackerSnapshot,
+  listTrackerItems,
+  unlinkGoalFromTrackerItem,
+  upsertTrackerItem,
+  type TrackerItemUpsertInput,
+} from "../src/core/tracker/items.js";
 
 const tempRoots: string[] = [];
 
@@ -25,13 +25,15 @@ afterEach(() => {
   }
 });
 
-function makeTempDir(prefix = "momentum-source-items-"): string {
+function makeTempDir(prefix = "momentum-tracker-items-"): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   tempRoots.push(dir);
   return fs.realpathSync(dir);
 }
 
-function baseInput(overrides: Partial<SourceItemUpsertInput> = {}): SourceItemUpsertInput {
+function baseInput(
+  overrides: Partial<TrackerItemUpsertInput> = {},
+): TrackerItemUpsertInput {
   return {
     adapterKind: "manual",
     externalId: "issue-1",
@@ -41,7 +43,7 @@ function baseInput(overrides: Partial<SourceItemUpsertInput> = {}): SourceItemUp
     status: "Todo",
     metadata: { estimate: 2, labels: ["m5"] },
     observedAt: 1000,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -49,7 +51,7 @@ describe("source item storage", () => {
   it("upserts source items by adapter kind and external id while preserving identity", () => {
     const db = openDb(makeTempDir());
     try {
-      const created = upsertSourceItem(db, baseInput(), { now: () => 1100 });
+      const created = upsertTrackerItem(db, baseInput(), { now: () => 1100 });
 
       expect(created.adapterKind).toBe("manual");
       expect(created.externalId).toBe("issue-1");
@@ -61,15 +63,15 @@ describe("source item storage", () => {
       expect(created.createdAt).toBe(1100);
       expect(created.updatedAt).toBe(1100);
 
-      const updated = upsertSourceItem(
+      const updated = upsertTrackerItem(
         db,
         baseInput({
           title: "Updated title",
           status: "In Progress",
           metadata: { estimate: 3, state: { type: "started" } },
-          observedAt: 1200
+          observedAt: 1200,
         }),
-        { now: () => 1300 }
+        { now: () => 1300 },
       );
 
       expect(updated.id).toBe(created.id);
@@ -77,10 +79,13 @@ describe("source item storage", () => {
       expect(updated.updatedAt).toBe(1300);
       expect(updated.title).toBe("Updated title");
       expect(updated.status).toBe("In Progress");
-      expect(updated.metadata).toEqual({ estimate: 3, state: { type: "started" } });
+      expect(updated.metadata).toEqual({
+        estimate: 3,
+        state: { type: "started" },
+      });
       expect(updated.lastObservedAt).toBe(1200);
 
-      expect(getSourceItemById(db, created.id)).toEqual(updated);
+      expect(getTrackerItemById(db, created.id)).toEqual(updated);
     } finally {
       db.close();
     }
@@ -89,12 +94,20 @@ describe("source item storage", () => {
   it("allows the same external id to exist under different adapter kinds", () => {
     const db = openDb(makeTempDir());
     try {
-      const manual = upsertSourceItem(db, baseInput({ adapterKind: "manual" }), {
-        now: () => 1
-      });
-      const fixture = upsertSourceItem(db, baseInput({ adapterKind: "local-fixture" }), {
-        now: () => 2
-      });
+      const manual = upsertTrackerItem(
+        db,
+        baseInput({ adapterKind: "manual" }),
+        {
+          now: () => 1,
+        },
+      );
+      const fixture = upsertTrackerItem(
+        db,
+        baseInput({ adapterKind: "local-fixture" }),
+        {
+          now: () => 2,
+        },
+      );
 
       expect(fixture.id).not.toBe(manual.id);
       expect(fixture.externalId).toBe(manual.externalId);
@@ -109,30 +122,30 @@ describe("source item storage", () => {
     const firstConnection = openDb(dataDir);
     const secondConnection = openDb(dataDir);
     try {
-      const newest = upsertSourceItem(
+      const newest = upsertTrackerItem(
         firstConnection,
         baseInput({
           title: "Newest title",
           status: "Done",
           metadata: { observed: "newest" },
-          observedAt: 2000
+          observedAt: 2000,
         }),
-        { now: () => 2100 }
+        { now: () => 2100 },
       );
 
-      const stale = upsertSourceItem(
+      const stale = upsertTrackerItem(
         secondConnection,
         baseInput({
           title: "Stale title",
           status: "Todo",
           metadata: { observed: "stale" },
-          observedAt: 1500
+          observedAt: 1500,
         }),
-        { now: () => 2200 }
+        { now: () => 2200 },
       );
 
       expect(stale).toEqual(newest);
-      expect(listSourceItems(firstConnection)).toEqual([newest]);
+      expect(listTrackerItems(firstConnection)).toEqual([newest]);
     } finally {
       firstConnection.close();
       secondConnection.close();
@@ -145,29 +158,27 @@ describe("source item storage", () => {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run("goal-1", "Linked goal", "momentum/linked", "/tmp/linked", 1, 1);
-      const linked = upsertSourceItem(
-        db,
-        baseInput({ goalId: "goal-1" }),
-        { now: () => 1100 }
-      );
-      const refreshed = upsertSourceItem(
+      const linked = upsertTrackerItem(db, baseInput({ goalId: "goal-1" }), {
+        now: () => 1100,
+      });
+      const refreshed = upsertTrackerItem(
         db,
         baseInput({
           title: "Refreshed title",
-          observedAt: 1200
+          observedAt: 1200,
         }),
-        { now: () => 1300 }
+        { now: () => 1300 },
       );
-      const cleared = upsertSourceItem(
+      const cleared = upsertTrackerItem(
         db,
         baseInput({
           title: "Cleared title",
           observedAt: 1400,
-          goalId: null
+          goalId: null,
         }),
-        { now: () => 1500 }
+        { now: () => 1500 },
       );
 
       expect(linked.goalId).toBe("goal-1");
@@ -184,40 +195,47 @@ describe("source item storage", () => {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      ).run("goal-link-1", "Link target", "momentum/link-1", "/tmp/link-1", 1, 1);
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(
+        "goal-link-1",
+        "Link target",
+        "momentum/link-1",
+        "/tmp/link-1",
+        1,
+        1,
+      );
 
-      const item = upsertSourceItem(db, baseInput(), { now: () => 1100 });
-      recordSourceSnapshot(
+      const item = upsertTrackerItem(db, baseInput(), { now: () => 1100 });
+      recordTrackerSnapshot(
         db,
         {
-          sourceItemId: item.id,
+          trackerItemId: item.id,
           adapterKind: item.adapterKind,
           externalId: item.externalId,
           observedAt: 1500,
-          snapshot: { description: "Initial scope" }
+          snapshot: { description: "Initial scope" },
         },
-        { now: () => 1600 }
+        { now: () => 1600 },
       );
 
-      const first = linkGoalToSourceItem(db, {
+      const first = linkGoalToTrackerItem(db, {
         goalId: "goal-link-1",
-        sourceItemId: item.id,
-        now: 2000
+        trackerItemId: item.id,
+        now: 2000,
       });
       expect(first.ok).toBe(true);
       if (first.ok) {
         expect(first.changed).toBe(true);
         expect(first.skippedReason).toBeNull();
         expect(first.previousGoalId).toBeNull();
-        expect(first.sourceItem.goalId).toBe("goal-link-1");
-        expect(first.sourceItem.updatedAt).toBe(2000);
+        expect(first.trackerItem.goalId).toBe("goal-link-1");
+        expect(first.trackerItem.updatedAt).toBe(2000);
       }
 
-      const second = linkGoalToSourceItem(db, {
+      const second = linkGoalToTrackerItem(db, {
         goalId: "goal-link-1",
-        sourceItemId: item.id,
-        now: 2100
+        trackerItemId: item.id,
+        now: 2100,
       });
       expect(second.ok).toBe(true);
       if (second.ok) {
@@ -226,22 +244,24 @@ describe("source item storage", () => {
         expect(second.previousGoalId).toBe("goal-link-1");
       }
 
-      expect(listSourceItemSummariesForGoal(db, "goal-link-1")).toHaveLength(1);
+      expect(listTrackerItemSummariesForGoal(db, "goal-link-1")).toHaveLength(
+        1,
+      );
 
-      const unlinkResult = unlinkGoalFromSourceItem(db, {
-        sourceItemId: item.id,
-        now: 2200
+      const unlinkResult = unlinkGoalFromTrackerItem(db, {
+        trackerItemId: item.id,
+        now: 2200,
       });
       expect(unlinkResult.ok).toBe(true);
       if (unlinkResult.ok) {
         expect(unlinkResult.changed).toBe(true);
         expect(unlinkResult.previousGoalId).toBe("goal-link-1");
-        expect(unlinkResult.sourceItem.goalId).toBeNull();
+        expect(unlinkResult.trackerItem.goalId).toBeNull();
       }
 
-      const unlinkIdempotent = unlinkGoalFromSourceItem(db, {
-        sourceItemId: item.id,
-        now: 2300
+      const unlinkIdempotent = unlinkGoalFromTrackerItem(db, {
+        trackerItemId: item.id,
+        now: 2300,
       });
       expect(unlinkIdempotent.ok).toBe(true);
       if (unlinkIdempotent.ok) {
@@ -249,7 +269,7 @@ describe("source item storage", () => {
         expect(unlinkIdempotent.previousGoalId).toBeNull();
       }
 
-      const snapshots = listSourceSnapshotsForItem(db, item.id);
+      const snapshots = listTrackerSnapshotsForItem(db, item.id);
       expect(snapshots).toHaveLength(1);
       expect(snapshots[0]?.snapshot).toEqual({ description: "Initial scope" });
     } finally {
@@ -257,48 +277,48 @@ describe("source item storage", () => {
     }
   });
 
-  it("returns goal_not_found, source_item_not_found, and linked_to_other_goal error codes from linkGoalToSourceItem", () => {
+  it("returns goal_not_found, tracker_item_not_found, and linked_to_other_goal error codes from linkGoalToTrackerItem", () => {
     const db = openDb(makeTempDir());
     try {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run("goal-a", "A", "momentum/a", "/tmp/a", 1, 1);
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run("goal-b", "B", "momentum/b", "/tmp/b", 1, 1);
-      const item = upsertSourceItem(db, baseInput(), { now: () => 100 });
+      const item = upsertTrackerItem(db, baseInput(), { now: () => 100 });
 
-      const missingGoal = linkGoalToSourceItem(db, {
+      const missingGoal = linkGoalToTrackerItem(db, {
         goalId: "goal-missing",
-        sourceItemId: item.id
+        trackerItemId: item.id,
       });
       expect(missingGoal.ok).toBe(false);
       if (!missingGoal.ok) {
         expect(missingGoal.code).toBe("goal_not_found");
       }
 
-      const missingItem = linkGoalToSourceItem(db, {
+      const missingItem = linkGoalToTrackerItem(db, {
         goalId: "goal-a",
-        sourceItemId: "source_item_missing"
+        trackerItemId: "source_item_missing",
       });
       expect(missingItem.ok).toBe(false);
       if (!missingItem.ok) {
-        expect(missingItem.code).toBe("source_item_not_found");
+        expect(missingItem.code).toBe("tracker_item_not_found");
       }
 
-      const linkedA = linkGoalToSourceItem(db, {
+      const linkedA = linkGoalToTrackerItem(db, {
         goalId: "goal-a",
-        sourceItemId: item.id
+        trackerItemId: item.id,
       });
       expect(linkedA.ok).toBe(true);
 
-      const collision = linkGoalToSourceItem(db, {
+      const collision = linkGoalToTrackerItem(db, {
         goalId: "goal-b",
-        sourceItemId: item.id
+        trackerItemId: item.id,
       });
       expect(collision.ok).toBe(false);
       if (!collision.ok) {
@@ -306,12 +326,12 @@ describe("source item storage", () => {
         expect(collision.currentGoalId).toBe("goal-a");
       }
 
-      const unlinkMissing = unlinkGoalFromSourceItem(db, {
-        sourceItemId: "source_item_missing"
+      const unlinkMissing = unlinkGoalFromTrackerItem(db, {
+        trackerItemId: "source_item_missing",
       });
       expect(unlinkMissing.ok).toBe(false);
       if (!unlinkMissing.ok) {
-        expect(unlinkMissing.code).toBe("source_item_not_found");
+        expect(unlinkMissing.code).toBe("tracker_item_not_found");
       }
     } finally {
       db.close();
@@ -321,44 +341,44 @@ describe("source item storage", () => {
   it("records immutable source snapshots for observed source item payloads", () => {
     const db = openDb(makeTempDir());
     try {
-      const item = upsertSourceItem(db, baseInput(), { now: () => 1100 });
+      const item = upsertTrackerItem(db, baseInput(), { now: () => 1100 });
 
-      const firstSnapshot = recordSourceSnapshot(
+      const firstSnapshot = recordTrackerSnapshot(
         db,
         {
-          sourceItemId: item.id,
+          trackerItemId: item.id,
           adapterKind: item.adapterKind,
           externalId: item.externalId,
           observedAt: 1000,
-          snapshot: { title: "Original title", nested: { status: "Todo" } }
+          snapshot: { title: "Original title", nested: { status: "Todo" } },
         },
-        { now: () => 1200 }
+        { now: () => 1200 },
       );
-      const secondSnapshot = recordSourceSnapshot(
+      const secondSnapshot = recordTrackerSnapshot(
         db,
         {
-          sourceItemId: item.id,
+          trackerItemId: item.id,
           adapterKind: item.adapterKind,
           externalId: item.externalId,
           observedAt: 1300,
-          snapshot: { title: "Updated title", labels: ["m5"] }
+          snapshot: { title: "Updated title", labels: ["m5"] },
         },
-        { now: () => 1400 }
+        { now: () => 1400 },
       );
 
       expect(firstSnapshot).toEqual({
         id: expect.any(String),
-        sourceItemId: item.id,
+        trackerItemId: item.id,
         adapterKind: "manual",
         externalId: "issue-1",
         observedAt: 1000,
         snapshot: { title: "Original title", nested: { status: "Todo" } },
-        createdAt: 1200
+        createdAt: 1200,
       });
       expect(secondSnapshot.id).not.toBe(firstSnapshot.id);
-      expect(listSourceSnapshotsForItem(db, item.id)).toEqual([
+      expect(listTrackerSnapshotsForItem(db, item.id)).toEqual([
         firstSnapshot,
-        secondSnapshot
+        secondSnapshot,
       ]);
     } finally {
       db.close();

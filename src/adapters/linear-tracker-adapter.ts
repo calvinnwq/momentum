@@ -1,8 +1,8 @@
 /**
- * Linear source adapter.
+ * Linear tracker adapter.
  *
  * This module owns the read-only normalization of Linear issue payloads into
- * Momentum's SourceAdapterItem vocabulary, plus the in-process list/get
+ * Momentum's TrackerAdapterItem vocabulary, plus the in-process list/get
  * surface used by tests and local callers that already have Linear issue
  * payloads. Normalization requires Linear's stable identity/title/url/update
  * fields, preserves the raw issue payload under metadata, and folds optional
@@ -11,43 +11,43 @@
  *
  * The adapter never performs HTTP itself, never reads credentials, and never
  * writes back to Linear. The paginated reconciliation orchestrator lives in
- * `source-reconciliation.ts` and normalizes each fetched issue through
+ * `reconciliation.ts` and normalizes each fetched issue through
  * `normalizeLinearIssue`; the HTTP-backed pagination client lives in
  * `linear-http-client.ts`, owns pagination input and auth/transport error
  * mapping, and delegates policy-neutral network I/O to
  * `linear-graphql-transport.ts` before the orchestrator persists local
- * SourceItem rows and snapshots.
+ * TrackerItem rows and snapshots.
  */
 
 import type {
-  SourceAdapter,
-  SourceAdapterError,
-  SourceAdapterGetInput,
-  SourceAdapterGetResult,
-  SourceAdapterItem,
-  SourceAdapterListInput,
-  SourceAdapterListResult,
-  SourceAdapterNormalizeInput,
-  SourceAdapterNormalizeResult,
-} from "./source-adapter.js";
+  TrackerAdapter,
+  TrackerAdapterError,
+  TrackerAdapterGetInput,
+  TrackerAdapterGetResult,
+  TrackerAdapterItem,
+  TrackerAdapterListInput,
+  TrackerAdapterListResult,
+  TrackerAdapterNormalizeInput,
+  TrackerAdapterNormalizeResult,
+} from "./tracker-adapter.js";
 
-export const LINEAR_SOURCE_ADAPTER_KIND = "linear" as const;
+export const LINEAR_TRACKER_ADAPTER_KIND = "linear" as const;
 
-export type LinearSourceAdapterFilters = {
+export type LinearTrackerAdapterFilters = {
   projectId?: string;
   projectName?: string;
   milestoneId?: string;
   milestoneName?: string;
 };
 
-export type LinearSourceAdapterClient = {
+export type LinearTrackerAdapterClient = {
   issues?: readonly unknown[];
-  filters?: LinearSourceAdapterFilters;
+  filters?: LinearTrackerAdapterFilters;
 };
 
-export function buildLinearSourceAdapter(): SourceAdapter {
+export function buildLinearTrackerAdapter(): TrackerAdapter {
   return {
-    kind: LINEAR_SOURCE_ADAPTER_KIND,
+    kind: LINEAR_TRACKER_ADAPTER_KIND,
     list: linearAdapterList,
     get: linearAdapterGet,
     normalize: linearAdapterNormalize,
@@ -56,7 +56,7 @@ export function buildLinearSourceAdapter(): SourceAdapter {
 
 export function normalizeLinearIssue(
   raw: unknown,
-): SourceAdapterNormalizeResult {
+): TrackerAdapterNormalizeResult {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return invalid("raw Linear issue must be an object");
   }
@@ -95,7 +95,7 @@ export function normalizeLinearIssue(
   if (assigneeInfo !== undefined) metadata["assignee"] = assigneeInfo;
   if (priority !== undefined) metadata["priority"] = priority;
 
-  const item: SourceAdapterItem = {
+  const item: TrackerAdapterItem = {
     externalId,
     externalKey: identifier,
     url,
@@ -109,20 +109,20 @@ export function normalizeLinearIssue(
 }
 
 function linearAdapterNormalize(
-  input: SourceAdapterNormalizeInput,
-): SourceAdapterNormalizeResult {
+  input: TrackerAdapterNormalizeInput,
+): TrackerAdapterNormalizeResult {
   return normalizeLinearIssue(input.raw);
 }
 
 function linearAdapterList(
-  input: SourceAdapterListInput,
-): SourceAdapterListResult {
+  input: TrackerAdapterListInput,
+): TrackerAdapterListResult {
   const client = (input.client?.["linear"] ?? undefined) as
-    LinearSourceAdapterClient | undefined;
+    LinearTrackerAdapterClient | undefined;
   const issues = client?.issues ?? [];
   const filters = client?.filters ?? {};
 
-  const items: SourceAdapterItem[] = [];
+  const items: TrackerAdapterItem[] = [];
   for (const raw of issues) {
     if (!matchesLinearFilters(raw, filters)) continue;
     const normalized = normalizeLinearIssue(raw);
@@ -133,10 +133,10 @@ function linearAdapterList(
 }
 
 function linearAdapterGet(
-  input: SourceAdapterGetInput,
-): SourceAdapterGetResult {
+  input: TrackerAdapterGetInput,
+): TrackerAdapterGetResult {
   const client = (input.client?.["linear"] ?? undefined) as
-    LinearSourceAdapterClient | undefined;
+    LinearTrackerAdapterClient | undefined;
   const issues = client?.issues ?? [];
 
   for (const raw of issues) {
@@ -152,14 +152,14 @@ function linearAdapterGet(
 
   return {
     ok: false,
-    code: "source_item_not_found",
-    error: `Source item "${input.externalId}" was not found by adapter "${LINEAR_SOURCE_ADAPTER_KIND}".`,
+    code: "tracker_item_not_found",
+    error: `Tracker item "${input.externalId}" was not found by adapter "${LINEAR_TRACKER_ADAPTER_KIND}".`,
   };
 }
 
 function matchesLinearFilters(
   raw: unknown,
-  filters: LinearSourceAdapterFilters,
+  filters: LinearTrackerAdapterFilters,
 ): boolean {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
   const record = raw as Record<string, unknown>;
@@ -293,10 +293,10 @@ function optionalNumber(value: unknown): number | undefined {
     : undefined;
 }
 
-function invalid(reason: string): SourceAdapterError {
+function invalid(reason: string): TrackerAdapterError {
   return {
     ok: false,
-    code: "source_item_invalid",
-    error: `Source adapter "${LINEAR_SOURCE_ADAPTER_KIND}" could not normalize source item: ${reason}.`,
+    code: "tracker_item_invalid",
+    error: `Tracker adapter "${LINEAR_TRACKER_ADAPTER_KIND}" could not normalize tracker item: ${reason}.`,
   };
 }

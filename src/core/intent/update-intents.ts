@@ -6,7 +6,7 @@ export const UPDATE_INTENT_STATUSES = [
   "pending",
   "applied",
   "skipped",
-  "canceled"
+  "canceled",
 ] as const;
 
 export type UpdateIntentStatus = (typeof UPDATE_INTENT_STATUSES)[number];
@@ -19,7 +19,7 @@ export type UpdateIntent = {
   payload: Record<string, unknown>;
   reason: string;
   goalId: string | null;
-  sourceItemId: string | null;
+  trackerItemId: string | null;
   evidenceRecordId: string | null;
   status: UpdateIntentStatus;
   idempotencyKey: string;
@@ -40,7 +40,7 @@ export type CreateUpdateIntentInput = {
   payload?: Record<string, unknown>;
   reason: string;
   goalId?: string | null;
-  sourceItemId?: string | null;
+  trackerItemId?: string | null;
   evidenceRecordId?: string | null;
   idempotencyKey: string;
 };
@@ -61,8 +61,7 @@ export type UpdateIntentDecisionInput = {
 };
 
 export type UpdateIntentDecisionErrorCode =
-  | "intent_not_found"
-  | "intent_already_terminal";
+  "intent_not_found" | "intent_already_terminal";
 
 export type UpdateIntentDecisionResult =
   | {
@@ -80,7 +79,7 @@ export type UpdateIntentDecisionResult =
 export type ListUpdateIntentsOptions = {
   status?: UpdateIntentStatus;
   goalId?: string | null;
-  sourceItemId?: string | null;
+  trackerItemId?: string | null;
   evidenceRecordId?: string | null;
   adapterKind?: string;
   intentType?: string;
@@ -95,7 +94,7 @@ type UpdateIntentRow = {
   payload_json: string;
   reason: string;
   goal_id: string | null;
-  source_item_id: string | null;
+  tracker_item_id: string | null;
   evidence_record_id: string | null;
   status: UpdateIntentStatus;
   idempotency_key: string;
@@ -119,7 +118,7 @@ type UpdateIntentRow = {
 export function createUpdateIntent(
   db: MomentumDb,
   input: CreateUpdateIntentInput,
-  clock: UpdateIntentClock = {}
+  clock: UpdateIntentClock = {},
 ): CreateUpdateIntentResult {
   validateNonEmpty(input.adapterKind, "adapterKind");
   validateNonEmpty(input.intentType, "intentType");
@@ -132,11 +131,11 @@ export function createUpdateIntent(
     .prepare(
       `INSERT INTO update_intents
          (id, adapter_kind, target_external_id, intent_type, payload_json,
-          reason, goal_id, source_item_id, evidence_record_id,
+          reason, goal_id, tracker_item_id, evidence_record_id,
           status, idempotency_key, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
        ON CONFLICT(idempotency_key) DO NOTHING
-       RETURNING *`
+       RETURNING *`,
     )
     .get(
       `update_intent_${randomUUID()}`,
@@ -146,11 +145,11 @@ export function createUpdateIntent(
       payloadJson,
       input.reason,
       input.goalId ?? null,
-      input.sourceItemId ?? null,
+      input.trackerItemId ?? null,
       input.evidenceRecordId ?? null,
       input.idempotencyKey,
       now,
-      now
+      now,
     ) as UpdateIntentRow | undefined;
 
   if (row) {
@@ -160,7 +159,7 @@ export function createUpdateIntent(
   const existing = getUpdateIntentRowByIdempotencyKey(db, input.idempotencyKey);
   if (!existing) {
     throw new Error(
-      `Update intent missing after idempotency conflict for key "${input.idempotencyKey}".`
+      `Update intent missing after idempotency conflict for key "${input.idempotencyKey}".`,
     );
   }
   return { intent: updateIntentFromRow(existing), created: false };
@@ -168,7 +167,7 @@ export function createUpdateIntent(
 
 export function getUpdateIntentById(
   db: MomentumDb,
-  id: string
+  id: string,
 ): UpdateIntent | null {
   const row = db
     .prepare("SELECT * FROM update_intents WHERE id = ?")
@@ -178,7 +177,7 @@ export function getUpdateIntentById(
 
 export function getUpdateIntentByIdempotencyKey(
   db: MomentumDb,
-  idempotencyKey: string
+  idempotencyKey: string,
 ): UpdateIntent | null {
   const row = getUpdateIntentRowByIdempotencyKey(db, idempotencyKey);
   return row ? updateIntentFromRow(row) : null;
@@ -186,7 +185,7 @@ export function getUpdateIntentByIdempotencyKey(
 
 export function listUpdateIntents(
   db: MomentumDb,
-  options: ListUpdateIntentsOptions = {}
+  options: ListUpdateIntentsOptions = {},
 ): UpdateIntent[] {
   const { where, params } = buildUpdateIntentsFilter(options);
   const limitClause =
@@ -200,7 +199,7 @@ export function listUpdateIntents(
          FROM update_intents
          ${where}
         ORDER BY created_at ASC, id ASC
-        ${limitClause}`
+        ${limitClause}`,
     )
     .all(...params) as UpdateIntentRow[];
 
@@ -211,7 +210,7 @@ export type CountUpdateIntentsOptions = Omit<ListUpdateIntentsOptions, "limit">;
 
 export function countUpdateIntents(
   db: MomentumDb,
-  options: CountUpdateIntentsOptions = {}
+  options: CountUpdateIntentsOptions = {},
 ): number {
   const { where, params } = buildUpdateIntentsFilter(options);
   const row = db
@@ -239,12 +238,12 @@ function buildUpdateIntentsFilter(options: CountUpdateIntentsOptions): {
       params.push(options.goalId);
     }
   }
-  if (options.sourceItemId !== undefined) {
-    if (options.sourceItemId === null) {
-      clauses.push("source_item_id IS NULL");
+  if (options.trackerItemId !== undefined) {
+    if (options.trackerItemId === null) {
+      clauses.push("tracker_item_id IS NULL");
     } else {
-      clauses.push("source_item_id = ?");
-      params.push(options.sourceItemId);
+      clauses.push("tracker_item_id = ?");
+      params.push(options.trackerItemId);
     }
   }
   if (options.evidenceRecordId !== undefined) {
@@ -269,14 +268,14 @@ function buildUpdateIntentsFilter(options: CountUpdateIntentsOptions): {
 }
 
 /**
- * Mark a pending intent as applied with a required operator reason. source-adapter does
+ * Mark a pending intent as applied with a required operator reason. tracker-adapter code does
  * not perform the external write — this records the operator's manual or
  * out-of-band action. Refuses to transition from a terminal status so prior
  * decisions are not silently overwritten.
  */
 export function markUpdateIntentApplied(
   db: MomentumDb,
-  input: UpdateIntentDecisionInput
+  input: UpdateIntentDecisionInput,
 ): UpdateIntentDecisionResult {
   return transitionUpdateIntent(db, input, "applied");
 }
@@ -287,7 +286,7 @@ export function markUpdateIntentApplied(
  */
 export function markUpdateIntentSkipped(
   db: MomentumDb,
-  input: UpdateIntentDecisionInput
+  input: UpdateIntentDecisionInput,
 ): UpdateIntentDecisionResult {
   return transitionUpdateIntent(db, input, "skipped");
 }
@@ -299,7 +298,7 @@ export function markUpdateIntentSkipped(
  */
 export function cancelUpdateIntent(
   db: MomentumDb,
-  input: UpdateIntentDecisionInput
+  input: UpdateIntentDecisionInput,
 ): UpdateIntentDecisionResult {
   return transitionUpdateIntent(db, input, "canceled");
 }
@@ -307,7 +306,7 @@ export function cancelUpdateIntent(
 function transitionUpdateIntent(
   db: MomentumDb,
   input: UpdateIntentDecisionInput,
-  targetStatus: Exclude<UpdateIntentStatus, "pending">
+  targetStatus: Exclude<UpdateIntentStatus, "pending">,
 ): UpdateIntentDecisionResult {
   validateNonEmpty(input.intentId, "intentId");
   validateNonEmpty(input.decisionReason, "decisionReason");
@@ -321,7 +320,7 @@ function transitionUpdateIntent(
     return {
       ok: false,
       code: "intent_not_found",
-      message: `Update intent not found: ${input.intentId}`
+      message: `Update intent not found: ${input.intentId}`,
     };
   }
   if (existing.status !== "pending") {
@@ -329,7 +328,7 @@ function transitionUpdateIntent(
       ok: false,
       code: "intent_already_terminal",
       message: `Update intent ${input.intentId} is already ${existing.status}; refusing to overwrite.`,
-      currentStatus: existing.status
+      currentStatus: existing.status,
     };
   }
 
@@ -347,7 +346,7 @@ function transitionUpdateIntent(
               skipped_at = ?,
               canceled_at = ?
         WHERE id = ? AND status = 'pending'
-        RETURNING *`
+        RETURNING *`,
     )
     .get(
       targetStatus,
@@ -356,7 +355,7 @@ function transitionUpdateIntent(
       appliedAt,
       skippedAt,
       canceledAt,
-      input.intentId
+      input.intentId,
     ) as UpdateIntentRow | undefined;
 
   if (!row) {
@@ -365,36 +364,35 @@ function transitionUpdateIntent(
       return {
         ok: false,
         code: "intent_not_found",
-        message: `Update intent disappeared during transition: ${input.intentId}`
+        message: `Update intent disappeared during transition: ${input.intentId}`,
       };
     }
     return {
       ok: false,
       code: "intent_already_terminal",
       message: `Update intent ${input.intentId} transitioned to ${current.status} concurrently; refusing to overwrite.`,
-      currentStatus: current.status
+      currentStatus: current.status,
     };
   }
 
   return {
     ok: true,
     intent: updateIntentFromRow(row),
-    previousStatus: existing.status
+    previousStatus: existing.status,
   };
 }
 
 function getUpdateIntentRowById(
   db: MomentumDb,
-  id: string
+  id: string,
 ): UpdateIntentRow | undefined {
-  return db
-    .prepare("SELECT * FROM update_intents WHERE id = ?")
-    .get(id) as UpdateIntentRow | undefined;
+  return db.prepare("SELECT * FROM update_intents WHERE id = ?").get(id) as
+    UpdateIntentRow | undefined;
 }
 
 function getUpdateIntentRowByIdempotencyKey(
   db: MomentumDb,
-  idempotencyKey: string
+  idempotencyKey: string,
 ): UpdateIntentRow | undefined {
   return db
     .prepare("SELECT * FROM update_intents WHERE idempotency_key = ?")
@@ -410,7 +408,7 @@ function updateIntentFromRow(row: UpdateIntentRow): UpdateIntent {
     payload: parseJsonObject(row.payload_json),
     reason: row.reason,
     goalId: row.goal_id,
-    sourceItemId: row.source_item_id,
+    trackerItemId: row.tracker_item_id,
     evidenceRecordId: row.evidence_record_id,
     status: row.status,
     idempotencyKey: row.idempotency_key,
@@ -421,7 +419,7 @@ function updateIntentFromRow(row: UpdateIntentRow): UpdateIntent {
     updatedAt: row.updated_at,
     appliedAt: row.applied_at,
     skippedAt: row.skipped_at,
-    canceledAt: row.canceled_at
+    canceledAt: row.canceled_at,
   };
 }
 

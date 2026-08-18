@@ -196,7 +196,7 @@ const INTENT_PAYLOAD = { kind: "comment" } as const;
 
 function seedPendingIntent(db: MomentumDb): { idempotencyMarker: string } {
   db.prepare(
-    `INSERT INTO source_items
+    `INSERT INTO tracker_items
        (id, adapter_kind, external_id, external_key, url, title, status,
         metadata_json, last_observed_at, goal_id, created_at, updated_at)
      VALUES (?, 'linear', ?, 'NGX-1001', ?, 'Happy issue', NULL, '{}', 1, NULL, 1, 1)`,
@@ -208,7 +208,7 @@ function seedPendingIntent(db: MomentumDb): { idempotencyMarker: string } {
   db.prepare(
     `INSERT INTO update_intents
        (id, adapter_kind, target_external_id, intent_type, payload_json,
-        reason, source_item_id, status, idempotency_key, created_at, updated_at,
+        reason, tracker_item_id, status, idempotency_key, created_at, updated_at,
         applied_at, skipped_at, canceled_at, decision_reason)
      VALUES (?, 'linear', ?, 'source_satisfied', ?, 'evidence shows goal complete',
              ?, 'pending', ?, 1, 1, NULL, NULL, NULL, NULL)`,

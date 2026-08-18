@@ -24,7 +24,7 @@
     {
       title: "External state",
       items: [
-        { n: "09", t: "Source commands", h: "source-commands.html" },
+        { n: "09", t: "Tracker commands", h: "tracker-commands.html" },
         { n: "10", t: "Evidence commands", h: "evidence-commands.html" },
         { n: "11", t: "Intent commands", h: "intent-commands.html" }
       ]

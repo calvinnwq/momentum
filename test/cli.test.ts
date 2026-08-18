@@ -274,7 +274,7 @@ describe("momentum CLI scaffold", () => {
         1,
       );
       db.prepare(
-        `INSERT INTO source_items
+        `INSERT INTO tracker_items
            (id, adapter_kind, external_id, external_key, url, title,
             status, metadata_json, last_observed_at, goal_id,
             created_at, updated_at)
@@ -322,7 +322,7 @@ describe("momentum CLI scaffold", () => {
           metadata: { pr: "https://example/pull/1" },
           ingestKey: "agent-workflow:cwfp-doc:merge_complete",
           goalId: "goal-doctor",
-          sourceItemId: "si-doctor",
+          trackerItemId: "si-doctor",
         },
         { now: () => 9_100 },
       );
@@ -2514,10 +2514,10 @@ describe("momentum recovery clear", () => {
   it("lists and gets source items for operator inspection", async () => {
     const dataDir = makeTempDir("momentum-cli-source-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const db = openDb(dataDir);
     try {
-      upsertSourceItem(
+      upsertTrackerItem(
         db,
         {
           adapterKind: "local-fixture",
@@ -2531,7 +2531,7 @@ describe("momentum recovery clear", () => {
         },
         { now: () => 1_700_000_000_100 },
       );
-      upsertSourceItem(
+      upsertTrackerItem(
         db,
         {
           adapterKind: "manual",
@@ -2549,7 +2549,7 @@ describe("momentum recovery clear", () => {
     }
 
     const listResult = await run([
-      "source",
+      "tracker",
       "list",
       "--adapter",
       "local-fixture",
@@ -2565,7 +2565,8 @@ describe("momentum recovery clear", () => {
     >;
     expect(listPayload).toMatchObject({
       ok: true,
-      command: "source list",
+      command: "tracker list",
+      schemaVersion: 2,
       adapter: "local-fixture",
       count: 1,
     });
@@ -2575,7 +2576,7 @@ describe("momentum recovery clear", () => {
     expect(firstItem).toBeDefined();
     // The exhaustive per-field source-item JSON shape (adapterKind, externalKey,
     // title, status, url, timestamps, ...) is pinned in the fast lane by
-    // test/cli-renderers-output-contract.test.ts via a sourceItemToJsonShape
+    // test/cli-renderers-output-contract.test.ts via a trackerItemToJsonShape
     // toEqual over the full field set. Thinned here (NGX-432) to the end-to-end
     // CLI wiring proof that the renderer unit test cannot cover: the `--adapter`
     // filter selected the right item, an unlinked item serializes goalId as
@@ -2588,7 +2589,7 @@ describe("momentum recovery clear", () => {
 
     const sourceId = firstItem!["id"] as string;
     const getResult = await run([
-      "source",
+      "tracker",
       "get",
       sourceId,
       "--data-dir",
@@ -2597,12 +2598,13 @@ describe("momentum recovery clear", () => {
     ]);
     expect(getResult.code).toBe(0);
     const getPayload = JSON.parse(getResult.stdout) as Record<string, unknown>;
-    // `source get` envelope + get-by-id wiring and opaque metadata round-trip;
+    // `tracker get` envelope + get-by-id wiring and opaque metadata round-trip;
     // the full item field shape is pinned by the fast renderer contract cited
     // above.
     expect(getPayload).toMatchObject({
       ok: true,
-      command: "source get",
+      command: "tracker get",
+      schemaVersion: 2,
       item: {
         id: sourceId,
         metadata: { opaque: { priority: "high" } },
@@ -2610,10 +2612,10 @@ describe("momentum recovery clear", () => {
     });
   });
 
-  it("source get reports a stable not_found error for unknown source item ids", async () => {
+  it("tracker get reports a stable not_found error for unknown source item ids", async () => {
     const dataDir = makeTempDir("momentum-cli-source-missing-");
     const result = await run([
-      "source",
+      "tracker",
       "get",
       "source_item_missing",
       "--data-dir",
@@ -2625,20 +2627,20 @@ describe("momentum recovery clear", () => {
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
-      command: "source get",
-      code: "source_item_not_found",
-      sourceItemId: "source_item_missing",
+      command: "tracker get",
+      code: "tracker_item_not_found",
+      trackerItemId: "source_item_missing",
     });
   });
 
-  it("source link is idempotent and surfaces previous/current goal ids", async () => {
+  it("tracker link is idempotent and surfaces previous/current goal ids", async () => {
     const dataDir = makeTempDir("momentum-cli-source-link-");
     const goalId = "goal-link-target";
 
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const db = openDb(dataDir);
-    let sourceItemId: string;
+    let trackerItemId: string;
     try {
       db.prepare(
         `INSERT INTO goals
@@ -2652,7 +2654,7 @@ describe("momentum recovery clear", () => {
         1,
         1,
       );
-      const item = upsertSourceItem(
+      const item = upsertTrackerItem(
         db,
         {
           adapterKind: "local-fixture",
@@ -2664,15 +2666,15 @@ describe("momentum recovery clear", () => {
         },
         { now: () => 1_700_000_000_100 },
       );
-      sourceItemId = item.id;
+      trackerItemId = item.id;
     } finally {
       db.close();
     }
 
     const firstLink = await run([
-      "source",
+      "tracker",
       "link",
-      sourceItemId,
+      trackerItemId,
       "--goal",
       goalId,
       "--data-dir",
@@ -2686,18 +2688,19 @@ describe("momentum recovery clear", () => {
     >;
     expect(firstPayload).toMatchObject({
       ok: true,
-      command: "source link",
+      command: "tracker link",
+      schemaVersion: 2,
       goalId,
-      sourceItemId,
+      trackerItemId,
       changed: true,
       previousGoalId: null,
       skippedReason: null,
     });
 
     const secondLink = await run([
-      "source",
+      "tracker",
       "link",
-      sourceItemId,
+      trackerItemId,
       "--goal",
       goalId,
       "--data-dir",
@@ -2711,27 +2714,27 @@ describe("momentum recovery clear", () => {
     >;
     expect(secondPayload).toMatchObject({
       ok: true,
-      command: "source link",
+      command: "tracker link",
       goalId,
-      sourceItemId,
+      trackerItemId,
       changed: false,
       skippedReason: "already_linked_to_target",
       previousGoalId: goalId,
     });
   });
 
-  it("source link creates a pending source_satisfied intent when completed goal evidence already exists", async () => {
+  it("tracker link creates a pending source_satisfied intent when completed goal evidence already exists", async () => {
     const dataDir = makeTempDir("momentum-cli-source-link-intent-");
     const goalId = "goal-link-intent";
 
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const { ingestEvidenceRecord } =
       await import("../src/core/evidence/records.js");
     const { listUpdateIntents } =
       await import("../src/core/intent/update-intents.js");
     const db = openDb(dataDir);
-    let sourceItemId: string;
+    let trackerItemId: string;
     try {
       db.prepare(
         `INSERT INTO goals
@@ -2754,7 +2757,7 @@ describe("momentum recovery clear", () => {
         goalId,
         ingestKey: `source-link-intent:${goalId}`,
       });
-      const item = upsertSourceItem(
+      const item = upsertTrackerItem(
         db,
         {
           adapterKind: "local-fixture",
@@ -2766,15 +2769,15 @@ describe("momentum recovery clear", () => {
         },
         { now: () => 1_700_000_000_100 },
       );
-      sourceItemId = item.id;
+      trackerItemId = item.id;
     } finally {
       db.close();
     }
 
     const link = await run([
-      "source",
+      "tracker",
       "link",
-      sourceItemId,
+      trackerItemId,
       "--goal",
       goalId,
       "--data-dir",
@@ -2796,21 +2799,24 @@ describe("momentum recovery clear", () => {
         goalId,
       });
       expect(intents).toHaveLength(1);
-      expect(intents[0]?.sourceItemId).toBe(sourceItemId);
+      expect(intents[0]).toMatchObject({
+        trackerItemId,
+        intentType: "source_satisfied",
+      });
     } finally {
       verifyDb.close();
     }
   });
 
-  it("source link returns goal_not_found, source_item_not_found, and linked_to_other_goal errors", async () => {
+  it("tracker link returns goal_not_found, tracker_item_not_found, and linked_to_other_goal errors", async () => {
     const dataDir = makeTempDir("momentum-cli-source-link-errors-");
     const goalAId = "goal-a-link-target";
 
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const db = openDb(dataDir);
     const goalBId = "goal-b-link-target";
-    let sourceItemId: string;
+    let trackerItemId: string;
     try {
       db.prepare(
         `INSERT INTO goals
@@ -2822,7 +2828,7 @@ describe("momentum recovery clear", () => {
            (id, title, branch, artifact_dir, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
       ).run(goalBId, "Goal B", "momentum/goal-b", "/tmp/goal-b", 1, 1);
-      const item = upsertSourceItem(
+      const item = upsertTrackerItem(
         db,
         {
           adapterKind: "local-fixture",
@@ -2834,15 +2840,15 @@ describe("momentum recovery clear", () => {
         },
         { now: () => 1_700_000_000_100 },
       );
-      sourceItemId = item.id;
+      trackerItemId = item.id;
     } finally {
       db.close();
     }
 
     const missingGoal = await run([
-      "source",
+      "tracker",
       "link",
-      sourceItemId,
+      trackerItemId,
       "--goal",
       "goal-missing",
       "--data-dir",
@@ -2856,14 +2862,14 @@ describe("momentum recovery clear", () => {
     >;
     expect(missingGoalPayload).toMatchObject({
       ok: false,
-      command: "source link",
+      command: "tracker link",
       code: "goal_not_found",
       goalId: "goal-missing",
-      sourceItemId,
+      trackerItemId,
     });
 
     const missingItem = await run([
-      "source",
+      "tracker",
       "link",
       "source_item_missing",
       "--goal",
@@ -2879,16 +2885,16 @@ describe("momentum recovery clear", () => {
     >;
     expect(missingItemPayload).toMatchObject({
       ok: false,
-      command: "source link",
-      code: "source_item_not_found",
-      sourceItemId: "source_item_missing",
+      command: "tracker link",
+      code: "tracker_item_not_found",
+      trackerItemId: "source_item_missing",
       goalId: goalAId,
     });
 
     const linkA = await run([
-      "source",
+      "tracker",
       "link",
-      sourceItemId,
+      trackerItemId,
       "--goal",
       goalAId,
       "--data-dir",
@@ -2898,9 +2904,9 @@ describe("momentum recovery clear", () => {
     expect(linkA.code).toBe(0);
 
     const collision = await run([
-      "source",
+      "tracker",
       "link",
-      sourceItemId,
+      trackerItemId,
       "--goal",
       goalBId,
       "--data-dir",
@@ -2914,22 +2920,22 @@ describe("momentum recovery clear", () => {
     >;
     expect(collisionPayload).toMatchObject({
       ok: false,
-      command: "source link",
+      command: "tracker link",
       code: "linked_to_other_goal",
-      sourceItemId,
+      trackerItemId,
       goalId: goalBId,
       currentGoalId: goalAId,
     });
   });
 
-  it("source unlink clears the link idempotently and surfaces source_item_not_found", async () => {
+  it("tracker unlink clears the link idempotently and surfaces tracker_item_not_found", async () => {
     const dataDir = makeTempDir("momentum-cli-source-unlink-");
     const goalId = "goal-unlink-target";
 
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const db = openDb(dataDir);
-    let sourceItemId: string;
+    let trackerItemId: string;
     try {
       db.prepare(
         `INSERT INTO goals
@@ -2943,7 +2949,7 @@ describe("momentum recovery clear", () => {
         1,
         1,
       );
-      const item = upsertSourceItem(
+      const item = upsertTrackerItem(
         db,
         {
           adapterKind: "local-fixture",
@@ -2956,15 +2962,15 @@ describe("momentum recovery clear", () => {
         },
         { now: () => 1_700_000_000_100 },
       );
-      sourceItemId = item.id;
+      trackerItemId = item.id;
     } finally {
       db.close();
     }
 
     const firstUnlink = await run([
-      "source",
+      "tracker",
       "unlink",
-      sourceItemId,
+      trackerItemId,
       "--data-dir",
       dataDir,
       "--json",
@@ -2976,16 +2982,17 @@ describe("momentum recovery clear", () => {
     >;
     expect(firstPayload).toMatchObject({
       ok: true,
-      command: "source unlink",
-      sourceItemId,
+      command: "tracker unlink",
+      schemaVersion: 2,
+      trackerItemId,
       changed: true,
       previousGoalId: goalId,
     });
 
     const secondUnlink = await run([
-      "source",
+      "tracker",
       "unlink",
-      sourceItemId,
+      trackerItemId,
       "--data-dir",
       dataDir,
       "--json",
@@ -2997,14 +3004,14 @@ describe("momentum recovery clear", () => {
     >;
     expect(secondPayload).toMatchObject({
       ok: true,
-      command: "source unlink",
-      sourceItemId,
+      command: "tracker unlink",
+      trackerItemId,
       changed: false,
       previousGoalId: null,
     });
 
     const missing = await run([
-      "source",
+      "tracker",
       "unlink",
       "source_item_missing",
       "--data-dir",
@@ -3018,9 +3025,9 @@ describe("momentum recovery clear", () => {
     >;
     expect(missingPayload).toMatchObject({
       ok: false,
-      command: "source unlink",
-      code: "source_item_not_found",
-      sourceItemId: "source_item_missing",
+      command: "tracker unlink",
+      code: "tracker_item_not_found",
+      trackerItemId: "source_item_missing",
     });
   });
 
@@ -3032,7 +3039,7 @@ describe("momentum recovery clear", () => {
     );
   });
 
-  it("source reconcile linear --dry-run records an audit-only run without writing items", async () => {
+  it("tracker reconcile linear --dry-run records an audit-only run without writing items", async () => {
     const dataDir = makeTempDir("momentum-cli-source-reconcile-dry-");
     const fakeIssue = {
       id: "lin-1",
@@ -3072,7 +3079,7 @@ describe("momentum recovery clear", () => {
 
     const result = await runWithDeps(
       [
-        "source",
+        "tracker",
         "reconcile",
         "linear",
         "--dry-run",
@@ -3092,7 +3099,8 @@ describe("momentum recovery clear", () => {
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: true,
-      command: "source reconcile linear",
+      command: "tracker reconcile linear",
+      schemaVersion: 2,
       adapter: "linear",
       dryRun: true,
       counts: { itemsObserved: 1, itemsCreated: 1 },
@@ -3119,16 +3127,16 @@ describe("momentum recovery clear", () => {
     ]);
 
     const { openDb } = await import("../src/adapters/db.js");
-    const { listSourceItems } = await import("../src/core/source/items.js");
+    const { listTrackerItems } = await import("../src/core/tracker/items.js");
     const db = openDb(dataDir);
     try {
-      expect(listSourceItems(db, { adapterKind: "linear" })).toEqual([]);
+      expect(listTrackerItems(db, { adapterKind: "linear" })).toEqual([]);
     } finally {
       db.close();
     }
   });
 
-  it("source reconcile linear live path upserts items and surfaces them via source list + doctor", async () => {
+  it("tracker reconcile linear live path upserts items and surfaces them via tracker list + doctor", async () => {
     const dataDir = makeTempDir("momentum-cli-source-reconcile-live-");
     const fakeIssue = {
       id: "lin-live-1",
@@ -3153,7 +3161,7 @@ describe("momentum recovery clear", () => {
     };
 
     const reconcile = await runWithDeps(
-      ["source", "reconcile", "linear", "--data-dir", dataDir, "--json"],
+      ["tracker", "reconcile", "linear", "--data-dir", dataDir, "--json"],
       { LINEAR_API_KEY: "test-key" },
       deps,
     );
@@ -3164,13 +3172,13 @@ describe("momentum recovery clear", () => {
     >;
     expect(reconcilePayload).toMatchObject({
       ok: true,
-      command: "source reconcile linear",
+      command: "tracker reconcile linear",
       dryRun: false,
       counts: { itemsObserved: 1, itemsCreated: 1 },
     });
 
     const listResult = await run([
-      "source",
+      "tracker",
       "list",
       "--adapter",
       "linear",
@@ -3207,14 +3215,14 @@ describe("momentum recovery clear", () => {
       string,
       unknown
     >;
-    const sources = doctorPayload["sources"] as Record<string, unknown>;
-    expect(sources).toMatchObject({
+    const trackers = doctorPayload["sources"] as Record<string, unknown>;
+    expect(trackers).toMatchObject({
       ok: true,
       lastReconciliation: { adapterKind: "linear", state: "succeeded" },
     });
   });
 
-  it("source list and doctor surface capped Linear reconciliation stop reasons", async () => {
+  it("tracker list and doctor surface capped Linear reconciliation stop reasons", async () => {
     const dataDir = makeTempDir("momentum-cli-source-reconcile-capped-");
     const issueA = {
       id: "lin-cap-1",
@@ -3256,7 +3264,7 @@ describe("momentum recovery clear", () => {
 
     const reconcile = await runWithDeps(
       [
-        "source",
+        "tracker",
         "reconcile",
         "linear",
         "--data-dir",
@@ -3280,7 +3288,7 @@ describe("momentum recovery clear", () => {
     });
 
     const listJson = await run([
-      "source",
+      "tracker",
       "list",
       "--adapter",
       "linear",
@@ -3300,7 +3308,7 @@ describe("momentum recovery clear", () => {
     });
 
     const listText = await run([
-      "source",
+      "tracker",
       "list",
       "--adapter",
       "linear",
@@ -3336,10 +3344,10 @@ describe("momentum recovery clear", () => {
     expect(doctorText.stdout).toContain("stopped=max_pages");
   });
 
-  it("source reconcile linear without LINEAR_API_KEY returns source_auth_unavailable from the default client", async () => {
+  it("tracker reconcile linear without LINEAR_API_KEY returns tracker_auth_unavailable from the default client", async () => {
     const dataDir = makeTempDir("momentum-cli-source-reconcile-noauth-");
     const result = await runWithDeps(
-      ["source", "reconcile", "linear", "--data-dir", dataDir, "--json"],
+      ["tracker", "reconcile", "linear", "--data-dir", dataDir, "--json"],
       {},
       {},
     );
@@ -3347,7 +3355,7 @@ describe("momentum recovery clear", () => {
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
-      command: "source reconcile linear",
+      command: "tracker reconcile linear",
       adapter: "linear",
     });
     const paginationStopped = payload["paginationStopped"] as Record<
@@ -3356,16 +3364,16 @@ describe("momentum recovery clear", () => {
     >;
     expect(paginationStopped).toMatchObject({
       reason: "auth_unavailable",
-      code: "source_auth_unavailable",
+      code: "tracker_auth_unavailable",
     });
     const runPayload = payload["run"] as Record<string, unknown>;
     expect(runPayload["state"]).toBe("failed");
   });
 
-  it("source reconcile rejects unknown adapter kinds with unsupported_source_adapter", async () => {
+  it("tracker reconcile rejects unknown adapter kinds with unsupported_tracker_adapter", async () => {
     const dataDir = makeTempDir("momentum-cli-source-reconcile-bad-");
     const result = await runWithDeps(
-      ["source", "reconcile", "github", "--data-dir", dataDir, "--json"],
+      ["tracker", "reconcile", "github", "--data-dir", dataDir, "--json"],
       { LINEAR_API_KEY: "x" },
       {},
     );
@@ -3373,8 +3381,8 @@ describe("momentum recovery clear", () => {
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
-      command: "source reconcile linear",
-      code: "unsupported_source_adapter",
+      command: "tracker reconcile linear",
+      code: "unsupported_tracker_adapter",
     });
   });
 });
@@ -3385,7 +3393,7 @@ describe("momentum CLI external apply post-apply reconciliation", () => {
     const db = openDb(dataDir);
     try {
       db.prepare(
-        `INSERT INTO source_items
+        `INSERT INTO tracker_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES (?, 'linear', ?, 'NGX-CLI', ?, 'CLI issue', 'Todo', '{}',
@@ -3398,7 +3406,7 @@ describe("momentum CLI external apply post-apply reconciliation", () => {
       db.prepare(
         `INSERT INTO update_intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
-            reason, source_item_id, status, idempotency_key, created_at,
+            reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
          VALUES (?, 'linear', ?, 'source_satisfied', '{"kind":"comment"}',
                  'evidence says done', ?, 'pending', ?, 1, 1,
@@ -3569,17 +3577,18 @@ describe("momentum project status", () => {
       ok: true,
       command: "project status",
       dataDir,
+      schemaVersion: 2,
       filters: {
-        source: null,
+        adapter: null,
         projectId: null,
         projectName: null,
         milestoneId: null,
         milestoneName: null,
       },
       staleThresholdMs: 24 * 60 * 60 * 1000,
-      totalSourceItemCount: 0,
-      truncatedSourceItems: false,
-      sourceItems: [],
+      totalTrackerItemCount: 0,
+      truncatedTrackerItems: false,
+      trackerItems: [],
       mismatches: [],
       totalMismatchCount: 0,
       truncatedMismatches: false,
@@ -3595,13 +3604,37 @@ describe("momentum project status", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("echoes filter values back when --source, --project, and --milestone are passed", async () => {
+  it("rejects the removed --source flag with a usage error", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+
+    const result = await run([
+      "project",
+      "status",
+      "--source",
+      "linear",
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe("");
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      code: "usage_error",
+      message:
+        "Unknown flag for project status: --source. Use --adapter to filter by tracker adapter.",
+    });
+  });
+
+  it("echoes filter values back when --adapter, --project, and --milestone are passed", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const db = openDb(dataDir);
     try {
-      upsertSourceItem(
+      upsertTrackerItem(
         db,
         {
           adapterKind: "linear",
@@ -3625,7 +3658,7 @@ describe("momentum project status", () => {
     const result = await run([
       "project",
       "status",
-      "--source",
+      "--adapter",
       "linear",
       "--project",
       "Alpha",
@@ -3639,14 +3672,14 @@ describe("momentum project status", () => {
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload["filters"]).toEqual({
-      source: "linear",
+      adapter: "linear",
       projectId: "Alpha",
       projectName: "Alpha",
       milestoneId: "Mile 1",
       milestoneName: "Mile 1",
     });
     expect(
-      (payload["counts"] as Record<string, unknown>)["sourceItems"],
+      (payload["counts"] as Record<string, unknown>)["trackerItems"],
     ).toMatchObject({
       total: 1,
     });
@@ -3655,10 +3688,10 @@ describe("momentum project status", () => {
   it("dedupes duplicate Linear rows by externalKey in project status JSON output", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const db = openDb(dataDir);
     try {
-      upsertSourceItem(
+      upsertTrackerItem(
         db,
         {
           adapterKind: "linear",
@@ -3674,7 +3707,7 @@ describe("momentum project status", () => {
         },
         { now: () => 1_700_000_000_100 },
       );
-      upsertSourceItem(
+      upsertTrackerItem(
         db,
         {
           adapterKind: "linear",
@@ -3690,7 +3723,7 @@ describe("momentum project status", () => {
         },
         { now: () => 1_700_000_000_200 },
       );
-      upsertSourceItem(
+      upsertTrackerItem(
         db,
         {
           adapterKind: "linear",
@@ -3713,7 +3746,7 @@ describe("momentum project status", () => {
     const result = await run([
       "project",
       "status",
-      "--source",
+      "--adapter",
       "linear",
       "--project",
       "Momentum",
@@ -3726,16 +3759,16 @@ describe("momentum project status", () => {
 
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
-    const sourceItems = payload["sourceItems"] as Array<
+    const trackerItems = payload["trackerItems"] as Array<
       Record<string, unknown>
     >;
-    expect(sourceItems).toHaveLength(1);
-    expect(sourceItems[0]?.["externalId"]).toBe(
+    expect(trackerItems).toHaveLength(1);
+    expect(trackerItems[0]?.["externalId"]).toBe(
       "00000000-0000-4000-8000-000000000004",
     );
-    expect(sourceItems[0]?.["status"]).toBe("Todo");
+    expect(trackerItems[0]?.["status"]).toBe("Todo");
     expect(
-      (payload["counts"] as Record<string, unknown>)["sourceItems"],
+      (payload["counts"] as Record<string, unknown>)["trackerItems"],
     ).toMatchObject({
       total: 1,
     });
@@ -3744,10 +3777,10 @@ describe("momentum project status", () => {
   it("matches --project and --milestone against non-UUID metadata ids", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const db = openDb(dataDir);
     try {
-      upsertSourceItem(
+      upsertTrackerItem(
         db,
         {
           adapterKind: "linear",
@@ -3771,7 +3804,7 @@ describe("momentum project status", () => {
     const result = await run([
       "project",
       "status",
-      "--source",
+      "--adapter",
       "linear",
       "--project",
       "proj-1",
@@ -3785,14 +3818,14 @@ describe("momentum project status", () => {
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload["filters"]).toEqual({
-      source: "linear",
+      adapter: "linear",
       projectId: "proj-1",
       projectName: "proj-1",
       milestoneId: "ms-1",
       milestoneName: "ms-1",
     });
     expect(
-      (payload["counts"] as Record<string, unknown>)["sourceItems"],
+      (payload["counts"] as Record<string, unknown>)["trackerItems"],
     ).toMatchObject({
       total: 1,
     });
@@ -3801,12 +3834,12 @@ describe("momentum project status", () => {
   it("applies --stale-threshold-hours to reconciliation warning detection", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
-    const { startSourceReconciliationRun, finishSourceReconciliationRun } =
-      await import("../src/core/source/reconciliation-runs.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
+    const { startTrackerReconciliationRun, finishTrackerReconciliationRun } =
+      await import("../src/core/tracker/reconciliation-runs.js");
     const db = openDb(dataDir);
     try {
-      upsertSourceItem(
+      upsertTrackerItem(
         db,
         {
           adapterKind: "linear",
@@ -3821,12 +3854,12 @@ describe("momentum project status", () => {
         { now: () => 1_000 },
       );
       const longAgo = Date.now() - 48 * 60 * 60 * 1000;
-      const reconRun = startSourceReconciliationRun(
+      const reconRun = startTrackerReconciliationRun(
         db,
         { adapterKind: "linear" },
         { now: () => longAgo },
       );
-      finishSourceReconciliationRun(
+      finishTrackerReconciliationRun(
         db,
         {
           runId: reconRun.id,
@@ -3879,7 +3912,7 @@ describe("momentum project status", () => {
   it("surfaces manual_recovery_required as the highest-priority next action", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const db = openDb(dataDir);
     try {
       db.prepare(
@@ -3901,7 +3934,7 @@ describe("momentum project status", () => {
         1_700_000_000_000,
         1_700_000_000_500,
       );
-      upsertSourceItem(
+      upsertTrackerItem(
         db,
         {
           adapterKind: "linear",
@@ -3945,12 +3978,12 @@ describe("momentum project status", () => {
   it("text mode truncates large source item lists with an `and N more` line", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const db = openDb(dataDir);
     try {
       for (let i = 0; i < 25; i += 1) {
         const key = `NGX-BIG-${String(i).padStart(3, "0")}`;
-        upsertSourceItem(
+        upsertTrackerItem(
           db,
           {
             adapterKind: "linear",
@@ -3973,8 +4006,8 @@ describe("momentum project status", () => {
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Project status");
-    expect(result.stdout).toContain("Source items: 25");
-    expect(result.stdout).toContain("Top source items:");
+    expect(result.stdout).toContain("Tracker items: 25");
+    expect(result.stdout).toContain("Top tracker items:");
     expect(result.stdout).toContain("... and 5 more");
     expect(result.stdout).toContain("Next action:");
     expect(result.stderr).toBe("");
@@ -4037,13 +4070,13 @@ describe("momentum project status", () => {
   it("surfaces pending update intents in the project status JSON payload", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const { createUpdateIntent } =
       await import("../src/core/intent/update-intents.js");
     const db = openDb(dataDir);
     const recentNow = Date.now();
     try {
-      const item = upsertSourceItem(
+      const item = upsertTrackerItem(
         db,
         {
           adapterKind: "linear",
@@ -4064,7 +4097,7 @@ describe("momentum project status", () => {
           intentType: "source_satisfied",
           reason: "Goal completed",
           targetExternalId: "issue-cli-intent",
-          sourceItemId: item.id,
+          trackerItemId: item.id,
           idempotencyKey: "linear:issue-cli-intent:source_satisfied:cli",
         },
         { now: () => recentNow },
@@ -4106,13 +4139,13 @@ describe("momentum project status", () => {
   it("surfaces pending intents for legacy scalar project and milestone metadata", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const { createUpdateIntent } =
       await import("../src/core/intent/update-intents.js");
     const db = openDb(dataDir);
     const recentNow = Date.now();
     try {
-      const item = upsertSourceItem(
+      const item = upsertTrackerItem(
         db,
         {
           adapterKind: "linear",
@@ -4136,7 +4169,7 @@ describe("momentum project status", () => {
           intentType: "source_satisfied",
           reason: "Legacy metadata should still be surfaced",
           targetExternalId: "NGX-LEGACY-META",
-          sourceItemId: item.id,
+          trackerItemId: item.id,
           idempotencyKey:
             "linear:issue-cli-legacy-metadata:source_satisfied:legacy",
         },
@@ -4149,7 +4182,7 @@ describe("momentum project status", () => {
     const result = await run([
       "project",
       "status",
-      "--source",
+      "--adapter",
       "linear",
       "--project",
       "Momentum",
@@ -4168,7 +4201,7 @@ describe("momentum project status", () => {
     >;
     expect(intents).toHaveLength(1);
     expect(payload["filters"]).toMatchObject({
-      source: "linear",
+      adapter: "linear",
       projectName: "Momentum",
       milestoneName: "Momentum-Native Coding Workflow Adoption",
     });
@@ -4183,13 +4216,13 @@ describe("momentum project status", () => {
   it("surfaces an empty external apply rollup when no audits exist", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const { createUpdateIntent } =
       await import("../src/core/intent/update-intents.js");
     const db = openDb(dataDir);
     const recentNow = Date.now();
     try {
-      const item = upsertSourceItem(
+      const item = upsertTrackerItem(
         db,
         {
           adapterKind: "linear",
@@ -4210,7 +4243,7 @@ describe("momentum project status", () => {
           intentType: "source_satisfied",
           reason: "Goal completed",
           targetExternalId: "issue-no-audit",
-          sourceItemId: item.id,
+          trackerItemId: item.id,
           idempotencyKey: "linear:issue-no-audit:source_satisfied:cli",
         },
         { now: () => recentNow },
@@ -4273,7 +4306,7 @@ describe("momentum project status", () => {
   it("aggregates per-intent audit surfaces in project status JSON and text output", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const { createUpdateIntent } =
       await import("../src/core/intent/update-intents.js");
     const { claimIntentApply, finalizeIntentApply } =
@@ -4283,7 +4316,7 @@ describe("momentum project status", () => {
     let succeededIntentId = "";
     let blockedIntentId = "";
     try {
-      const itemSucceeded = upsertSourceItem(
+      const itemSucceeded = upsertTrackerItem(
         db,
         {
           adapterKind: "linear",
@@ -4304,13 +4337,13 @@ describe("momentum project status", () => {
           intentType: "source_satisfied",
           reason: "Goal completed",
           targetExternalId: "issue-succeeded",
-          sourceItemId: itemSucceeded.id,
+          trackerItemId: itemSucceeded.id,
           idempotencyKey: "linear:issue-succeeded:source_satisfied:cli",
         },
         { now: () => recentNow },
       );
       succeededIntentId = succeeded.intent.id;
-      const itemBlocked = upsertSourceItem(
+      const itemBlocked = upsertTrackerItem(
         db,
         {
           adapterKind: "linear",
@@ -4331,7 +4364,7 @@ describe("momentum project status", () => {
           intentType: "comment_requested",
           reason: "Followup",
           targetExternalId: "issue-blocked",
-          sourceItemId: itemBlocked.id,
+          trackerItemId: itemBlocked.id,
           idempotencyKey: "linear:issue-blocked:comment_requested:cli",
         },
         { now: () => recentNow + 1 },
@@ -4511,12 +4544,12 @@ describe("momentum project status", () => {
   it("honors --intent-stale-threshold-days to flag pending intents stale", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const { createUpdateIntent } =
       await import("../src/core/intent/update-intents.js");
     const db = openDb(dataDir);
     try {
-      const item = upsertSourceItem(
+      const item = upsertTrackerItem(
         db,
         {
           adapterKind: "linear",
@@ -4536,7 +4569,7 @@ describe("momentum project status", () => {
           adapterKind: "linear",
           intentType: "source_satisfied",
           reason: "Older intent",
-          sourceItemId: item.id,
+          trackerItemId: item.id,
           idempotencyKey: "linear:issue-cli-stale:source_satisfied:cli",
         },
         { now: () => 1_000 },

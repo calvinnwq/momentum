@@ -2,13 +2,18 @@ import {
   type ProjectRollup,
   type ProjectRollupExternalApply,
   type ProjectRollupFilters,
-  type ProjectRollupPendingIntentExternalApply
+  type ProjectRollupPendingIntentExternalApply,
 } from "../core/repo/project-rollup.js";
 import {
   intentApplyAuditToJsonShape,
-  type IntentApplyAuditJsonShape
+  type IntentApplyAuditJsonShape,
 } from "./intent.js";
-import { write, writeJson, type CliIo } from "./cli-output.js";
+import {
+  TRACKER_CONTRACT_SCHEMA_VERSION,
+  write,
+  writeJson,
+  type CliIo,
+} from "./cli-output.js";
 
 export function emitProjectStatusSuccess(
   parsed: { json: boolean },
@@ -17,7 +22,7 @@ export function emitProjectStatusSuccess(
     dataDir: string;
     filters: ProjectRollupFilters;
     rollup: ProjectRollup;
-  }
+  },
 ): number {
   const { dataDir, filters, rollup } = input;
   if (parsed.json) {
@@ -32,13 +37,13 @@ export function emitProjectStatusSuccess(
 export function emitProjectStatusFailure(
   parsed: { json: boolean },
   io: CliIo,
-  failure: { code: string; message: string }
+  failure: { code: string; message: string },
 ): number {
   const payload = {
     ok: false,
     command: "project status",
     code: failure.code,
-    message: failure.message
+    message: failure.message,
   };
   if (parsed.json) {
     writeJson(io.stderr, payload);
@@ -51,26 +56,27 @@ export function emitProjectStatusFailure(
 export function projectStatusToJsonShape(
   dataDir: string,
   filters: ProjectRollupFilters,
-  rollup: ProjectRollup
+  rollup: ProjectRollup,
 ): Record<string, unknown> {
   return {
     ok: true,
     command: "project status",
     dataDir,
+    schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     filters: {
-      source: filters.adapterKind ?? null,
+      adapter: filters.adapterKind ?? null,
       projectId: filters.projectId ?? null,
       projectName: filters.projectName ?? null,
       milestoneId: filters.milestoneId ?? null,
-      milestoneName: filters.milestoneName ?? null
+      milestoneName: filters.milestoneName ?? null,
     },
     staleThresholdMs: rollup.reconciliationStaleThresholdMs,
     intentStaleThresholdMs: rollup.intentStaleThresholdMs,
     generatedAt: rollup.generatedAt,
     counts: rollup.counts,
-    sourceItems: rollup.sourceItems,
-    totalSourceItemCount: rollup.totalSourceItemCount,
-    truncatedSourceItems: rollup.truncatedSourceItems,
+    trackerItems: rollup.trackerItems,
+    totalTrackerItemCount: rollup.totalTrackerItemCount,
+    truncatedTrackerItems: rollup.truncatedTrackerItems,
     mismatches: rollup.mismatches,
     totalMismatchCount: rollup.totalMismatchCount,
     truncatedMismatches: rollup.truncatedMismatches,
@@ -78,18 +84,18 @@ export function projectStatusToJsonShape(
     pendingUpdateIntents: rollup.pendingUpdateIntents.map((intent) => ({
       ...intent,
       externalApply: projectRollupExternalApplyIntentToJsonShape(
-        intent.externalApply
-      )
+        intent.externalApply,
+      ),
     })),
     totalPendingUpdateIntentCount: rollup.totalPendingUpdateIntentCount,
     truncatedPendingUpdateIntents: rollup.truncatedPendingUpdateIntents,
     externalApply: projectRollupExternalApplyToJsonShape(rollup.externalApply),
-    nextAction: rollup.nextAction
+    nextAction: rollup.nextAction,
   };
 }
 
 export function projectRollupExternalApplyIntentToJsonShape(
-  external: ProjectRollupPendingIntentExternalApply
+  external: ProjectRollupPendingIntentExternalApply,
 ): {
   applyState: ProjectRollupPendingIntentExternalApply["applyState"];
   totalAttempts: number;
@@ -102,12 +108,12 @@ export function projectRollupExternalApplyIntentToJsonShape(
     counts: external.counts,
     latestAttempt: external.latestAttempt
       ? intentApplyAuditToJsonShape(external.latestAttempt)
-      : null
+      : null,
   };
 }
 
 export function projectRollupExternalApplyToJsonShape(
-  external: ProjectRollupExternalApply
+  external: ProjectRollupExternalApply,
 ): {
   pendingIntentApplyStateCounts: ProjectRollupExternalApply["pendingIntentApplyStateCounts"];
   pendingAuditCounts: ProjectRollupExternalApply["pendingAuditCounts"];
@@ -121,34 +127,34 @@ export function projectRollupExternalApplyToJsonShape(
     latestAttempt: external.latestAttempt
       ? {
           intentId: external.latestAttempt.intentId,
-          ...intentApplyAuditToJsonShape(external.latestAttempt)
+          ...intentApplyAuditToJsonShape(external.latestAttempt),
         }
-      : null
+      : null,
   };
 }
 
 export function renderProjectStatusText(
   rollup: ProjectRollup,
   filters: ProjectRollupFilters,
-  dataDir: string
+  dataDir: string,
 ): string {
   const lines: string[] = ["Project status"];
   lines.push(
-    `Filters: source=${filters.adapterKind ?? "(any)"} project=${
+    `Filters: adapter=${filters.adapterKind ?? "(any)"} project=${
       filters.projectId ?? filters.projectName ?? "(any)"
-    } milestone=${filters.milestoneId ?? filters.milestoneName ?? "(any)"}`
+    } milestone=${filters.milestoneId ?? filters.milestoneName ?? "(any)"}`,
   );
   lines.push(`Data dir: ${dataDir}`);
   lines.push(
-    `Source items: ${rollup.counts.sourceItems.total} ` +
-      `(linked=${rollup.counts.sourceItems.linkedToGoal}, unlinked=${rollup.counts.sourceItems.unlinked})`
+    `Tracker items: ${rollup.counts.trackerItems.total} ` +
+      `(linked=${rollup.counts.trackerItems.linkedToGoal}, unlinked=${rollup.counts.trackerItems.unlinked})`,
   );
-  const statusSummary = Object.entries(rollup.counts.sourceItems.byStatus)
+  const statusSummary = Object.entries(rollup.counts.trackerItems.byStatus)
     .sort(([a], [b]) => (a < b ? -1 : 1))
     .map(([status, count]) => `${status}=${count}`)
     .join(", ");
   if (statusSummary.length > 0) {
-    lines.push(`Source status: ${statusSummary}`);
+    lines.push(`Tracker status: ${statusSummary}`);
   }
   const goalSummary = Object.entries(rollup.counts.goals.byState)
     .sort(([a], [b]) => (a < b ? -1 : 1))
@@ -157,23 +163,23 @@ export function renderProjectStatusText(
   lines.push(
     `Goals: total=${rollup.counts.goals.total}` +
       (goalSummary.length > 0 ? ` (${goalSummary})` : "") +
-      `, manual_recovery=${rollup.counts.goals.needingManualRecovery}`
+      `, manual_recovery=${rollup.counts.goals.needingManualRecovery}`,
   );
   lines.push(
     `Evidence: total=${rollup.counts.evidence.totalRecords}, ` +
       `goals_with_evidence=${rollup.counts.evidence.goalsWithEvidence}, ` +
-      `goals_without_evidence=${rollup.counts.evidence.goalsWithoutEvidence}`
+      `goals_without_evidence=${rollup.counts.evidence.goalsWithoutEvidence}`,
   );
   lines.push(
-    `Mismatches: source_done_goal_not_terminal=${rollup.counts.mismatches.source_done_goal_not_terminal}, ` +
-      `goal_done_source_not_done=${rollup.counts.mismatches.goal_done_source_not_done}, ` +
+    `Mismatches: tracker_done_goal_not_terminal=${rollup.counts.mismatches.tracker_done_goal_not_terminal}, ` +
+      `goal_done_tracker_not_done=${rollup.counts.mismatches.goal_done_tracker_not_done}, ` +
       `evidence_missing_after_completion=${rollup.counts.mismatches.evidence_missing_after_completion}, ` +
-      `manual_recovery_required=${rollup.counts.mismatches.manual_recovery_required}`
+      `manual_recovery_required=${rollup.counts.mismatches.manual_recovery_required}`,
   );
   lines.push(
     `Pending external update intents: ${rollup.counts.pendingUpdateIntents} ` +
       `(stale=${rollup.counts.staleUpdateIntents}, ` +
-      `stale_threshold_ms=${rollup.intentStaleThresholdMs})`
+      `stale_threshold_ms=${rollup.intentStaleThresholdMs})`,
   );
   const externalApplyStateCounts =
     rollup.externalApply.pendingIntentApplyStateCounts;
@@ -181,7 +187,7 @@ export function renderProjectStatusText(
   lines.push(
     `Pending external apply state: idle=${externalApplyStateCounts.idle}, ` +
       `in_flight=${externalApplyStateCounts.in_flight}, ` +
-      `blocked=${externalApplyStateCounts.blocked}`
+      `blocked=${externalApplyStateCounts.blocked}`,
   );
   lines.push(
     `Pending external apply audits: total=${rollup.externalApply.totalAttempts}, ` +
@@ -189,7 +195,7 @@ export function renderProjectStatusText(
       `failed=${externalApplyAuditCounts.failed}, ` +
       `claimed=${externalApplyAuditCounts.claimed}, ` +
       `blocked=${externalApplyAuditCounts.blocked}, ` +
-      `audit_incomplete=${externalApplyAuditCounts.audit_incomplete}`
+      `audit_incomplete=${externalApplyAuditCounts.audit_incomplete}`,
   );
   const latestExternalApply = rollup.externalApply.latestAttempt;
   if (latestExternalApply) {
@@ -197,7 +203,7 @@ export function renderProjectStatusText(
       `Latest external apply: ${latestExternalApply.id} ${latestExternalApply.lifecycleState}` +
         ` intent=${latestExternalApply.intentId}` +
         ` (result=${latestExternalApply.resultStatus ?? "(none)"}` +
-        ` code=${latestExternalApply.resultCode ?? "(none)"})`
+        ` code=${latestExternalApply.resultCode ?? "(none)"})`,
     );
   } else {
     lines.push("Latest external apply: (none)");
@@ -210,27 +216,27 @@ export function renderProjectStatusText(
         warning.ageMs === null ? "" : ` (age_ms=${warning.ageMs})`;
       const errorText = warning.error ? ` error=${warning.error}` : "";
       lines.push(
-        `Reconciliation warning: ${warning.adapterKind} ${warning.reason}${ageText}${errorText}`
+        `Reconciliation warning: ${warning.adapterKind} ${warning.reason}${ageText}${errorText}`,
       );
     }
   }
   lines.push("");
-  lines.push("Top source items:");
-  if (rollup.sourceItems.length === 0) {
+  lines.push("Top tracker items:");
+  if (rollup.trackerItems.length === 0) {
     lines.push("  (none)");
   } else {
-    for (const item of rollup.sourceItems) {
+    for (const item of rollup.trackerItems) {
       const goalText = item.goalId
         ? `goal=${item.goalId} (${item.goalState ?? "unknown"})`
         : "goal=(none)";
       lines.push(
         `  - [${item.adapterKind}] ${item.externalKey ?? item.externalId} ` +
-          `${item.title}${item.status ? ` (${item.status})` : ""} ${goalText}`
+          `${item.title}${item.status ? ` (${item.status})` : ""} ${goalText}`,
       );
     }
-    if (rollup.truncatedSourceItems) {
+    if (rollup.truncatedTrackerItems) {
       lines.push(
-        `  ... and ${rollup.totalSourceItemCount - rollup.sourceItems.length} more`
+        `  ... and ${rollup.totalTrackerItemCount - rollup.trackerItems.length} more`,
       );
     }
   }
@@ -241,13 +247,13 @@ export function renderProjectStatusText(
   } else {
     for (const mismatch of rollup.mismatches) {
       lines.push(
-        `  - [${mismatch.kind}] ${mismatch.externalKey ?? mismatch.sourceItemId} ` +
-          `source=${mismatch.sourceStatus ?? "(none)"} goal=${mismatch.goalId ?? "(none)"} (${mismatch.goalState ?? "unknown"})`
+        `  - [${mismatch.kind}] ${mismatch.externalKey ?? mismatch.trackerItemId} ` +
+          `tracker=${mismatch.trackerStatus ?? "(none)"} goal=${mismatch.goalId ?? "(none)"} (${mismatch.goalState ?? "unknown"})`,
       );
     }
     if (rollup.truncatedMismatches) {
       lines.push(
-        `  ... and ${rollup.totalMismatchCount - rollup.mismatches.length} more`
+        `  ... and ${rollup.totalMismatchCount - rollup.mismatches.length} more`,
       );
     }
   }
@@ -262,27 +268,29 @@ export function renderProjectStatusText(
         ? ` target=${intent.targetExternalId}`
         : "";
       const goalText = intent.goalId ? ` goal=${intent.goalId}` : "";
-      const sourceText = intent.sourceItemId
-        ? ` source=${intent.sourceItemId}`
+      const trackerText = intent.trackerItemId
+        ? ` tracker=${intent.trackerItemId}`
         : "";
       const latestText = intent.externalApply.latestAttempt
         ? ` latest=${intent.externalApply.latestAttempt.lifecycleState}`
         : "";
       lines.push(
         `  - [${intent.adapterKind}/${intent.intentType}] ${intent.intentId}` +
-          `${targetText}${goalText}${sourceText} age_ms=${intent.ageMs}${staleText}` +
+          `${targetText}${goalText}${trackerText} age_ms=${intent.ageMs}${staleText}` +
           ` apply=${intent.externalApply.applyState}` +
-          ` attempts=${intent.externalApply.totalAttempts}${latestText}`
+          ` attempts=${intent.externalApply.totalAttempts}${latestText}`,
       );
     }
     if (rollup.truncatedPendingUpdateIntents) {
       lines.push(
-        `  ... and ${rollup.totalPendingUpdateIntentCount - rollup.pendingUpdateIntents.length} more`
+        `  ... and ${rollup.totalPendingUpdateIntentCount - rollup.pendingUpdateIntents.length} more`,
       );
     }
   }
   lines.push("");
-  lines.push(`Next action: ${rollup.nextAction.kind} — ${rollup.nextAction.message}`);
+  lines.push(
+    `Next action: ${rollup.nextAction.kind} — ${rollup.nextAction.message}`,
+  );
   lines.push("");
   return lines.join("\n");
 }

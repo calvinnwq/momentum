@@ -5,21 +5,21 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
-  reconcileLinearSource,
+  reconcileLinearTracker,
   type LinearReconciliationClient,
   type LinearReconciliationFetchPageInput,
   type LinearReconciliationFetchPageResult,
-} from "../src/core/source/reconciliation.js";
+} from "../src/core/tracker/reconciliation.js";
 
 /**
  * NGX-369 read-only invariant proof for the Linear source reconciliation adapter.
  *
- * The source-adapters contract (SPEC.md) requires
+ * The tracker-adapters contract (SPEC.md) requires
  * that source adapters write ONLY to Momentum's local durable source tables and
  * never own Goal / Iteration / Job state, never touch git, and never perform or
  * queue automatic external writes. The existing source-reconciliation tests
- * assert the positive durable writes (source_items / source_snapshots /
- * source_reconciliation_runs) and the dry-run no-write path, but nothing pins the
+ * assert the positive durable writes (tracker_items / tracker_snapshots /
+ * tracker_reconciliation_runs) and the dry-run no-write path, but nothing pins the
  * negative side: that an actual reconciliation leaves every execution-state and
  * external-write table untouched. These tests close that gap.
  */
@@ -107,9 +107,9 @@ function snapshotTables(
 
 // Tables the source reconciliation adapter is the durable owner of (M5 contract).
 const SOURCE_TABLES = [
-  "source_items",
-  "source_snapshots",
-  "source_reconciliation_runs",
+  "tracker_items",
+  "tracker_snapshots",
+  "tracker_reconciliation_runs",
 ] as const;
 
 // Execution-state and external-write tables a read-only source adapter must
@@ -259,7 +259,7 @@ function seedForbiddenTables(db: MomentumDb): void {
   `);
 }
 
-describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
+describe("reconcileLinearTracker read-only invariants (NGX-369)", () => {
   it("writes only to the source_* tables and leaves every execution-state and external-write table unchanged", async () => {
     const db = openDb(makeTempDir());
     try {
@@ -268,7 +268,7 @@ describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
 
       // Exercise the busiest durable-write paths against a single db: create,
       // then update, then skip + per-item error, then dry-run.
-      await reconcileLinearSource(db, {
+      await reconcileLinearTracker(db, {
         client: singlePageClient([
           makeLinearIssue({
             id: "issue-a",
@@ -283,7 +283,7 @@ describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
         ]),
       });
       // Update pass: newer observedAt -> upsert + a fresh snapshot for issue-a.
-      await reconcileLinearSource(db, {
+      await reconcileLinearTracker(db, {
         client: singlePageClient([
           makeLinearIssue({
             id: "issue-a",
@@ -293,7 +293,7 @@ describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
         ]),
       });
       // Stale issue-a (skipped, no write) alongside a malformed issue (per-item error, no write).
-      await reconcileLinearSource(db, {
+      await reconcileLinearTracker(db, {
         client: singlePageClient([
           makeLinearIssue({
             id: "issue-a",
@@ -304,7 +304,7 @@ describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
         ]),
       });
       // Dry-run never persists items or snapshots, but still records the run.
-      await reconcileLinearSource(db, {
+      await reconcileLinearTracker(db, {
         client: singlePageClient([
           makeLinearIssue({ id: "issue-c", identifier: "NGX-3" }),
         ]),
@@ -312,9 +312,9 @@ describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
       });
 
       // The adapter IS the durable owner of these: they must be populated.
-      expect(countRows(db, "source_items")).toBe(2); // issue-a, issue-b (issue-c was dry-run only)
-      expect(countRows(db, "source_snapshots")).toBe(3); // 2 creates + 1 update
-      expect(countRows(db, "source_reconciliation_runs")).toBe(4); // one row per attempt, incl. dry-run
+      expect(countRows(db, "tracker_items")).toBe(2); // issue-a, issue-b (issue-c was dry-run only)
+      expect(countRows(db, "tracker_snapshots")).toBe(3); // 2 creates + 1 update
+      expect(countRows(db, "tracker_reconciliation_runs")).toBe(4); // one row per attempt, incl. dry-run
 
       for (const table of FORBIDDEN_TABLES) {
         expect(
@@ -331,7 +331,7 @@ describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
-      await reconcileLinearSource(db, {
+      await reconcileLinearTracker(db, {
         client: singlePageClient([
           makeLinearIssue({ id: "issue-a", identifier: "NGX-1" }),
           makeLinearIssue({ id: "issue-b", identifier: "NGX-2" }),
@@ -365,7 +365,10 @@ describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
         },
       };
 
-      await reconcileLinearSource(db, { client, filters: { projectId: "p1" } });
+      await reconcileLinearTracker(db, {
+        client,
+        filters: { projectId: "p1" },
+      });
 
       expect(inputs).toHaveLength(1);
       // The adapter's sole outward surface is a read request: exactly a pagination

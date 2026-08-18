@@ -5,11 +5,11 @@ import path from "node:path";
 
 import { openDb } from "../src/adapters/db.js";
 import {
-  finishSourceReconciliationRun,
-  getSourceReconciliationRun,
-  listSourceReconciliationRuns,
-  startSourceReconciliationRun
-} from "../src/core/source/reconciliation-runs.js";
+  finishTrackerReconciliationRun,
+  getTrackerReconciliationRun,
+  listTrackerReconciliationRuns,
+  startTrackerReconciliationRun,
+} from "../src/core/tracker/reconciliation-runs.js";
 
 const tempRoots: string[] = [];
 
@@ -30,13 +30,13 @@ describe("source reconciliation run storage", () => {
   it("starts and finishes a reconciliation run with durable counts and metadata", () => {
     const db = openDb(makeTempDir());
     try {
-      const started = startSourceReconciliationRun(
+      const started = startTrackerReconciliationRun(
         db,
         {
           adapterKind: "local-fixture",
-          metadata: { filters: { project: "Momentum" } }
+          metadata: { filters: { project: "Momentum" } },
         },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
 
       expect(started).toEqual({
@@ -50,20 +50,20 @@ describe("source reconciliation run storage", () => {
         itemsUpserted: 0,
         metadata: { filters: { project: "Momentum" } },
         createdAt: 1_000,
-        updatedAt: 1_000
+        updatedAt: 1_000,
       });
-      expect(getSourceReconciliationRun(db, started.id)).toEqual(started);
+      expect(getTrackerReconciliationRun(db, started.id)).toEqual(started);
 
-      const finished = finishSourceReconciliationRun(
+      const finished = finishTrackerReconciliationRun(
         db,
         {
           runId: started.id,
           state: "succeeded",
           itemsSeen: 3,
           itemsUpserted: 2,
-          metadata: { filters: { project: "Momentum" }, nextCursor: null }
+          metadata: { filters: { project: "Momentum" }, nextCursor: null },
         },
-        { now: () => 1_500 }
+        { now: () => 1_500 },
       );
 
       expect(finished).toEqual({
@@ -73,9 +73,9 @@ describe("source reconciliation run storage", () => {
         itemsSeen: 3,
         itemsUpserted: 2,
         metadata: { filters: { project: "Momentum" }, nextCursor: null },
-        updatedAt: 1_500
+        updatedAt: 1_500,
       });
-      expect(getSourceReconciliationRun(db, started.id)).toEqual(finished);
+      expect(getTrackerReconciliationRun(db, started.id)).toEqual(finished);
     } finally {
       db.close();
     }
@@ -84,22 +84,22 @@ describe("source reconciliation run storage", () => {
   it("records failed reconciliation runs with stable error text", () => {
     const db = openDb(makeTempDir());
     try {
-      const started = startSourceReconciliationRun(
+      const started = startTrackerReconciliationRun(
         db,
         { adapterKind: "local-fixture" },
-        { now: () => 2_000 }
+        { now: () => 2_000 },
       );
 
-      const failed = finishSourceReconciliationRun(
+      const failed = finishTrackerReconciliationRun(
         db,
         {
           runId: started.id,
           state: "failed",
           error: "adapter unavailable",
           itemsSeen: 1,
-          itemsUpserted: 0
+          itemsUpserted: 0,
         },
-        { now: () => 2_100 }
+        { now: () => 2_100 },
       );
 
       expect(failed?.state).toBe("failed");
@@ -115,24 +115,24 @@ describe("source reconciliation run storage", () => {
   it("does not overwrite a reconciliation run after it reaches a terminal state", () => {
     const db = openDb(makeTempDir());
     try {
-      const started = startSourceReconciliationRun(
+      const started = startTrackerReconciliationRun(
         db,
         { adapterKind: "local-fixture", metadata: { cursor: "first" } },
-        { now: () => 3_000 }
+        { now: () => 3_000 },
       );
 
-      const finished = finishSourceReconciliationRun(
+      const finished = finishTrackerReconciliationRun(
         db,
         {
           runId: started.id,
           state: "succeeded",
           itemsSeen: 4,
           itemsUpserted: 4,
-          metadata: { cursor: null }
+          metadata: { cursor: null },
         },
-        { now: () => 3_500 }
+        { now: () => 3_500 },
       );
-      const lateFinish = finishSourceReconciliationRun(
+      const lateFinish = finishTrackerReconciliationRun(
         db,
         {
           runId: started.id,
@@ -140,13 +140,13 @@ describe("source reconciliation run storage", () => {
           error: "late failure",
           itemsSeen: 0,
           itemsUpserted: 0,
-          metadata: { cursor: "stale" }
+          metadata: { cursor: "stale" },
         },
-        { now: () => 4_000 }
+        { now: () => 4_000 },
       );
 
       expect(lateFinish).toEqual(finished);
-      expect(getSourceReconciliationRun(db, started.id)).toEqual(finished);
+      expect(getTrackerReconciliationRun(db, started.id)).toEqual(finished);
     } finally {
       db.close();
     }
@@ -155,31 +155,31 @@ describe("source reconciliation run storage", () => {
   it("lists reconciliation runs deterministically with optional adapter filtering", () => {
     const db = openDb(makeTempDir());
     try {
-      const laterFixture = startSourceReconciliationRun(
+      const laterFixture = startTrackerReconciliationRun(
         db,
         { adapterKind: "local-fixture" },
-        { now: () => 2_000 }
+        { now: () => 2_000 },
       );
-      const manual = startSourceReconciliationRun(
+      const manual = startTrackerReconciliationRun(
         db,
         { adapterKind: "manual" },
-        { now: () => 1_500 }
+        { now: () => 1_500 },
       );
-      const earlierFixture = startSourceReconciliationRun(
+      const earlierFixture = startTrackerReconciliationRun(
         db,
         { adapterKind: "local-fixture" },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
 
-      expect(listSourceReconciliationRuns(db).map((run) => run.id)).toEqual([
+      expect(listTrackerReconciliationRuns(db).map((run) => run.id)).toEqual([
         earlierFixture.id,
         manual.id,
-        laterFixture.id
+        laterFixture.id,
       ]);
       expect(
-        listSourceReconciliationRuns(db, { adapterKind: "local-fixture" }).map(
-          (run) => run.id
-        )
+        listTrackerReconciliationRuns(db, { adapterKind: "local-fixture" }).map(
+          (run) => run.id,
+        ),
       ).toEqual([earlierFixture.id, laterFixture.id]);
     } finally {
       db.close();

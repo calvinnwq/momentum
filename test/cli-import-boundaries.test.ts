@@ -334,17 +334,17 @@ describe("M11 CLI import boundaries", () => {
       importSpecifiers(
         "src/domain-example.ts",
         `
-          import "./commands/source/index.js";
-          import type { Source } from "./commands/source/index.js";
-          export { render } from "./renderers/source.js";
+          import "./commands/tracker/index.js";
+          import type { Source } from "./commands/tracker/index.js";
+          export { render } from "./renderers/tracker.js";
           const lazy = import("./commands/intent/index.js");
           type Lazy = import("./renderers/intent.js").IntentJsonShape;
         `,
       ),
     ).toEqual([
-      "./commands/source/index.js",
-      "./commands/source/index.js",
-      "./renderers/source.js",
+      "./commands/tracker/index.js",
+      "./commands/tracker/index.js",
+      "./renderers/tracker.js",
       "./commands/intent/index.js",
       "./renderers/intent.js",
     ]);
@@ -355,7 +355,7 @@ describe("M11 CLI import boundaries", () => {
       importReferences(
         "src/renderers/example.ts",
         `
-          import { type SourceItem } from "../source-items.js";
+          import { type TrackerItem } from "../tracker-items.js";
           export { type WorkflowRunImport } from "../workflow-run-import.js";
           import { write, type CliIo } from "./cli-output.js";
           import DefaultExport, { type GoalSpec } from "../goal-spec.js";
@@ -363,7 +363,7 @@ describe("M11 CLI import boundaries", () => {
       ),
     ).toEqual([
       {
-        specifier: "../source-items.js",
+        specifier: "../tracker-items.js",
         isTypeOnly: true,
         runtimeBindings: [],
       },
@@ -404,7 +404,7 @@ describe("M11 CLI import boundaries", () => {
       true,
     );
     expect(isPersistenceOrMutationModule("src/core/goal/types.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/core/source/items.ts")).toBe(
+    expect(isPersistenceOrMutationModule("src/core/tracker/items.ts")).toBe(
       true,
     );
     expect(isPersistenceOrMutationModule("src/core/evidence/records.ts")).toBe(
@@ -443,8 +443,8 @@ describe("M11 CLI import boundaries", () => {
   it("allows only explicit renderer transitional imports", () => {
     const updateIntentTypeEdge: ImportEdge = {
       from: "src/renderers/evidence.ts",
-      to: "src/core/source/update-intent-generator.ts",
-      specifier: "../core/source/update-intent-generator.js",
+      to: "src/core/tracker/update-intent-generator.ts",
+      specifier: "../core/tracker/update-intent-generator.js",
       isTypeOnly: true,
       runtimeBindings: [],
     };
@@ -455,7 +455,7 @@ describe("M11 CLI import boundaries", () => {
       rendererTransitionalImportIsAllowed({
         ...updateIntentTypeEdge,
         isTypeOnly: false,
-        runtimeBindings: ["evaluateGoalForSourceSatisfiedIntents"],
+        runtimeBindings: ["evaluateGoalForTrackerSatisfiedIntents"],
       }),
     ).toBe(false);
 
@@ -509,7 +509,7 @@ describe("M11 CLI import boundaries", () => {
       .filter(([, exception]) => {
         return (
           !/^NGX-(?:447|448|449|450)$/.test(exception.ownerIssue) ||
-          !/^src\/(?:core\/(?:workflow|executors|goal|source|intent|daemon|repo|evidence)\/|config\/|shared\/|adapters\/)/.test(
+          !/^src\/(?:core\/(?:workflow|executors|goal|tracker|intent|daemon|repo|evidence)\/|config\/|shared\/|adapters\/)/.test(
             exception.targetHome,
           ) ||
           exception.reason.trim().length < 20
@@ -695,8 +695,8 @@ describe("M11 CLI import boundaries", () => {
       "src/adapters/acp-config.ts",
       "src/adapters/live-step-wrapper.ts",
       "src/adapters/host-bindings-registry.ts",
-      "src/adapters/source-adapter.ts",
-      "src/adapters/linear-source-adapter.ts",
+      "src/adapters/tracker-adapter.ts",
+      "src/adapters/linear-tracker-adapter.ts",
       "src/adapters/trusted-shell-config.ts",
       "src/adapters/no-mistakes-executor.ts",
       "src/adapters/no-mistakes-orchestrator.ts",
@@ -720,8 +720,8 @@ describe("M11 CLI import boundaries", () => {
       "src/acp-config.ts",
       "src/live-step-wrapper.ts",
       "src/host-bindings-registry.ts",
-      "src/source-adapter.ts",
-      "src/linear-source-adapter.ts",
+      "src/tracker-adapter.ts",
+      "src/linear-tracker-adapter.ts",
       "src/trusted-shell-config.ts",
       "src/no-mistakes-executor.ts",
       "src/no-mistakes-orchestrator.ts",
@@ -769,10 +769,10 @@ describe("M11 CLI import boundaries", () => {
     expect(architecture).toMatch(/src\/cli\.ts.*dispatch/s);
   });
 
-  it("documents how to add future source modules without creating root junk", () => {
+  it("documents how to add future runtime modules without creating root junk", () => {
     const standard = readFile("ARCHITECTURE.md");
 
-    expect(standard).toContain("## Adding Source Modules");
+    expect(standard).toContain("## Adding Runtime Modules");
     expect(standard).toMatch(/Do not add new root `src\/\*\.ts` modules/i);
     expect(standard).toMatch(/src\/core\/<domain>/);
     expect(standard).toMatch(/Transitional exceptions/i);

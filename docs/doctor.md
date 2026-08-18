@@ -130,8 +130,8 @@ The `effectiveIntentApply` block in the policy payload reports the resolved
 
 ## Sources block
 
-The JSON `sources` block reports SourceItem counts and the most recent
-reconciliation run:
+The JSON `sources` block reports current tracker-item counts and the most recent
+reconciliation run.
 
 ```json
 {

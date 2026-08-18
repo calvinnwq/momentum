@@ -66,7 +66,7 @@ function externalApplyAllowedPolicy(): string {
   );
 }
 
-function insertSourceItem(
+function insertTrackerItem(
   db: MomentumDb,
   args: {
     id: string;
@@ -78,7 +78,7 @@ function insertSourceItem(
   },
 ): void {
   db.prepare(
-    `INSERT INTO source_items
+    `INSERT INTO tracker_items
        (id, adapter_kind, external_id, external_key, url, title, status,
         metadata_json, last_observed_at, goal_id, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, NULL, '{}', 1, NULL, 1, 1)`,
@@ -99,7 +99,7 @@ function insertIntent(
     adapterKind?: string;
     intentType?: string;
     targetExternalId?: string | null;
-    sourceItemId?: string | null;
+    trackerItemId?: string | null;
     payload?: Record<string, unknown>;
     status?: "pending" | "applied" | "skipped" | "canceled";
   },
@@ -115,7 +115,7 @@ function insertIntent(
   db.prepare(
     `INSERT INTO update_intents
        (id, adapter_kind, target_external_id, intent_type, payload_json,
-        reason, source_item_id, status, idempotency_key, created_at, updated_at,
+        reason, tracker_item_id, status, idempotency_key, created_at, updated_at,
         applied_at, skipped_at, canceled_at, decision_reason)
      VALUES (?, ?, ?, ?, ?, 'evidence shows goal complete', ?, ?, ?, 1, 1,
              ?, ?, ?, ?)`,
@@ -125,7 +125,7 @@ function insertIntent(
     targetExternalId,
     args.intentType ?? "source_satisfied",
     JSON.stringify(args.payload ?? { kind: "comment" }),
-    args.sourceItemId ?? null,
+    args.trackerItemId ?? null,
     status,
     `idemp:${args.id}`,
     appliedAt,
@@ -137,13 +137,13 @@ function insertIntent(
 
 function seedHappyPath(db: MomentumDb): {
   intentId: string;
-  sourceItemId: string;
+  trackerItemId: string;
   externalId: string;
 } {
   const externalId = "linear_issue_id_happy";
-  const sourceItemId = "source_item_happy";
-  insertSourceItem(db, {
-    id: sourceItemId,
+  const trackerItemId = "source_item_happy";
+  insertTrackerItem(db, {
+    id: trackerItemId,
     adapterKind: "linear",
     externalId,
     externalKey: "NGX-1001",
@@ -154,9 +154,9 @@ function seedHappyPath(db: MomentumDb): {
   insertIntent(db, {
     id: intentId,
     targetExternalId: externalId,
-    sourceItemId,
+    trackerItemId,
   });
-  return { intentId, sourceItemId, externalId };
+  return { intentId, trackerItemId, externalId };
 }
 
 type ApplySpy = {
@@ -599,9 +599,9 @@ describe("executeExternalApply two-phase happy path", () => {
     const db = openDb(dataDir);
     try {
       const externalId = "linear_issue_id_status";
-      const sourceItemId = "source_item_status";
-      insertSourceItem(db, {
-        id: sourceItemId,
+      const trackerItemId = "source_item_status";
+      insertTrackerItem(db, {
+        id: trackerItemId,
         adapterKind: "linear",
         externalId,
         externalKey: "NGX-522",
@@ -616,7 +616,7 @@ describe("executeExternalApply two-phase happy path", () => {
         id: "intent_status_update",
         intentType: "status_update",
         targetExternalId: externalId,
-        sourceItemId,
+        trackerItemId,
         payload,
       });
       const repoPath = makeRepo(externalApplyAllowedPolicy());

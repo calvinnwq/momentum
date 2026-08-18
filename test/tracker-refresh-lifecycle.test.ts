@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildIdempotencyMarker } from "../src/adapters/external-update-adapter.js";
 import type { IntentApplyAudit } from "../src/core/intent/apply-audits.js";
 import type { UpdateIntent } from "../src/core/intent/update-intents.js";
-import type { SourceItem } from "../src/core/source/items.js";
+import type { TrackerItem } from "../src/core/tracker/items.js";
 import {
   planTrackerRefreshAlreadyAppliedReconciliation,
   planTrackerRefreshLifecycle,
@@ -15,7 +15,7 @@ const INTENT_ID = "intent_565";
 const EXPECTED_OPERATOR_REASON =
   "daemon external-apply for workflow current-run/tracker-refresh";
 
-function source(overrides: Partial<SourceItem> = {}): SourceItem {
+function tracker(overrides: Partial<TrackerItem> = {}): TrackerItem {
   return {
     id: SOURCE_ID,
     adapterKind: "linear",
@@ -42,7 +42,7 @@ function intent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {
     payload: { state: "Done" },
     reason: "workflow complete",
     goalId: null,
-    sourceItemId: SOURCE_ID,
+    trackerItemId: SOURCE_ID,
     evidenceRecordId: null,
     status: "pending",
     idempotencyKey: "linear:NGX-565:status_update:done",
@@ -102,7 +102,7 @@ function audit(
   };
 }
 
-function sources(...items: SourceItem[]): ReadonlyMap<string, SourceItem> {
+function sources(...items: TrackerItem[]): ReadonlyMap<string, TrackerItem> {
   return new Map(items.map((item) => [item.id, item]));
 }
 
@@ -114,7 +114,7 @@ function baseInput(
     intentApplyPolicy: "external_apply_allowed" as const,
     issueScopeIdentifier: ISSUE_SCOPE,
     pendingIntents: [intent()],
-    sourceItemsById: sources(source()),
+    trackerItemsById: sources(tracker()),
     expectedOperatorReason: EXPECTED_OPERATOR_REASON,
     ...overrides,
   };
@@ -186,12 +186,12 @@ describe("tracker-refresh lifecycle planner", () => {
     expect(plan.evidence.intentId).toBe(INTENT_ID);
   });
 
-  it("requires a matching Linear source item", () => {
+  it("requires a matching Linear tracker item", () => {
     expect(
-      planTrackerRefreshLifecycle(baseInput({ sourceItemsById: sources() })),
+      planTrackerRefreshLifecycle(baseInput({ trackerItemsById: sources() })),
     ).toMatchObject({
       phase: "preflight",
-      status: "source_missing",
+      status: "tracker_item_missing",
       action: "resolve_intent_evidence",
       safeToMutate: false,
     });
@@ -233,7 +233,7 @@ describe("tracker-refresh lifecycle planner", () => {
     expect(plan.evidence).toMatchObject({
       issueScopeIdentifier: ISSUE_SCOPE,
       intentId: INTENT_ID,
-      sourceItemId: SOURCE_ID,
+      trackerItemId: SOURCE_ID,
       idempotencyKey: "linear:NGX-565:status_update:done",
     });
     expect(plan.evidence.idempotencyMarker).toContain(INTENT_ID);
@@ -397,7 +397,7 @@ describe("tracker-refresh lifecycle planner", () => {
       issueScopeIdentifier: ISSUE_SCOPE,
       pendingIntents: [stalePending],
       appliedIntents: [currentApplied],
-      sourceItemsById: sources(source()),
+      trackerItemsById: sources(tracker()),
       latestAuditsByIntentId: new Map([
         [currentApplied.id, audit(currentApplied)],
       ]),
@@ -464,8 +464,8 @@ describe("tracker-refresh lifecycle planner", () => {
       planTrackerRefreshLifecycle(
         baseInput({
           pendingIntents: [intent({ targetExternalId: ISSUE_SCOPE })],
-          sourceItemsById: sources(
-            source({
+          trackerItemsById: sources(
+            tracker({
               externalId: "linear-issue-other",
               externalKey: "NGX-999",
             }),

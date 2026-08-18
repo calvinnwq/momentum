@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS evidence_records (
   summary TEXT NOT NULL,
   metadata_json TEXT NOT NULL DEFAULT '{}',
   goal_id TEXT REFERENCES goals(id),
-  source_item_id TEXT REFERENCES source_items(id),
+  tracker_item_id TEXT REFERENCES tracker_items(id),
   run_id TEXT,
   step_id TEXT,
   ingest_key TEXT NOT NULL,
@@ -191,8 +191,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_records_ingest_key
 CREATE INDEX IF NOT EXISTS idx_evidence_records_goal
   ON evidence_records(goal_id) WHERE goal_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_evidence_records_source_item
-  ON evidence_records(source_item_id) WHERE source_item_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_evidence_records_tracker_item
+  ON evidence_records(tracker_item_id) WHERE tracker_item_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_evidence_records_source_type
   ON evidence_records(source, type);
@@ -209,8 +209,8 @@ CREATE INDEX IF NOT EXISTS idx_evidence_records_run_step
   ON evidence_records(run_id, step_id) WHERE run_id IS NOT NULL;
 `;
 
-const SOURCE_ITEMS_DDL = `
-CREATE TABLE IF NOT EXISTS source_items (
+const TRACKER_ITEMS_DDL = `
+CREATE TABLE IF NOT EXISTS tracker_items (
   id TEXT PRIMARY KEY,
   adapter_kind TEXT NOT NULL,
   external_id TEXT NOT NULL,
@@ -225,18 +225,18 @@ CREATE TABLE IF NOT EXISTS source_items (
   updated_at INTEGER NOT NULL
 ) STRICT;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_source_items_adapter_external
-  ON source_items(adapter_kind, external_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tracker_items_adapter_external
+  ON tracker_items(adapter_kind, external_id);
 
-CREATE INDEX IF NOT EXISTS idx_source_items_goal_id
-  ON source_items(goal_id) WHERE goal_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tracker_items_goal_id
+  ON tracker_items(goal_id) WHERE goal_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_source_items_adapter_kind
-  ON source_items(adapter_kind);
+CREATE INDEX IF NOT EXISTS idx_tracker_items_adapter_kind
+  ON tracker_items(adapter_kind);
 
-CREATE TABLE IF NOT EXISTS source_snapshots (
+CREATE TABLE IF NOT EXISTS tracker_snapshots (
   id TEXT PRIMARY KEY,
-  source_item_id TEXT NOT NULL REFERENCES source_items(id),
+  tracker_item_id TEXT NOT NULL REFERENCES tracker_items(id),
   adapter_kind TEXT NOT NULL,
   external_id TEXT NOT NULL,
   observed_at INTEGER NOT NULL,
@@ -244,10 +244,10 @@ CREATE TABLE IF NOT EXISTS source_snapshots (
   created_at INTEGER NOT NULL
 ) STRICT;
 
-CREATE INDEX IF NOT EXISTS idx_source_snapshots_item_observed
-  ON source_snapshots(source_item_id, observed_at);
+CREATE INDEX IF NOT EXISTS idx_tracker_snapshots_item_observed
+  ON tracker_snapshots(tracker_item_id, observed_at);
 
-CREATE TABLE IF NOT EXISTS source_reconciliation_runs (
+CREATE TABLE IF NOT EXISTS tracker_reconciliation_runs (
   id TEXT PRIMARY KEY,
   adapter_kind TEXT NOT NULL,
   state TEXT NOT NULL,
@@ -261,8 +261,8 @@ CREATE TABLE IF NOT EXISTS source_reconciliation_runs (
   updated_at INTEGER NOT NULL
 ) STRICT;
 
-CREATE INDEX IF NOT EXISTS idx_source_reconciliation_runs_adapter_started
-  ON source_reconciliation_runs(adapter_kind, started_at);
+CREATE INDEX IF NOT EXISTS idx_tracker_reconciliation_runs_adapter_started
+  ON tracker_reconciliation_runs(adapter_kind, started_at);
 `;
 
 const UPDATE_INTENTS_DDL = `
@@ -274,7 +274,7 @@ CREATE TABLE IF NOT EXISTS update_intents (
   payload_json TEXT NOT NULL DEFAULT '{}',
   reason TEXT NOT NULL,
   goal_id TEXT REFERENCES goals(id),
-  source_item_id TEXT REFERENCES source_items(id),
+  tracker_item_id TEXT REFERENCES tracker_items(id),
   evidence_record_id TEXT REFERENCES evidence_records(id),
   status TEXT NOT NULL DEFAULT 'pending',
   idempotency_key TEXT NOT NULL,
@@ -297,8 +297,8 @@ CREATE INDEX IF NOT EXISTS idx_update_intents_status
 CREATE INDEX IF NOT EXISTS idx_update_intents_goal
   ON update_intents(goal_id) WHERE goal_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_update_intents_source_item
-  ON update_intents(source_item_id) WHERE source_item_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_update_intents_tracker_item
+  ON update_intents(tracker_item_id) WHERE tracker_item_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_update_intents_evidence
   ON update_intents(evidence_record_id) WHERE evidence_record_id IS NOT NULL;
@@ -1454,6 +1454,149 @@ function migrateLegacyExecutorInvocationSchema(
   }
 }
 
+const PARTIAL_LEGACY_INVOCATION_REQUIRED_COLUMNS: readonly string[] = [
+  "invocation_id",
+  "workflow_run_id",
+  "step_run_id",
+  "step_key",
+  "executor_family",
+  "state",
+  "attempt",
+  "created_at",
+  "updated_at",
+];
+
+// Every `executor_attempts` column the partial SDK-05 phase writes. The phase
+// builds its INSERT from this list and the preflight requires each column on a
+// pre-existing destination table, so the two can never drift. The list also
+// covers every column the phase reads back (`attempt_id`,
+// `legacy_invocation_id`, `attempt_number`).
+const PARTIAL_LEGACY_INVOCATION_ATTEMPT_COLUMNS: readonly string[] = [
+  "attempt_id",
+  "workflow_run_id",
+  "step_run_id",
+  "step_key",
+  "executor",
+  "state",
+  "attempt_number",
+  "started_at",
+  "heartbeat_at",
+  "finished_at",
+  "legacy_invocation_id",
+  "legacy_provenance",
+  "created_at",
+  "updated_at",
+];
+
+/**
+ * Read-only preconditions of `migratePartialLegacyExecutorInvocationSchema`:
+ * when that phase would run (a legacy invocation table with no legacy round
+ * source), every deterministic refusal the phase can raise is replicated here
+ * without mutating anything - the required-column contract of the legacy
+ * source table, the destination-table contract (every `executor_attempts`
+ * column the phase's INSERT names, when that table pre-exists), the collision
+ * with an unrelated current attempt, and the foreign-key parents of every
+ * row the phase would insert. Shared with the migration itself so the
+ * up-front refusal and the phase's own refusals can never drift, and hoisted
+ * into the fail-closed block at the top of `applyQueueMigrations` because the
+ * phase runs after the tracker rename and the additive pass; without the
+ * preflight its refusal would strand a committed rename beside the
+ * unmigrated legacy executor table.
+ */
+function assertPartialLegacyInvocationMigrationPreconditions(
+  db: MomentumDb,
+): void {
+  if (!tableExists(db, "executor_invocations")) return;
+  if (
+    tableExists(db, "executor_rounds") &&
+    columnExists(db, "executor_rounds", "invocation_id")
+  ) {
+    return;
+  }
+  const missingColumn = PARTIAL_LEGACY_INVOCATION_REQUIRED_COLUMNS.find(
+    (column) => !columnExists(db, "executor_invocations", column),
+  );
+  if (missingColumn !== undefined) {
+    throw new Error(
+      `partial SDK-05 invocation migration is missing required column ${missingColumn}`,
+    );
+  }
+
+  // A pre-existing destination table must already carry every column the
+  // phase's INSERT names; the additive pass never repairs `executor_attempts`
+  // columns, and preparing any statement against a partial table would throw
+  // an unhelpful error here or - worse - only inside the phase, after the
+  // tracker rename committed. An absent table needs no check: the additive
+  // DDL pass creates it in full current shape before the phase runs.
+  if (tableExists(db, "executor_attempts")) {
+    const missingAttemptColumn = PARTIAL_LEGACY_INVOCATION_ATTEMPT_COLUMNS.find(
+      (column) => !columnExists(db, "executor_attempts", column),
+    );
+    if (missingAttemptColumn !== undefined) {
+      throw new Error(
+        `partial SDK-05 invocation migration target executor_attempts is missing required column ${missingAttemptColumn}`,
+      );
+    }
+  }
+
+  // Replicate the phase's remaining deterministic refusals read-only, in the
+  // phase's own iteration order. A row whose existing attempt already records
+  // this invocation is the phase's idempotent skip; it is neither refused nor
+  // FK-checked. An absent parent table counts as a missing parent row: the
+  // additive pass creates the table empty, so the phase's post-insert
+  // foreign_key_check would still refuse. Both foreign-key columns of
+  // `executor_attempts` are NOT NULL, so every inserted row is FK-enforced.
+  const existingAttempt = tableExists(db, "executor_attempts")
+    ? db.prepare(
+        `SELECT attempt_id, legacy_invocation_id
+           FROM executor_attempts
+          WHERE attempt_id = ?`,
+      )
+    : undefined;
+  const workflowRunById = tableExists(db, "workflow_runs")
+    ? db.prepare("SELECT 1 FROM workflow_runs WHERE id = ?")
+    : undefined;
+  const workflowStepByIdentity = tableExists(db, "workflow_steps")
+    ? db.prepare(
+        "SELECT 1 FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+      )
+    : undefined;
+  const invocations = db
+    .prepare(
+      `SELECT invocation_id, workflow_run_id, step_run_id
+         FROM executor_invocations
+        ORDER BY workflow_run_id, step_run_id, created_at, invocation_id`,
+    )
+    .all() as Array<Record<string, unknown>>;
+  for (const invocation of invocations) {
+    const invocationId = String(invocation.invocation_id);
+    const existing = existingAttempt?.get(invocationId) as
+      { attempt_id: string; legacy_invocation_id: string | null } | undefined;
+    if (existing !== undefined) {
+      if (existing.legacy_invocation_id === invocationId) continue;
+      throw new Error(
+        `partial SDK-05 invocation migration collides with current attempt ${invocationId}`,
+      );
+    }
+    const workflowRunId = String(invocation.workflow_run_id);
+    const stepRunId = String(invocation.step_run_id);
+    if (workflowRunById?.get(workflowRunId) === undefined) {
+      throw new Error(
+        `partial SDK-05 invocation migration would produce foreign-key violations: ` +
+          `invocation ${invocationId} references missing workflow run ${workflowRunId}; ` +
+          "repair the parent row or remove the invocation before reopening this database",
+      );
+    }
+    if (workflowStepByIdentity?.get(workflowRunId, stepRunId) === undefined) {
+      throw new Error(
+        `partial SDK-05 invocation migration would produce foreign-key violations: ` +
+          `invocation ${invocationId} references missing workflow step ${stepRunId} in run ${workflowRunId}; ` +
+          "repair the parent row or remove the invocation before reopening this database",
+      );
+    }
+  }
+}
+
 /**
  * Complete the interrupted SDK-05 migration shape where invocations were
  * persisted but no legacy rounds were ever written. The normal rebuild cannot
@@ -1478,25 +1621,8 @@ function migratePartialLegacyExecutorInvocationSchema(
     return;
   }
 
-  const requiredColumns = [
-    "invocation_id",
-    "workflow_run_id",
-    "step_run_id",
-    "step_key",
-    "executor_family",
-    "state",
-    "attempt",
-    "created_at",
-    "updated_at",
-  ];
-  const missingColumn = requiredColumns.find(
-    (column) => !columnExists(db, "executor_invocations", column),
-  );
-  if (missingColumn !== undefined) {
-    throw new Error(
-      `partial SDK-05 invocation migration is missing required column ${missingColumn}`,
-    );
-  }
+  assertPartialLegacyInvocationMigrationPreconditions(db);
+  const requiredColumns = PARTIAL_LEGACY_INVOCATION_REQUIRED_COLUMNS;
 
   const optionalColumns = ["started_at", "heartbeat_at", "finished_at"].filter(
     (column) => columnExists(db, "executor_invocations", column),
@@ -1522,12 +1648,12 @@ function migratePartialLegacyExecutorInvocationSchema(
            FROM executor_attempts
           WHERE attempt_id = ?`,
       );
+      // Column order matches the `insertAttempt.run(...)` argument order
+      // below; the preflight requires each of these on a pre-existing table.
       const insertAttempt = db.prepare(
         `INSERT INTO executor_attempts (
-           attempt_id, workflow_run_id, step_run_id, step_key, executor,
-           state, attempt_number, started_at, heartbeat_at, finished_at,
-           legacy_invocation_id, legacy_provenance, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ${PARTIAL_LEGACY_INVOCATION_ATTEMPT_COLUMNS.join(", ")}
+         ) VALUES (${PARTIAL_LEGACY_INVOCATION_ATTEMPT_COLUMNS.map(() => "?").join(", ")})`,
       );
       const attemptNumbersByStep = new Map<string, Set<number>>();
 
@@ -2194,6 +2320,190 @@ function mergeOrRenameExecutorColumn(
   );
 }
 
+// The NAM-05 source -> tracker durable rename set. Each entry pairs the legacy
+// object with its tracker-named replacement so the rename migration and its
+// needed-check stay in lockstep. `workflow_runs.source`, `source_artifact_path`,
+// and the evidence-record `source` label are deliberately absent: they are not
+// tracker vocabulary.
+const TRACKER_TABLE_RENAMES: ReadonlyArray<[string, string]> = [
+  ["source_items", "tracker_items"],
+  ["source_snapshots", "tracker_snapshots"],
+  ["source_reconciliation_runs", "tracker_reconciliation_runs"],
+];
+
+const TRACKER_ITEM_COLUMN_RENAMES: ReadonlyArray<[string, string, string]> = [
+  ["tracker_snapshots", "source_item_id", "tracker_item_id"],
+  ["evidence_records", "source_item_id", "tracker_item_id"],
+  ["update_intents", "source_item_id", "tracker_item_id"],
+];
+
+// Old-name indexes dropped by the rename; the tracker-named replacements are
+// recreated from the fresh DDL inside the same transaction. RENAME TO/RENAME
+// COLUMN rewrite index definitions but keep index names, so the names are
+// migrated explicitly.
+const TRACKER_INDEX_RENAME_DROPS: readonly string[] = [
+  "idx_source_items_adapter_external",
+  "idx_source_items_goal_id",
+  "idx_source_items_adapter_kind",
+  "idx_source_snapshots_item_observed",
+  "idx_source_reconciliation_runs_adapter_started",
+  "idx_evidence_records_source_item",
+  "idx_update_intents_source_item",
+];
+
+// Recreated per table and guarded by table/column existence: a supported older
+// database can carry the source-named tracker tables without evidence_records
+// or update_intents yet. Those dependent tables (and these same tracker-item
+// indexes, via EVIDENCE_RECORDS_DDL / UPDATE_INTENTS_DDL) are created by the
+// later additive DDL pass, so a skipped index here is still created.
+const TRACKER_INDEX_RECREATES: ReadonlyArray<[string, string]> = [
+  [
+    "evidence_records",
+    `CREATE INDEX IF NOT EXISTS idx_evidence_records_tracker_item
+  ON evidence_records(tracker_item_id) WHERE tracker_item_id IS NOT NULL`,
+  ],
+  [
+    "update_intents",
+    `CREATE INDEX IF NOT EXISTS idx_update_intents_tracker_item
+  ON update_intents(tracker_item_id) WHERE tracker_item_id IS NOT NULL`,
+  ],
+];
+
+/**
+ * Whether the durable tracker graph still carries pre-rename source-vocabulary
+ * schema. Exported so read-only opens route a pre-rename database through the
+ * full migration chain.
+ */
+export function trackerSchemaMigrationNeeded(db: MomentumDb): boolean {
+  for (const [legacyTable] of TRACKER_TABLE_RENAMES) {
+    if (tableExists(db, legacyTable)) return true;
+  }
+  for (const [table, legacyColumn] of TRACKER_ITEM_COLUMN_RENAMES) {
+    if (tableExists(db, table) && columnExists(db, table, legacyColumn)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Refuse an ambiguous partially renamed tracker graph without mutating
+ * anything: a tracker-named table beside its still-present source-named table
+ * (or a table carrying both column spellings) cannot be renamed losslessly
+ * and parks the open for operator inspection. A legacy tracker-item column
+ * whose declared foreign-key parent table is absent is refused the same way:
+ * `RENAME COLUMN` cannot repair the dangling reference, so the renamed column
+ * would still point at the missing parent and every later insert would fail.
+ * Hoisted into the fail-closed
+ * block at the top of `applyQueueMigrations` so the refusal lands before any
+ * earlier migration commits and the refused database stays byte-identical to
+ * its pre-open state; `migrateTrackerSchemaRename` re-checks as defense.
+ */
+function assertTrackerSchemaRenameUnambiguous(db: MomentumDb): void {
+  for (const [legacyTable, trackerTable] of TRACKER_TABLE_RENAMES) {
+    if (tableExists(db, legacyTable) && tableExists(db, trackerTable)) {
+      throw new Error(
+        `tracker schema migration refused: both ${legacyTable} and ${trackerTable} exist; ` +
+          "resolve the ambiguous partial state before reopening this database",
+      );
+    }
+  }
+  for (const [
+    table,
+    legacyColumn,
+    trackerColumn,
+  ] of TRACKER_ITEM_COLUMN_RENAMES) {
+    if (!tableExists(db, table)) continue;
+    if (
+      columnExists(db, table, legacyColumn) &&
+      columnExists(db, table, trackerColumn)
+    ) {
+      throw new Error(
+        `tracker schema migration refused: ${table} carries both ${legacyColumn} and ${trackerColumn}`,
+      );
+    }
+    if (!columnExists(db, table, legacyColumn)) continue;
+    const foreignKeys = db
+      .prepare(`PRAGMA foreign_key_list(${table})`)
+      .all() as Array<{ table: string; from: string }>;
+    const legacyFk = foreignKeys.find((fk) => fk.from === legacyColumn);
+    if (legacyFk !== undefined && !tableExists(db, legacyFk.table)) {
+      throw new Error(
+        `tracker schema migration refused: ${table}.${legacyColumn} references missing table ${legacyFk.table}; ` +
+          "resolve the dangling foreign-key parent before reopening this database",
+      );
+    }
+  }
+}
+
+/**
+ * Rename the durable tracker graph from source vocabulary to tracker
+ * vocabulary, in place, losslessly, and exactly once.
+ *
+ * Runs after the legacy executor rebuild (whose tables are disjoint from the
+ * tracker graph) so an executor-rebuild failure leaves a pre-rename database
+ * untouched and retryable, and before the additive DDL pass so a legacy
+ * database is renamed rather than gaining empty tracker-named tables beside
+ * populated source-named ones.
+ * `ALTER TABLE ... RENAME TO` / `RENAME COLUMN` rewrite the referencing
+ * foreign-key clauses in dependent tables (SQLite non-legacy alter semantics),
+ * so row bytes, ids, timestamps, links, and uniqueness constraints are
+ * untouched; only names change. Old-name indexes are dropped and their
+ * tracker-named equivalents recreated in the same transaction.
+ *
+ * Fails closed without mutating anything when the database is ambiguous; see
+ * `assertTrackerSchemaRenameUnambiguous`.
+ */
+function migrateTrackerSchemaRename(db: MomentumDb): void {
+  if (!trackerSchemaMigrationNeeded(db)) return;
+
+  assertTrackerSchemaRenameUnambiguous(db);
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const [legacyTable, trackerTable] of TRACKER_TABLE_RENAMES) {
+      if (!tableExists(db, legacyTable)) continue;
+      db.exec(`ALTER TABLE ${legacyTable} RENAME TO ${trackerTable}`);
+    }
+    for (const [
+      table,
+      legacyColumn,
+      trackerColumn,
+    ] of TRACKER_ITEM_COLUMN_RENAMES) {
+      if (!tableExists(db, table)) continue;
+      if (!columnExists(db, table, legacyColumn)) continue;
+      if (columnExists(db, table, trackerColumn)) {
+        throw new Error(
+          `tracker schema migration refused: ${table} carries both ${legacyColumn} and ${trackerColumn}`,
+        );
+      }
+      db.exec(
+        `ALTER TABLE ${table} RENAME COLUMN ${legacyColumn} TO ${trackerColumn}`,
+      );
+    }
+    for (const indexName of TRACKER_INDEX_RENAME_DROPS) {
+      db.exec(`DROP INDEX IF EXISTS ${indexName}`);
+    }
+    db.exec(TRACKER_ITEMS_DDL);
+    for (const [table, indexDdl] of TRACKER_INDEX_RECREATES) {
+      if (!tableExists(db, table)) continue;
+      if (!columnExists(db, table, "tracker_item_id")) continue;
+      db.exec(indexDdl);
+    }
+
+    const violations = db.prepare("PRAGMA foreign_key_check").all();
+    if (violations.length > 0) {
+      throw new Error(
+        "tracker schema migration produced foreign-key violations; rolling back",
+      );
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function applyQueueMigrations(
   db: MomentumDb,
   options: QueueMigrationOptions = {},
@@ -2205,9 +2515,44 @@ export function applyQueueMigrations(
   // front. Otherwise the vocabulary/route-state migration would commit its
   // canonical writes and the later rebuild refusal would leave a mixed state.
   assertWorkflowRunsRebuildColumnContract(db);
-  // Runs before the main additive pass because it must rebuild tables with
-  // foreign keys disabled, which SQLite only allows outside a transaction.
+  // Fail closed before any mutation, part two: a stale route-state plan must
+  // refuse the whole migration chain before the tracker rename commits, so the
+  // refused database stays byte-identical to its pre-open state.
+  if (
+    routeStatePlan.deferredUntilBaseComplete !== true &&
+    trackerSchemaMigrationNeeded(db)
+  ) {
+    assertWorkflowRouteStatePlanCurrent(db, routeStatePlan);
+  }
+  // Fail closed before any mutation, part three: an ambiguous partially
+  // renamed tracker graph must refuse the whole migration chain up front, so
+  // the refused database stays byte-identical to its pre-open state.
+  if (trackerSchemaMigrationNeeded(db)) {
+    assertTrackerSchemaRenameUnambiguous(db);
+  }
+  // Fail closed before any mutation, part four: the partial SDK-05 invocation
+  // phase runs after the tracker rename and the additive pass, so its full
+  // deterministic refusal set - required columns, current-attempt collisions,
+  // and missing foreign-key parents of the rows it would insert - is checked
+  // up front when a rename is pending. The state it reads is not changed by
+  // the earlier phases: the legacy rebuild only runs when executor_rounds
+  // carries invocation_id, in which case the check short-circuits, and no
+  // phase before the partial migration inserts parent or attempt rows.
+  // Otherwise the late refusal would strand a committed rename beside the
+  // unmigrated legacy executor table.
+  if (trackerSchemaMigrationNeeded(db)) {
+    assertPartialLegacyInvocationMigrationPreconditions(db);
+  }
+  // Runs before the tracker rename and the main additive pass because it must
+  // rebuild tables with foreign keys disabled, which SQLite only allows
+  // outside a transaction. Its tables are disjoint from the tracker graph, so
+  // running it first means a mid-rebuild failure leaves a pre-rename database
+  // untouched and retryable instead of stranding a committed rename.
   migrateLegacyExecutorInvocationSchema(db, options);
+  // Runs after the executor legacy rebuild (see above) and before the
+  // additive pass so legacy source-named tracker tables are renamed instead
+  // of coexisting with freshly created tracker-named tables.
+  migrateTrackerSchemaRename(db);
   db.exec("BEGIN");
   try {
     if (tableExists(db, "jobs")) {
@@ -2223,7 +2568,7 @@ export function applyQueueMigrations(
     db.exec(JOB_IDEMPOTENCY_INDEX_DDL);
     db.exec(REPO_LOCKS_DDL);
     db.exec(DAEMON_RUNS_DDL);
-    db.exec(SOURCE_ITEMS_DDL);
+    db.exec(TRACKER_ITEMS_DDL);
     db.exec(EVIDENCE_RECORDS_DDL);
     if (tableExists(db, "evidence_records")) {
       for (const column of EVIDENCE_RECORD_LINKAGE_COLUMNS) {

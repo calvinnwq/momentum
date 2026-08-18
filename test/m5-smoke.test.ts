@@ -25,7 +25,7 @@ const M5_SMOKE_RUN_ID = "smoke-m5-workflow-run-1";
  * Seed a goal row directly in durable SQLite state against the same
  * --data-dir the built CLI subprocess uses. The goal-first CLI lane
  * (`goal start`, `status`, `logs`, `handoff`, `worker run`) is retired
- * (NGX-600), so the kept surfaces exercised here — `source link`, intent
+ * (NGX-600), so the kept surfaces exercised here — `tracker link`, intent
  * generation, and `project status` — operate on goal rows created via direct
  * insert. They only read the goals table (id / state / needs_manual_recovery),
  * never the retired iteration mechanism.
@@ -190,7 +190,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       dataDir,
       path: runDir,
       goalId: null,
-      sourceItemId: null,
+      trackerItemId: null,
     });
     const ingestCounts = ingestPayload["counts"] as Record<string, number>;
     expect(ingestCounts.observed).toBe(4);
@@ -342,7 +342,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       dataDir,
     });
     const counts = payload["counts"] as Record<string, Record<string, unknown>>;
-    expect(counts.sourceItems).toMatchObject({
+    expect(counts.trackerItems).toMatchObject({
       total: 0,
       linkedToGoal: 0,
       unlinked: 0,
@@ -353,7 +353,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       goalsWithEvidence: 0,
       goalsWithoutEvidence: 0,
     });
-    expect(payload["sourceItems"]).toEqual([]);
+    expect(payload["trackerItems"]).toEqual([]);
     expect(payload["mismatches"]).toEqual([]);
     expect(payload["pendingUpdateIntents"]).toEqual([]);
     expect(payload["reconciliationWarnings"]).toEqual([]);
@@ -362,7 +362,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
     expect(typeof nextAction["message"]).toBe("string");
   }, 60_000);
 
-  it("reconciles fixture Linear issues against a mock endpoint and surfaces them through source list and source get", async () => {
+  it("reconciles fixture Linear issues against a mock endpoint and surfaces them through tracker list and tracker get", async () => {
     const dataDir = makeTempDir("momentum-smoke-m5-reconcile-data-");
     const issue = {
       id: "issue-smoke-ngx-294",
@@ -389,7 +389,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
     try {
       const reconcile = await runCliBinaryAsync(
         [
-          "source",
+          "tracker",
           "reconcile",
           "linear",
           "--linear-endpoint",
@@ -402,7 +402,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       );
       expect(
         reconcile.code,
-        `source reconcile linear stderr: ${reconcile.stderr}`,
+        `tracker reconcile linear stderr: ${reconcile.stderr}`,
       ).toBe(0);
       const reconcilePayload = JSON.parse(reconcile.stdout) as Record<
         string,
@@ -410,7 +410,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       >;
       expect(reconcilePayload).toMatchObject({
         ok: true,
-        command: "source reconcile linear",
+        command: "tracker reconcile linear",
         dataDir,
         adapter: "linear",
         dryRun: false,
@@ -453,17 +453,17 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       expect(variables).toMatchObject({ first: 50, after: null });
 
       const list = runCliBinary([
-        "source",
+        "tracker",
         "list",
         "--data-dir",
         dataDir,
         "--json",
       ]);
-      expect(list.code, `source list stderr: ${list.stderr}`).toBe(0);
+      expect(list.code, `tracker list stderr: ${list.stderr}`).toBe(0);
       const listPayload = JSON.parse(list.stdout) as Record<string, unknown>;
       expect(listPayload).toMatchObject({
         ok: true,
-        command: "source list",
+        command: "tracker list",
         dataDir,
       });
       const listedItems = listPayload["items"] as Array<
@@ -482,25 +482,25 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       });
       expect(typeof listedItem["id"]).toBe("string");
 
-      const sourceItemId = listedItem["id"] as string;
+      const trackerItemId = listedItem["id"] as string;
       const get = runCliBinary([
-        "source",
+        "tracker",
         "get",
-        sourceItemId,
+        trackerItemId,
         "--data-dir",
         dataDir,
         "--json",
       ]);
-      expect(get.code, `source get stderr: ${get.stderr}`).toBe(0);
+      expect(get.code, `tracker get stderr: ${get.stderr}`).toBe(0);
       const getPayload = JSON.parse(get.stdout) as Record<string, unknown>;
       expect(getPayload).toMatchObject({
         ok: true,
-        command: "source get",
+        command: "tracker get",
         dataDir,
       });
       const fetchedItem = getPayload["item"] as Record<string, unknown>;
       expect(fetchedItem).toMatchObject({
-        id: sourceItemId,
+        id: trackerItemId,
         adapterKind: "linear",
         externalId: "issue-smoke-ngx-294",
         externalKey: "NGX-294",
@@ -519,20 +519,19 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         string,
         unknown
       >;
-      const sourcesPayload = doctorPayload["sources"] as Record<
+      const trackersPayload = doctorPayload["sources"] as Record<
         string,
         unknown
       >;
-      expect(sourcesPayload).toMatchObject({
+      expect(trackersPayload).toMatchObject({
         ok: true,
         totalSourceItems: 1,
         linkedSourceItems: 0,
         unlinkedSourceItems: 1,
       });
-      const lastReconciliation = sourcesPayload["lastReconciliation"] as Record<
-        string,
-        unknown
-      >;
+      const lastReconciliation = trackersPayload[
+        "lastReconciliation"
+      ] as Record<string, unknown>;
       expect(lastReconciliation).toMatchObject({
         adapterKind: "linear",
         state: "succeeded",
@@ -544,14 +543,14 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
     }
   }, 60_000);
 
-  it("links a reconciled SourceItem to a goal and surfaces the link through source get", async () => {
+  it("links a reconciled TrackerItem to a goal and surfaces the link through tracker get", async () => {
     const dataDir = makeTempDir("momentum-smoke-m5-link-data-");
 
     const issue = {
       id: "issue-smoke-ngx-294-link",
       identifier: "NGX-294",
       title: "M5-07 M5 smoke, docs, and milestone closeout",
-      description: "Smoke fixture for the M5 Goal/SourceItem linkage path.",
+      description: "Smoke fixture for the M5 Goal/TrackerItem linkage path.",
       url: "https://linear.app/ngxcalvin/issue/NGX-294",
       updatedAt: "2026-05-18T10:30:00.000Z",
       priority: 0,
@@ -572,7 +571,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
     try {
       const reconcile = await runCliBinaryAsync(
         [
-          "source",
+          "tracker",
           "reconcile",
           "linear",
           "--linear-endpoint",
@@ -585,7 +584,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       );
       expect(
         reconcile.code,
-        `source reconcile linear stderr: ${reconcile.stderr}`,
+        `tracker reconcile linear stderr: ${reconcile.stderr}`,
       ).toBe(0);
       const reconcilePayload = JSON.parse(reconcile.stdout) as Record<
         string,
@@ -601,9 +600,9 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         externalKey: "NGX-294",
       });
 
-      // Resolve the new SourceItem id via source list (reconcile payload omits the local id).
+      // Resolve the new TrackerItem id via tracker list (reconcile payload omits the local id).
       const initialList = runCliBinary([
-        "source",
+        "tracker",
         "list",
         "--data-dir",
         dataDir,
@@ -611,7 +610,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       ]);
       expect(
         initialList.code,
-        `initial source list stderr: ${initialList.stderr}`,
+        `initial tracker list stderr: ${initialList.stderr}`,
       ).toBe(0);
       const initialListPayload = JSON.parse(initialList.stdout) as Record<
         string,
@@ -621,13 +620,13 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         Record<string, unknown>
       >;
       expect(initialListedItems).toHaveLength(1);
-      const sourceItemId = initialListedItems[0]?.["id"] as string;
-      expect(typeof sourceItemId).toBe("string");
-      expect(sourceItemId.length).toBeGreaterThan(0);
+      const trackerItemId = initialListedItems[0]?.["id"] as string;
+      expect(typeof trackerItemId).toBe("string");
+      expect(trackerItemId.length).toBeGreaterThan(0);
       expect(initialListedItems[0]?.["goalId"]).toBeNull();
 
       // The goal-first CLI lane is retired (NGX-600): seed the goal row the
-      // kept `source link` surface targets directly in durable state.
+      // kept `tracker link` surface targets directly in durable state.
       const goalId = "goal-smoke-m5-link";
       seedGoalRow(dataDir, {
         goalId,
@@ -636,29 +635,29 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       });
 
       const link = runCliBinary([
-        "source",
+        "tracker",
         "link",
-        sourceItemId,
+        trackerItemId,
         "--goal",
         goalId,
         "--data-dir",
         dataDir,
         "--json",
       ]);
-      expect(link.code, `source link stderr: ${link.stderr}`).toBe(0);
+      expect(link.code, `tracker link stderr: ${link.stderr}`).toBe(0);
       const linkPayload = JSON.parse(link.stdout) as Record<string, unknown>;
       expect(linkPayload).toMatchObject({
         ok: true,
-        command: "source link",
+        command: "tracker link",
         dataDir,
         goalId,
-        sourceItemId,
+        trackerItemId,
         changed: true,
         previousGoalId: null,
       });
       const linkedItem = linkPayload["item"] as Record<string, unknown>;
       expect(linkedItem).toMatchObject({
-        id: sourceItemId,
+        id: trackerItemId,
         adapterKind: "linear",
         externalKey: "NGX-294",
         goalId,
@@ -666,9 +665,9 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
 
       // Linking the same item again is a no-op (changed=false, skippedReason=already_linked).
       const relink = runCliBinary([
-        "source",
+        "tracker",
         "link",
-        sourceItemId,
+        trackerItemId,
         "--goal",
         goalId,
         "--data-dir",
@@ -686,25 +685,25 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         skippedReason: "already_linked_to_target",
       });
 
-      // `source get` surfaces the durable link through a kept surface.
+      // `tracker get` surfaces the durable link through a kept surface.
       const get = runCliBinary([
-        "source",
+        "tracker",
         "get",
-        sourceItemId,
+        trackerItemId,
         "--data-dir",
         dataDir,
         "--json",
       ]);
-      expect(get.code, `source get stderr: ${get.stderr}`).toBe(0);
+      expect(get.code, `tracker get stderr: ${get.stderr}`).toBe(0);
       const getPayload = JSON.parse(get.stdout) as Record<string, unknown>;
       expect(getPayload).toMatchObject({
         ok: true,
-        command: "source get",
+        command: "tracker get",
         dataDir,
       });
       const fetchedItem = getPayload["item"] as Record<string, unknown>;
       expect(fetchedItem).toMatchObject({
-        id: sourceItemId,
+        id: trackerItemId,
         adapterKind: "linear",
         externalId: "issue-smoke-ngx-294-link",
         externalKey: "NGX-294",
@@ -715,9 +714,9 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       });
       expect(typeof fetchedItem["lastObservedAt"]).toBe("number");
 
-      // `source list` reports the same goal linkage for the item.
+      // `tracker list` reports the same goal linkage for the item.
       const linkedList = runCliBinary([
-        "source",
+        "tracker",
         "list",
         "--data-dir",
         dataDir,
@@ -725,7 +724,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       ]);
       expect(
         linkedList.code,
-        `linked source list stderr: ${linkedList.stderr}`,
+        `linked tracker list stderr: ${linkedList.stderr}`,
       ).toBe(0);
       const linkedListPayload = JSON.parse(linkedList.stdout) as Record<
         string,
@@ -736,7 +735,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       >;
       expect(linkedListItems).toHaveLength(1);
       expect(linkedListItems[0]).toMatchObject({
-        id: sourceItemId,
+        id: trackerItemId,
         externalKey: "NGX-294",
         goalId,
       });
@@ -748,11 +747,11 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         string,
         unknown
       >;
-      const sourcesPayload = doctorPayload["sources"] as Record<
+      const trackersPayload = doctorPayload["sources"] as Record<
         string,
         unknown
       >;
-      expect(sourcesPayload).toMatchObject({
+      expect(trackersPayload).toMatchObject({
         ok: true,
         totalSourceItems: 1,
         linkedSourceItems: 1,
@@ -763,7 +762,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
     }
   }, 60_000);
 
-  it("generates a source_satisfied update intent through source link for a completed goal and refuses --external-apply", async () => {
+  it("generates a source_satisfied update intent through tracker link for a completed goal and refuses --external-apply", async () => {
     const dataDir = makeTempDir("momentum-smoke-m5-intent-gen-data-");
 
     const issue = {
@@ -791,7 +790,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
     try {
       const reconcile = await runCliBinaryAsync(
         [
-          "source",
+          "tracker",
           "reconcile",
           "linear",
           "--linear-endpoint",
@@ -804,34 +803,34 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       );
       expect(
         reconcile.code,
-        `source reconcile linear stderr: ${reconcile.stderr}`,
+        `tracker reconcile linear stderr: ${reconcile.stderr}`,
       ).toBe(0);
 
       const sourceList = runCliBinary([
-        "source",
+        "tracker",
         "list",
         "--data-dir",
         dataDir,
         "--json",
       ]);
-      expect(sourceList.code, `source list stderr: ${sourceList.stderr}`).toBe(
+      expect(sourceList.code, `tracker list stderr: ${sourceList.stderr}`).toBe(
         0,
       );
       const sourceListPayload = JSON.parse(sourceList.stdout) as Record<
         string,
         unknown
       >;
-      const sourceItems = sourceListPayload["items"] as Array<
+      const trackerItems = sourceListPayload["items"] as Array<
         Record<string, unknown>
       >;
-      expect(sourceItems).toHaveLength(1);
-      const sourceItemId = sourceItems[0]?.["id"] as string;
-      expect(typeof sourceItemId).toBe("string");
-      expect(sourceItemId.length).toBeGreaterThan(0);
+      expect(trackerItems).toHaveLength(1);
+      const trackerItemId = trackerItems[0]?.["id"] as string;
+      expect(typeof trackerItemId).toBe("string");
+      expect(trackerItemId.length).toBeGreaterThan(0);
 
       // The goal-first CLI lane is retired (NGX-600): seed a goal row that
       // is already `completed`. The intent generator gates on the goal's
-      // durable `state` column plus the linked open SourceItem and accepted
+      // durable `state` column plus the linked open TrackerItem and accepted
       // verification evidence, so a direct insert satisfies its
       // completed-goal precondition without the retired iteration mechanism.
       const goalId = "goal-smoke-m5-intent";
@@ -892,8 +891,8 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         runDir,
         "--goal",
         goalId,
-        "--source-item",
-        sourceItemId,
+        "--tracker-item",
+        trackerItemId,
         "--data-dir",
         dataDir,
         "--json",
@@ -913,19 +912,19 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         )}`,
       ).toBe(true);
 
-      // Linking now triggers `evaluateGoalForSourceSatisfiedIntents` against
+      // Linking now triggers `evaluateGoalForTrackerSatisfiedIntents` against
       // the completed goal + non-terminal source item + accepted evidence.
       const link = runCliBinary([
-        "source",
+        "tracker",
         "link",
-        sourceItemId,
+        trackerItemId,
         "--goal",
         goalId,
         "--data-dir",
         dataDir,
         "--json",
       ]);
-      expect(link.code, `source link stderr: ${link.stderr}`).toBe(0);
+      expect(link.code, `tracker link stderr: ${link.stderr}`).toBe(0);
       const linkPayload = JSON.parse(link.stdout) as Record<string, unknown>;
       const linkCounts = linkPayload["counts"] as Record<string, number>;
       expect(linkCounts).toMatchObject({
@@ -959,7 +958,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         intentType: "source_satisfied",
         status: "pending",
         goalId,
-        sourceItemId,
+        trackerItemId,
         targetExternalId: "issue-smoke-ngx-294-intent",
       });
       const intentId = intent["id"] as string;
@@ -969,9 +968,9 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       // Re-running the eval (e.g. relinking) replays the same intent rather
       // than creating a new one — proves idempotency through the built CLI.
       const relink = runCliBinary([
-        "source",
+        "tracker",
         "link",
-        sourceItemId,
+        trackerItemId,
         "--goal",
         goalId,
         "--data-dir",
@@ -1132,9 +1131,9 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
   it("computes a project rollup with mismatches and pending intents through the built CLI", async () => {
     const dataDir = makeTempDir("momentum-smoke-m5-rollup-data-");
 
-    // SourceItem stays in a non-terminal state ("In Progress") while the
+    // TrackerItem stays in a non-terminal state ("In Progress") while the
     // Goal is completed; that asymmetry is what produces the
-    // `goal_done_source_not_done` mismatch the rollup must surface.
+    // `goal_done_tracker_not_done` mismatch the rollup must surface.
     const issue = {
       id: "issue-smoke-ngx-294-rollup",
       identifier: "NGX-294",
@@ -1160,7 +1159,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
     try {
       const reconcile = await runCliBinaryAsync(
         [
-          "source",
+          "tracker",
           "reconcile",
           "linear",
           "--linear-endpoint",
@@ -1173,29 +1172,29 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       );
       expect(
         reconcile.code,
-        `source reconcile linear stderr: ${reconcile.stderr}`,
+        `tracker reconcile linear stderr: ${reconcile.stderr}`,
       ).toBe(0);
 
       const sourceList = runCliBinary([
-        "source",
+        "tracker",
         "list",
         "--data-dir",
         dataDir,
         "--json",
       ]);
-      expect(sourceList.code, `source list stderr: ${sourceList.stderr}`).toBe(
+      expect(sourceList.code, `tracker list stderr: ${sourceList.stderr}`).toBe(
         0,
       );
       const sourceListPayload = JSON.parse(sourceList.stdout) as Record<
         string,
         unknown
       >;
-      const sourceItems = sourceListPayload["items"] as Array<
+      const trackerItems = sourceListPayload["items"] as Array<
         Record<string, unknown>
       >;
-      expect(sourceItems).toHaveLength(1);
-      const sourceItemId = sourceItems[0]?.["id"] as string;
-      expect(typeof sourceItemId).toBe("string");
+      expect(trackerItems).toHaveLength(1);
+      const trackerItemId = trackerItems[0]?.["id"] as string;
+      expect(typeof trackerItemId).toBe("string");
 
       // The goal-first CLI lane is retired (NGX-600): seed a completed goal
       // row directly. The rollup reads only id / state /
@@ -1260,27 +1259,27 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         runDir,
         "--goal",
         goalId,
-        "--source-item",
-        sourceItemId,
+        "--tracker-item",
+        trackerItemId,
         "--data-dir",
         dataDir,
         "--json",
       ]);
       expect(ingest.code, `evidence ingest stderr: ${ingest.stderr}`).toBe(0);
 
-      // Link the SourceItem to the completed Goal — this triggers intent
+      // Link the TrackerItem to the completed Goal — this triggers intent
       // creation (completed goal + non-terminal source + validate_complete).
       const link = runCliBinary([
-        "source",
+        "tracker",
         "link",
-        sourceItemId,
+        trackerItemId,
         "--goal",
         goalId,
         "--data-dir",
         dataDir,
         "--json",
       ]);
-      expect(link.code, `source link stderr: ${link.stderr}`).toBe(0);
+      expect(link.code, `tracker link stderr: ${link.stderr}`).toBe(0);
       const linkPayload = JSON.parse(link.stdout) as Record<string, unknown>;
       const linkCounts = linkPayload["counts"] as Record<string, number>;
       expect(linkCounts).toMatchObject({
@@ -1311,12 +1310,12 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         string,
         Record<string, unknown>
       >;
-      expect(counts.sourceItems).toMatchObject({
+      expect(counts.trackerItems).toMatchObject({
         total: 1,
         linkedToGoal: 1,
         unlinked: 0,
       });
-      const sourceByStatus = counts.sourceItems?.["byStatus"] as Record<
+      const sourceByStatus = counts.trackerItems?.["byStatus"] as Record<
         string,
         number
       >;
@@ -1333,22 +1332,22 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       expect(evidenceCounts.goalsWithoutEvidence).toBe(0);
 
       const mismatchCounts = counts.mismatches as Record<string, number>;
-      expect(mismatchCounts.goal_done_source_not_done).toBe(1);
-      expect(mismatchCounts.source_done_goal_not_terminal).toBe(0);
+      expect(mismatchCounts.goal_done_tracker_not_done).toBe(1);
+      expect(mismatchCounts.tracker_done_goal_not_terminal).toBe(0);
       expect(mismatchCounts.evidence_missing_after_completion).toBe(0);
       expect(mismatchCounts.manual_recovery_required).toBe(0);
       expect(counts["pendingUpdateIntents"]).toBe(1);
       expect(counts["staleUpdateIntents"]).toBe(0);
 
-      // `project status` source-item summaries use `sourceItemId`, not the
-      // bare `id` shape that `source list`/`source get` return — verify the
-      // local id ties back to the SourceItem created by reconciliation.
-      const rolledItems = projectPayload["sourceItems"] as Array<
+      // `project status` source-item summaries use `trackerItemId`, not the
+      // bare `id` shape that `tracker list`/`tracker get` return — verify the
+      // local id ties back to the TrackerItem created by reconciliation.
+      const rolledItems = projectPayload["trackerItems"] as Array<
         Record<string, unknown>
       >;
       expect(rolledItems).toHaveLength(1);
       expect(rolledItems[0]).toMatchObject({
-        sourceItemId,
+        trackerItemId,
         adapterKind: "linear",
         externalKey: "NGX-294",
         status: "In Progress",
@@ -1361,12 +1360,12 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       >;
       expect(mismatches).toHaveLength(1);
       expect(mismatches[0]).toMatchObject({
-        kind: "goal_done_source_not_done",
-        sourceItemId,
+        kind: "goal_done_tracker_not_done",
+        trackerItemId,
         externalKey: "NGX-294",
         goalId,
         goalState: "completed",
-        sourceStatus: "In Progress",
+        trackerStatus: "In Progress",
       });
       expect(projectPayload["totalMismatchCount"]).toBe(1);
       expect(projectPayload["truncatedMismatches"]).toBe(false);
@@ -1379,7 +1378,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         adapterKind: "linear",
         intentType: "source_satisfied",
         goalId,
-        sourceItemId,
+        trackerItemId,
         targetExternalId: "issue-smoke-ngx-294-rollup",
         stale: false,
       });
@@ -1390,7 +1389,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       expect(projectPayload["reconciliationWarnings"]).toEqual([]);
 
       // `pickNextAction` prioritizes pending intents above the
-      // `goal_done_source_not_done` mismatch, so the operator-facing
+      // `goal_done_tracker_not_done` mismatch, so the operator-facing
       // hint should steer to the intent review path here.
       const nextAction = projectPayload["nextAction"] as Record<
         string,

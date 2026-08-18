@@ -6,8 +6,8 @@ import path from "node:path";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   DEFAULT_VERIFICATION_EVIDENCE_TYPES,
-  evaluateGoalForSourceSatisfiedIntents,
-} from "../src/core/source/update-intent-generator.js";
+  evaluateGoalForTrackerSatisfiedIntents,
+} from "../src/core/tracker/update-intent-generator.js";
 import {
   getUpdateIntentById,
   listUpdateIntents,
@@ -52,7 +52,7 @@ function insertGoal(
   );
 }
 
-type SourceItemSeed = {
+type TrackerItemSeed = {
   id: string;
   goalId?: string | null;
   status?: string | null;
@@ -60,9 +60,9 @@ type SourceItemSeed = {
   externalId?: string;
 };
 
-function insertSourceItem(db: MomentumDb, seed: SourceItemSeed): void {
+function insertTrackerItem(db: MomentumDb, seed: TrackerItemSeed): void {
   db.prepare(
-    `INSERT INTO source_items
+    `INSERT INTO tracker_items
        (id, adapter_kind, external_id, external_key, url, title,
         status, metadata_json, last_observed_at, goal_id,
         created_at, updated_at)
@@ -73,7 +73,7 @@ function insertSourceItem(db: MomentumDb, seed: SourceItemSeed): void {
     seed.externalId ?? `ext-${seed.id}`,
     seed.id.toUpperCase(),
     `https://linear.app/example/issue/${seed.id}`,
-    `SourceItem ${seed.id}`,
+    `TrackerItem ${seed.id}`,
     seed.status ?? "in_progress",
     "{}",
     1,
@@ -89,12 +89,12 @@ function insertEvidenceRecord(
   type: string,
   goalId: string | null,
   occurredAt = 1000,
-  sourceItemId: string | null = null,
+  trackerItemId: string | null = null,
 ): void {
   db.prepare(
     `INSERT INTO evidence_records
        (id, source, type, format_version, artifact_path, external_id,
-        occurred_at, summary, metadata_json, goal_id, source_item_id,
+        occurred_at, summary, metadata_json, goal_id, tracker_item_id,
         ingest_key, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
@@ -108,19 +108,19 @@ function insertEvidenceRecord(
     `${type} for ${goalId ?? "(no goal)"}`,
     "{}",
     goalId,
-    sourceItemId,
+    trackerItemId,
     `ingest:${id}`,
     occurredAt,
     occurredAt,
   );
 }
 
-describe("evaluateGoalForSourceSatisfiedIntents", () => {
-  it("creates one source_satisfied intent for a completed Goal with verification evidence and a linked open source item", () => {
+describe("evaluateGoalForTrackerSatisfiedIntents", () => {
+  it("creates one source_satisfied intent for a completed Goal with verification evidence and a linked open tracker item", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-1", "completed");
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-1",
         goalId: "goal-1",
         status: "in_progress",
@@ -129,7 +129,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       });
       insertEvidenceRecord(db, "ev-1", "validate_complete", "goal-1", 1000);
 
-      const result = evaluateGoalForSourceSatisfiedIntents(
+      const result = evaluateGoalForTrackerSatisfiedIntents(
         db,
         { goalId: "goal-1" },
         { now: () => 5000 },
@@ -143,7 +143,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       expect(result.intent.intentType).toBe("source_satisfied");
       expect(result.intent.status).toBe("pending");
       expect(result.intent.goalId).toBe("goal-1");
-      expect(result.intent.sourceItemId).toBe("si-1");
+      expect(result.intent.trackerItemId).toBe("si-1");
       expect(result.intent.evidenceRecordId).toBe("ev-1");
       expect(result.intent.reason).toContain("completed");
       expect(result.intent.reason).toContain("verification evidence");
@@ -153,8 +153,15 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       expect(result.intent.payload).toMatchObject({
         evidenceType: "validate_complete",
         goalState: "completed",
+        trackerItemId: "si-1",
+        trackerExternalId: "NGX-1",
+        trackerExternalKey: "SI-1",
+        trackerCurrentStatus: "in_progress",
       });
-      expect(result.sourceItem.id).toBe("si-1");
+      expect(result.intent.payload).not.toHaveProperty("sourceExternalId");
+      expect(result.intent.payload).not.toHaveProperty("sourceExternalKey");
+      expect(result.intent.payload).not.toHaveProperty("sourceCurrentStatus");
+      expect(result.trackerItem.id).toBe("si-1");
       expect(result.verificationEvidence.id).toBe("ev-1");
 
       expect(listUpdateIntents(db).map((i) => i.id)).toEqual([
@@ -169,7 +176,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-1", "completed");
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-1",
         goalId: "goal-1",
         status: "in_progress",
@@ -178,7 +185,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       });
       insertEvidenceRecord(db, "ev-1", "no_mistakes_complete", "goal-1", 1000);
 
-      const first = evaluateGoalForSourceSatisfiedIntents(
+      const first = evaluateGoalForTrackerSatisfiedIntents(
         db,
         { goalId: "goal-1" },
         { now: () => 1000 },
@@ -189,7 +196,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       // Add additional verification evidence; the intent should not duplicate.
       insertEvidenceRecord(db, "ev-2", "verification_passed", "goal-1", 2000);
 
-      const replay = evaluateGoalForSourceSatisfiedIntents(
+      const replay = evaluateGoalForTrackerSatisfiedIntents(
         db,
         { goalId: "goal-1" },
         { now: () => 5000 },
@@ -206,11 +213,11 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
     }
   });
 
-  it("uses verification evidence linked through the source item when goal_id is absent", () => {
+  it("uses verification evidence linked through the tracker item when goal_id is absent", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-source-evidence", "completed");
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-source-evidence",
         goalId: "goal-source-evidence",
         status: "in_progress",
@@ -226,7 +233,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         "si-source-evidence",
       );
 
-      const result = evaluateGoalForSourceSatisfiedIntents(
+      const result = evaluateGoalForTrackerSatisfiedIntents(
         db,
         { goalId: "goal-source-evidence" },
         { now: () => 5000 },
@@ -236,35 +243,35 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       if (result.outcome !== "intent_created") return;
       expect(result.verificationEvidence.id).toBe("ev-source-only");
       expect(result.verificationEvidence.goalId).toBeNull();
-      expect(result.verificationEvidence.sourceItemId).toBe(
+      expect(result.verificationEvidence.trackerItemId).toBe(
         "si-source-evidence",
       );
       expect(result.intent.evidenceRecordId).toBe("ev-source-only");
-      expect(result.intent.sourceItemId).toBe("si-source-evidence");
+      expect(result.intent.trackerItemId).toBe("si-source-evidence");
     } finally {
       db.close();
     }
   });
 
-  it("creates intents for every linked open source item and skips terminal source items", () => {
+  it("creates intents for every linked open tracker item and skips terminal tracker items", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-multi-source", "completed");
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-closed",
         goalId: "goal-multi-source",
         status: "Done",
         adapterKind: "linear",
         externalId: "NGX-CLOSED",
       });
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-open-a",
         goalId: "goal-multi-source",
         status: "In Progress",
         adapterKind: "linear",
         externalId: "NGX-OPEN-A",
       });
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-open-b",
         goalId: "goal-multi-source",
         status: "Todo",
@@ -279,7 +286,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         1000,
       );
 
-      const result = evaluateGoalForSourceSatisfiedIntents(
+      const result = evaluateGoalForTrackerSatisfiedIntents(
         db,
         { goalId: "goal-multi-source" },
         { now: () => 5000 },
@@ -293,7 +300,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         "NGX-OPEN-A",
         "NGX-OPEN-B",
       ]);
-      expect(intents.map((intent) => intent.sourceItemId)).toEqual([
+      expect(intents.map((intent) => intent.trackerItemId)).toEqual([
         "si-open-a",
         "si-open-b",
       ]);
@@ -309,13 +316,13 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-plural", "completed");
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-plural-a",
         goalId: "goal-plural",
         status: "In Progress",
         externalId: "NGX-PLURAL-A",
       });
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-plural-b",
         goalId: "goal-plural",
         status: "Todo",
@@ -329,7 +336,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         1000,
       );
 
-      const first = evaluateGoalForSourceSatisfiedIntents(
+      const first = evaluateGoalForTrackerSatisfiedIntents(
         db,
         { goalId: "goal-plural" },
         { now: () => 5000 },
@@ -339,7 +346,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         "intent_created",
       ]);
 
-      const replay = evaluateGoalForSourceSatisfiedIntents(
+      const replay = evaluateGoalForTrackerSatisfiedIntents(
         db,
         { goalId: "goal-plural" },
         { now: () => 6000 },
@@ -354,17 +361,17 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
     }
   });
 
-  it("returns evidence warnings alongside created intents for partially covered source items", () => {
+  it("returns evidence warnings alongside created intents for partially covered tracker items", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-partial", "completed");
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-covered",
         goalId: "goal-partial",
         status: "In Progress",
         externalId: "NGX-COVERED",
       });
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-uncovered",
         goalId: "goal-partial",
         status: "Todo",
@@ -379,7 +386,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         "si-covered",
       );
 
-      const results = evaluateGoalForSourceSatisfiedIntents(
+      const results = evaluateGoalForTrackerSatisfiedIntents(
         db,
         { goalId: "goal-partial" },
         { now: () => 5000 },
@@ -391,31 +398,31 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       const warning = results.find(
         (result) => result.outcome === "evidence_insufficient",
       );
-      expect(warning?.warning.sourceItemId).toBe("si-uncovered");
+      expect(warning?.warning.trackerItemId).toBe("si-uncovered");
       expect(listUpdateIntents(db)).toHaveLength(1);
     } finally {
       db.close();
     }
   });
 
-  it("returns every evidence warning when no linked source item has evidence", () => {
+  it("returns every evidence warning when no linked tracker item has evidence", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-all-uncovered", "completed");
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-uncovered-a",
         goalId: "goal-all-uncovered",
         status: "In Progress",
         externalId: "NGX-UNCOVERED-A",
       });
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-uncovered-b",
         goalId: "goal-all-uncovered",
         status: "Todo",
         externalId: "NGX-UNCOVERED-B",
       });
 
-      const results = evaluateGoalForSourceSatisfiedIntents(db, {
+      const results = evaluateGoalForTrackerSatisfiedIntents(db, {
         goalId: "goal-all-uncovered",
       });
 
@@ -426,7 +433,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       expect(
         results
           .filter((result) => result.outcome === "evidence_insufficient")
-          .map((result) => result.warning.sourceItemId),
+          .map((result) => result.warning.trackerItemId),
       ).toEqual(["si-uncovered-a", "si-uncovered-b"]);
       expect(listUpdateIntents(db)).toHaveLength(0);
     } finally {
@@ -434,11 +441,11 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
     }
   });
 
-  it("returns evidence_insufficient when a completed Goal is linked to a source item but has no verification evidence", () => {
+  it("returns evidence_insufficient when a completed Goal is linked to a tracker item but has no verification evidence", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-2", "completed");
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-2",
         goalId: "goal-2",
         status: "in_progress",
@@ -448,7 +455,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       // Insert a non-verification evidence type so we know the predicate is strict.
       insertEvidenceRecord(db, "ev-noise", "plan_created", "goal-2", 500);
 
-      const result = evaluateGoalForSourceSatisfiedIntents(
+      const result = evaluateGoalForTrackerSatisfiedIntents(
         db,
         { goalId: "goal-2" },
         { now: () => 5000 },
@@ -457,8 +464,9 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       expect(result.outcome).toBe("evidence_insufficient");
       if (result.outcome !== "evidence_insufficient") return;
       expect(result.warning.goalId).toBe("goal-2");
-      expect(result.warning.sourceItemId).toBe("si-2");
-      expect(result.warning.sourceExternalId).toBe("NGX-2");
+      expect(result.warning.trackerItemId).toBe("si-2");
+      expect(result.warning.trackerExternalId).toBe("NGX-2");
+      expect(result.warning).not.toHaveProperty("sourceExternalId");
       expect(result.warning.acceptedEvidenceTypes).toEqual(
         DEFAULT_VERIFICATION_EVIDENCE_TYPES,
       );
@@ -475,7 +483,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-3", "queued");
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-3",
         goalId: "goal-3",
         status: "in_progress",
@@ -484,7 +492,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       });
       insertEvidenceRecord(db, "ev-3", "no_mistakes_complete", "goal-3", 1000);
 
-      const result = evaluateGoalForSourceSatisfiedIntents(db, {
+      const result = evaluateGoalForTrackerSatisfiedIntents(db, {
         goalId: "goal-3",
       })[0]!;
       expect(result.outcome).toBe("goal_not_terminal");
@@ -500,7 +508,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-failed", "failed");
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-failed",
         goalId: "goal-failed",
         status: "in_progress",
@@ -515,7 +523,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         1000,
       );
 
-      const result = evaluateGoalForSourceSatisfiedIntents(db, {
+      const result = evaluateGoalForTrackerSatisfiedIntents(db, {
         goalId: "goal-failed",
       })[0]!;
       expect(result.outcome).toBe("goal_state_not_completed");
@@ -527,17 +535,17 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
     }
   });
 
-  it("returns no_source_link when a completed Goal has no linked SourceItem", () => {
+  it("returns no_tracker_link when a completed Goal has no linked TrackerItem", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-4", "completed");
       insertEvidenceRecord(db, "ev-4", "no_mistakes_complete", "goal-4", 1000);
 
-      const result = evaluateGoalForSourceSatisfiedIntents(db, {
+      const result = evaluateGoalForTrackerSatisfiedIntents(db, {
         goalId: "goal-4",
       })[0]!;
-      expect(result.outcome).toBe("no_source_link");
-      if (result.outcome !== "no_source_link") return;
+      expect(result.outcome).toBe("no_tracker_link");
+      if (result.outcome !== "no_tracker_link") return;
       expect(result.goalId).toBe("goal-4");
       expect(listUpdateIntents(db)).toEqual([]);
     } finally {
@@ -545,11 +553,11 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
     }
   });
 
-  it("returns source_already_terminal when the linked source item is already closed/done", () => {
+  it("returns tracker_already_terminal when the linked tracker item is already closed/done", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-5", "completed");
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-5",
         goalId: "goal-5",
         status: "Done",
@@ -558,13 +566,13 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       });
       insertEvidenceRecord(db, "ev-5", "no_mistakes_complete", "goal-5", 1000);
 
-      const result = evaluateGoalForSourceSatisfiedIntents(db, {
+      const result = evaluateGoalForTrackerSatisfiedIntents(db, {
         goalId: "goal-5",
       })[0]!;
-      expect(result.outcome).toBe("source_already_terminal");
-      if (result.outcome !== "source_already_terminal") return;
-      expect(result.sourceItem.id).toBe("si-5");
-      expect(result.sourceItem.status).toBe("Done");
+      expect(result.outcome).toBe("tracker_already_terminal");
+      if (result.outcome !== "tracker_already_terminal") return;
+      expect(result.trackerItem.id).toBe("si-5");
+      expect(result.trackerItem.status).toBe("Done");
       expect(listUpdateIntents(db)).toEqual([]);
     } finally {
       db.close();
@@ -574,7 +582,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
   it("returns goal_not_found for unknown goal ids", () => {
     const db = openDb(makeTempDir());
     try {
-      const result = evaluateGoalForSourceSatisfiedIntents(db, {
+      const result = evaluateGoalForTrackerSatisfiedIntents(db, {
         goalId: "goal-missing",
       })[0]!;
       expect(result.outcome).toBe("goal_not_found");
@@ -589,7 +597,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-6", "completed");
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-6",
         goalId: "goal-6",
         status: "in_progress",
@@ -600,7 +608,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       // but we override the accepted set to include it.
       insertEvidenceRecord(db, "ev-6", "plan_created", "goal-6", 1000);
 
-      const result = evaluateGoalForSourceSatisfiedIntents(
+      const result = evaluateGoalForTrackerSatisfiedIntents(
         db,
         {
           goalId: "goal-6",
@@ -620,7 +628,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
     const db = openDb(makeTempDir());
     try {
       expect(() =>
-        evaluateGoalForSourceSatisfiedIntents(db, { goalId: "" }),
+        evaluateGoalForTrackerSatisfiedIntents(db, { goalId: "" }),
       ).toThrowError(/goalId/);
     } finally {
       db.close();
@@ -631,14 +639,14 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
     const db = openDb(makeTempDir());
     try {
       insertGoal(db, "goal-7", "completed");
-      insertSourceItem(db, {
+      insertTrackerItem(db, {
         id: "si-7",
         goalId: "goal-7",
         adapterKind: "linear",
         externalId: "NGX-7",
       });
       expect(() =>
-        evaluateGoalForSourceSatisfiedIntents(db, {
+        evaluateGoalForTrackerSatisfiedIntents(db, {
           goalId: "goal-7",
           verificationEvidenceTypes: [],
         }),

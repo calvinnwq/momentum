@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { MomentumDb } from "../../adapters/db.js";
 
-export type SourceItem = {
+export type TrackerItem = {
   id: string;
   adapterKind: string;
   externalId: string;
@@ -17,7 +17,7 @@ export type SourceItem = {
   updatedAt: number;
 };
 
-export type SourceItemSummary = {
+export type TrackerItemSummary = {
   id: string;
   adapterKind: string;
   externalId: string;
@@ -28,9 +28,9 @@ export type SourceItemSummary = {
   lastObservedAt: number;
 };
 
-export type SourceSnapshot = {
+export type TrackerSnapshot = {
   id: string;
-  sourceItemId: string;
+  trackerItemId: string;
   adapterKind: string;
   externalId: string;
   observedAt: number;
@@ -38,7 +38,7 @@ export type SourceSnapshot = {
   createdAt: number;
 };
 
-export type SourceItemUpsertInput = {
+export type TrackerItemUpsertInput = {
   adapterKind: string;
   externalId: string;
   externalKey?: string | null;
@@ -50,19 +50,19 @@ export type SourceItemUpsertInput = {
   goalId?: string | null;
 };
 
-export type SourceSnapshotInput = {
-  sourceItemId: string;
+export type TrackerSnapshotInput = {
+  trackerItemId: string;
   adapterKind: string;
   externalId: string;
   observedAt: number;
   snapshot: Record<string, unknown>;
 };
 
-export type SourceItemClock = {
+export type TrackerItemClock = {
   now?: () => number;
 };
 
-type SourceItemRow = {
+type TrackerItemRow = {
   id: string;
   adapter_kind: string;
   external_id: string;
@@ -77,9 +77,9 @@ type SourceItemRow = {
   updated_at: number;
 };
 
-type SourceSnapshotRow = {
+type TrackerSnapshotRow = {
   id: string;
-  source_item_id: string;
+  tracker_item_id: string;
   adapter_kind: string;
   external_id: string;
   observed_at: number;
@@ -87,17 +87,17 @@ type SourceSnapshotRow = {
   created_at: number;
 };
 
-export function upsertSourceItem(
+export function upsertTrackerItem(
   db: MomentumDb,
-  input: SourceItemUpsertInput,
-  clock: SourceItemClock = {}
-): SourceItem {
+  input: TrackerItemUpsertInput,
+  clock: TrackerItemClock = {},
+): TrackerItem {
   const now = clock.now?.() ?? Date.now();
   const metadataJson = JSON.stringify(input.metadata ?? {});
   const hasGoalId = Object.hasOwn(input, "goalId");
   const row = db
     .prepare(
-      `INSERT INTO source_items
+      `INSERT INTO tracker_items
          (id, adapter_kind, external_id, external_key, url, title, status,
           metadata_json, last_observed_at, goal_id, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -110,14 +110,14 @@ export function upsertSourceItem(
          last_observed_at = excluded.last_observed_at,
          goal_id = CASE
            WHEN ? = 1 THEN excluded.goal_id
-           ELSE source_items.goal_id
+           ELSE tracker_items.goal_id
          END,
          updated_at = excluded.updated_at
-        WHERE excluded.last_observed_at >= source_items.last_observed_at
-       RETURNING *`
+        WHERE excluded.last_observed_at >= tracker_items.last_observed_at
+       RETURNING *`,
     )
     .get(
-      `source_item_${randomUUID()}`,
+      `tracker_item_${randomUUID()}`,
       input.adapterKind,
       input.externalId,
       input.externalKey ?? null,
@@ -129,126 +129,128 @@ export function upsertSourceItem(
       input.goalId ?? null,
       now,
       now,
-      hasGoalId ? 1 : 0
-    ) as SourceItemRow;
+      hasGoalId ? 1 : 0,
+    ) as TrackerItemRow;
 
-  return sourceItemFromRow(
+  return trackerItemFromRow(
     row ??
-      getSourceItemRowByAdapterExternalId(db, input.adapterKind, input.externalId)
+      getTrackerItemRowByAdapterExternalId(
+        db,
+        input.adapterKind,
+        input.externalId,
+      ),
   );
 }
 
-export function getSourceItemById(
+export function getTrackerItemById(
   db: MomentumDb,
-  id: string
-): SourceItem | null {
-  const row = db
-    .prepare("SELECT * FROM source_items WHERE id = ?")
-    .get(id) as SourceItemRow | undefined;
-  return row ? sourceItemFromRow(row) : null;
+  id: string,
+): TrackerItem | null {
+  const row = db.prepare("SELECT * FROM tracker_items WHERE id = ?").get(id) as
+    TrackerItemRow | undefined;
+  return row ? trackerItemFromRow(row) : null;
 }
 
-export function getSourceItemByAdapterExternalId(
+export function getTrackerItemByAdapterExternalId(
   db: MomentumDb,
   adapterKind: string,
-  externalId: string
-): SourceItem | null {
+  externalId: string,
+): TrackerItem | null {
   const row = db
     .prepare(
-      "SELECT * FROM source_items WHERE adapter_kind = ? AND external_id = ?"
+      "SELECT * FROM tracker_items WHERE adapter_kind = ? AND external_id = ?",
     )
-    .get(adapterKind, externalId) as SourceItemRow | undefined;
-  return row ? sourceItemFromRow(row) : null;
+    .get(adapterKind, externalId) as TrackerItemRow | undefined;
+  return row ? trackerItemFromRow(row) : null;
 }
 
-function getSourceItemRowByAdapterExternalId(
+function getTrackerItemRowByAdapterExternalId(
   db: MomentumDb,
   adapterKind: string,
-  externalId: string
-): SourceItemRow {
+  externalId: string,
+): TrackerItemRow {
   const row = db
     .prepare(
-      "SELECT * FROM source_items WHERE adapter_kind = ? AND external_id = ?"
+      "SELECT * FROM tracker_items WHERE adapter_kind = ? AND external_id = ?",
     )
-    .get(adapterKind, externalId) as SourceItemRow | undefined;
+    .get(adapterKind, externalId) as TrackerItemRow | undefined;
   if (!row) {
     throw new Error(
-      `Source item missing after upsert conflict for adapter "${adapterKind}" and external id "${externalId}".`
+      `Tracker item missing after upsert conflict for adapter "${adapterKind}" and external id "${externalId}".`,
     );
   }
   return row;
 }
 
-export function listSourceItems(
+export function listTrackerItems(
   db: MomentumDb,
-  options: { adapterKind?: string } = {}
-): SourceItem[] {
-  const rows = options.adapterKind === undefined
-    ? (db
-        .prepare(
-          `SELECT *
-             FROM source_items
-            ORDER BY adapter_kind ASC, external_key ASC, external_id ASC`
-        )
-        .all() as SourceItemRow[])
-    : (db
-        .prepare(
-          `SELECT *
-             FROM source_items
+  options: { adapterKind?: string } = {},
+): TrackerItem[] {
+  const rows =
+    options.adapterKind === undefined
+      ? (db
+          .prepare(
+            `SELECT *
+             FROM tracker_items
+            ORDER BY adapter_kind ASC, external_key ASC, external_id ASC`,
+          )
+          .all() as TrackerItemRow[])
+      : (db
+          .prepare(
+            `SELECT *
+             FROM tracker_items
             WHERE adapter_kind = ?
-            ORDER BY adapter_kind ASC, external_key ASC, external_id ASC`
-        )
-        .all(options.adapterKind) as SourceItemRow[]);
+            ORDER BY adapter_kind ASC, external_key ASC, external_id ASC`,
+          )
+          .all(options.adapterKind) as TrackerItemRow[]);
 
-  return rows.map(sourceItemFromRow);
+  return rows.map(trackerItemFromRow);
 }
 
-export type LinkGoalToSourceItemErrorCode =
+export type LinkGoalToTrackerItemErrorCode =
   | "goal_not_found"
-  | "source_item_not_found"
+  | "tracker_item_not_found"
   | "linked_to_other_goal"
   | "link_changed";
 
-export type LinkGoalToSourceItemSkippedReason =
-  | "already_linked_to_target";
+export type LinkGoalToTrackerItemSkippedReason = "already_linked_to_target";
 
-export type LinkGoalToSourceItemResult =
+export type LinkGoalToTrackerItemResult =
   | {
       ok: true;
       changed: boolean;
-      skippedReason: LinkGoalToSourceItemSkippedReason | null;
-      sourceItem: SourceItem;
+      skippedReason: LinkGoalToTrackerItemSkippedReason | null;
+      trackerItem: TrackerItem;
       previousGoalId: string | null;
     }
   | {
       ok: false;
-      code: LinkGoalToSourceItemErrorCode;
+      code: LinkGoalToTrackerItemErrorCode;
       message: string;
       currentGoalId?: string | null;
     };
 
-export type UnlinkGoalFromSourceItemErrorCode =
-  | "source_item_not_found"
-  | "link_changed";
+export type UnlinkGoalFromTrackerItemErrorCode =
+  "tracker_item_not_found" | "link_changed";
 
-export type UnlinkGoalFromSourceItemResult =
+export type UnlinkGoalFromTrackerItemResult =
   | {
       ok: true;
       changed: boolean;
-      sourceItem: SourceItem;
+      trackerItem: TrackerItem;
       previousGoalId: string | null;
     }
   | {
       ok: false;
-      code: UnlinkGoalFromSourceItemErrorCode;
+      code: UnlinkGoalFromTrackerItemErrorCode;
       message: string;
       currentGoalId?: string | null;
     };
 
-export function linkGoalToSourceItem(
+export function linkGoalToTrackerItem(
   db: MomentumDb,
-  input: { goalId: string; sourceItemId: string; now?: number }
-): LinkGoalToSourceItemResult {
+  input: { goalId: string; trackerItemId: string; now?: number },
+): LinkGoalToTrackerItemResult {
   const goalExists = db
     .prepare("SELECT id FROM goals WHERE id = ?")
     .get(input.goalId) as { id: string } | undefined;
@@ -256,16 +258,16 @@ export function linkGoalToSourceItem(
     return {
       ok: false,
       code: "goal_not_found",
-      message: `Goal not found: ${input.goalId}`
+      message: `Goal not found: ${input.goalId}`,
     };
   }
 
-  const existing = getSourceItemById(db, input.sourceItemId);
+  const existing = getTrackerItemById(db, input.trackerItemId);
   if (!existing) {
     return {
       ok: false,
-      code: "source_item_not_found",
-      message: `Source item not found: ${input.sourceItemId}`
+      code: "tracker_item_not_found",
+      message: `Tracker item not found: ${input.trackerItemId}`,
     };
   }
 
@@ -274,8 +276,8 @@ export function linkGoalToSourceItem(
       ok: true,
       changed: false,
       skippedReason: "already_linked_to_target",
-      sourceItem: existing,
-      previousGoalId: existing.goalId
+      trackerItem: existing,
+      previousGoalId: existing.goalId,
     };
   }
 
@@ -283,28 +285,28 @@ export function linkGoalToSourceItem(
     return {
       ok: false,
       code: "linked_to_other_goal",
-      message: `Source item ${input.sourceItemId} is already linked to goal ${existing.goalId}. Unlink it first.`,
-      currentGoalId: existing.goalId
+      message: `Tracker item ${input.trackerItemId} is already linked to goal ${existing.goalId}. Unlink it first.`,
+      currentGoalId: existing.goalId,
     };
   }
 
   const now = input.now ?? Date.now();
   const row = db
     .prepare(
-      `UPDATE source_items
+      `UPDATE tracker_items
           SET goal_id = ?, updated_at = ?
         WHERE id = ?
           AND goal_id IS NULL
-        RETURNING *`
+        RETURNING *`,
     )
-    .get(input.goalId, now, input.sourceItemId) as SourceItemRow | undefined;
+    .get(input.goalId, now, input.trackerItemId) as TrackerItemRow | undefined;
   if (!row) {
-    const current = getSourceItemById(db, input.sourceItemId);
+    const current = getTrackerItemById(db, input.trackerItemId);
     if (!current) {
       return {
         ok: false,
-        code: "source_item_not_found",
-        message: `Source item not found: ${input.sourceItemId}`
+        code: "tracker_item_not_found",
+        message: `Tracker item not found: ${input.trackerItemId}`,
       };
     }
     if (current.goalId === input.goalId) {
@@ -312,23 +314,23 @@ export function linkGoalToSourceItem(
         ok: true,
         changed: false,
         skippedReason: "already_linked_to_target",
-        sourceItem: current,
-        previousGoalId: current.goalId
+        trackerItem: current,
+        previousGoalId: current.goalId,
       };
     }
     if (current.goalId === null) {
       return {
         ok: false,
         code: "link_changed",
-        message: `Source item ${input.sourceItemId} link changed while linking; retry the operation.`,
-        currentGoalId: null
+        message: `Tracker item ${input.trackerItemId} link changed while linking; retry the operation.`,
+        currentGoalId: null,
       };
     }
     return {
       ok: false,
       code: "linked_to_other_goal",
-      message: `Source item ${input.sourceItemId} is already linked to goal ${current.goalId}. Unlink it first.`,
-      currentGoalId: current.goalId
+      message: `Tracker item ${input.trackerItemId} is already linked to goal ${current.goalId}. Unlink it first.`,
+      currentGoalId: current.goalId,
     };
   }
 
@@ -336,21 +338,21 @@ export function linkGoalToSourceItem(
     ok: true,
     changed: true,
     skippedReason: null,
-    sourceItem: sourceItemFromRow(row),
-    previousGoalId: existing.goalId
+    trackerItem: trackerItemFromRow(row),
+    previousGoalId: existing.goalId,
   };
 }
 
-export function unlinkGoalFromSourceItem(
+export function unlinkGoalFromTrackerItem(
   db: MomentumDb,
-  input: { sourceItemId: string; now?: number }
-): UnlinkGoalFromSourceItemResult {
-  const existing = getSourceItemById(db, input.sourceItemId);
+  input: { trackerItemId: string; now?: number },
+): UnlinkGoalFromTrackerItemResult {
+  const existing = getTrackerItemById(db, input.trackerItemId);
   if (!existing) {
     return {
       ok: false,
-      code: "source_item_not_found",
-      message: `Source item not found: ${input.sourceItemId}`
+      code: "tracker_item_not_found",
+      message: `Tracker item not found: ${input.trackerItemId}`,
     };
   }
 
@@ -358,68 +360,69 @@ export function unlinkGoalFromSourceItem(
     return {
       ok: true,
       changed: false,
-      sourceItem: existing,
-      previousGoalId: null
+      trackerItem: existing,
+      previousGoalId: null,
     };
   }
 
   const now = input.now ?? Date.now();
   const row = db
     .prepare(
-      `UPDATE source_items
+      `UPDATE tracker_items
           SET goal_id = NULL, updated_at = ?
         WHERE id = ?
           AND goal_id = ?
-        RETURNING *`
+        RETURNING *`,
     )
-    .get(now, input.sourceItemId, existing.goalId) as SourceItemRow | undefined;
+    .get(now, input.trackerItemId, existing.goalId) as
+    TrackerItemRow | undefined;
   if (!row) {
-    const current = getSourceItemById(db, input.sourceItemId);
+    const current = getTrackerItemById(db, input.trackerItemId);
     if (!current) {
       return {
         ok: false,
-        code: "source_item_not_found",
-        message: `Source item not found: ${input.sourceItemId}`
+        code: "tracker_item_not_found",
+        message: `Tracker item not found: ${input.trackerItemId}`,
       };
     }
     if (current.goalId === null) {
       return {
         ok: true,
         changed: false,
-        sourceItem: current,
-        previousGoalId: null
+        trackerItem: current,
+        previousGoalId: null,
       };
     }
     return {
       ok: false,
       code: "link_changed",
-      message: `Source item ${input.sourceItemId} link changed to goal ${current.goalId}; retry after confirming the current link.`,
-      currentGoalId: current.goalId
+      message: `Tracker item ${input.trackerItemId} link changed to goal ${current.goalId}; retry after confirming the current link.`,
+      currentGoalId: current.goalId,
     };
   }
 
   return {
     ok: true,
     changed: true,
-    sourceItem: sourceItemFromRow(row),
-    previousGoalId: existing.goalId
+    trackerItem: trackerItemFromRow(row),
+    previousGoalId: existing.goalId,
   };
 }
 
-export function listSourceItemSummariesForGoal(
+export function listTrackerItemSummariesForGoal(
   db: MomentumDb,
-  goalId: string
-): SourceItemSummary[] {
+  goalId: string,
+): TrackerItemSummary[] {
   const rows = db
     .prepare(
       `SELECT id, adapter_kind, external_id, external_key, url, title, status,
               last_observed_at
-         FROM source_items
+         FROM tracker_items
         WHERE goal_id = ?
-        ORDER BY adapter_kind ASC, external_key ASC, external_id ASC`
+        ORDER BY adapter_kind ASC, external_key ASC, external_id ASC`,
     )
     .all(goalId) as Pick<
-    SourceItemRow,
+    TrackerItemRow,
     | "id"
     | "adapter_kind"
     | "external_id"
@@ -430,71 +433,71 @@ export function listSourceItemSummariesForGoal(
     | "last_observed_at"
   >[];
 
-  return rows.map(sourceItemSummaryFromRow);
+  return rows.map(trackerItemSummaryFromRow);
 }
 
-export function recordSourceSnapshot(
+export function recordTrackerSnapshot(
   db: MomentumDb,
-  input: SourceSnapshotInput,
-  clock: SourceItemClock = {}
-): SourceSnapshot {
+  input: TrackerSnapshotInput,
+  clock: TrackerItemClock = {},
+): TrackerSnapshot {
   const now = clock.now?.() ?? Date.now();
   const snapshotJson = JSON.stringify(input.snapshot);
   const row = db
     .prepare(
-      `INSERT INTO source_snapshots
-         (id, source_item_id, adapter_kind, external_id, observed_at,
+      `INSERT INTO tracker_snapshots
+         (id, tracker_item_id, adapter_kind, external_id, observed_at,
           snapshot_json, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`
+       RETURNING *`,
     )
     .get(
-      `source_snapshot_${randomUUID()}`,
-      input.sourceItemId,
+      `tracker_snapshot_${randomUUID()}`,
+      input.trackerItemId,
       input.adapterKind,
       input.externalId,
       input.observedAt,
       snapshotJson,
-      now
-    ) as SourceSnapshotRow;
+      now,
+    ) as TrackerSnapshotRow;
 
-  return sourceSnapshotFromRow(row);
+  return trackerSnapshotFromRow(row);
 }
 
-export function listSourceSnapshotsForItem(
+export function listTrackerSnapshotsForItem(
   db: MomentumDb,
-  sourceItemId: string
-): SourceSnapshot[] {
+  trackerItemId: string,
+): TrackerSnapshot[] {
   const rows = db
     .prepare(
       `SELECT *
-         FROM source_snapshots
-        WHERE source_item_id = ?
-        ORDER BY observed_at ASC, created_at ASC, id ASC`
+         FROM tracker_snapshots
+        WHERE tracker_item_id = ?
+        ORDER BY observed_at ASC, created_at ASC, id ASC`,
     )
-    .all(sourceItemId) as SourceSnapshotRow[];
+    .all(trackerItemId) as TrackerSnapshotRow[];
 
-  return rows.map(sourceSnapshotFromRow);
+  return rows.map(trackerSnapshotFromRow);
 }
 
-export function getLatestSourceSnapshotForItem(
+export function getLatestTrackerSnapshotForItem(
   db: MomentumDb,
-  sourceItemId: string
-): SourceSnapshot | null {
+  trackerItemId: string,
+): TrackerSnapshot | null {
   const row = db
     .prepare(
       `SELECT *
-         FROM source_snapshots
-        WHERE source_item_id = ?
+         FROM tracker_snapshots
+        WHERE tracker_item_id = ?
         ORDER BY observed_at DESC, created_at DESC, id DESC
-        LIMIT 1`
+        LIMIT 1`,
     )
-    .get(sourceItemId) as SourceSnapshotRow | undefined;
+    .get(trackerItemId) as TrackerSnapshotRow | undefined;
 
-  return row ? sourceSnapshotFromRow(row) : null;
+  return row ? trackerSnapshotFromRow(row) : null;
 }
 
-function sourceItemFromRow(row: SourceItemRow): SourceItem {
+function trackerItemFromRow(row: TrackerItemRow): TrackerItem {
   return {
     id: row.id,
     adapterKind: row.adapter_kind,
@@ -507,13 +510,13 @@ function sourceItemFromRow(row: SourceItemRow): SourceItem {
     lastObservedAt: row.last_observed_at,
     goalId: row.goal_id,
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
   };
 }
 
-function sourceItemSummaryFromRow(
+function trackerItemSummaryFromRow(
   row: Pick<
-    SourceItemRow,
+    TrackerItemRow,
     | "id"
     | "adapter_kind"
     | "external_id"
@@ -522,8 +525,8 @@ function sourceItemSummaryFromRow(
     | "title"
     | "status"
     | "last_observed_at"
-  >
-): SourceItemSummary {
+  >,
+): TrackerItemSummary {
   return {
     id: row.id,
     adapterKind: row.adapter_kind,
@@ -532,19 +535,19 @@ function sourceItemSummaryFromRow(
     url: row.url,
     title: row.title,
     status: row.status,
-    lastObservedAt: row.last_observed_at
+    lastObservedAt: row.last_observed_at,
   };
 }
 
-function sourceSnapshotFromRow(row: SourceSnapshotRow): SourceSnapshot {
+function trackerSnapshotFromRow(row: TrackerSnapshotRow): TrackerSnapshot {
   return {
     id: row.id,
-    sourceItemId: row.source_item_id,
+    trackerItemId: row.tracker_item_id,
     adapterKind: row.adapter_kind,
     externalId: row.external_id,
     observedAt: row.observed_at,
     snapshot: parseMetadata(row.snapshot_json),
-    createdAt: row.created_at
+    createdAt: row.created_at,
   };
 }
 

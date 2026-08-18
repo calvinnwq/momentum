@@ -15,7 +15,7 @@ describe("operator docs coverage", () => {
       "stop",
       "status",
       "momentum recovery clear",
-      "momentum doctor"
+      "momentum doctor",
     ]) {
       expect(readme).toContain(cmd);
     }
@@ -28,10 +28,10 @@ describe("operator docs coverage", () => {
     expect(runners).toContain("acp");
   });
 
-  it("keeps source commands documented for operators", () => {
-    const docs = readRepoFile("docs/source-commands.md");
-    expect(docs).toContain("source list");
-    expect(docs).toContain("source reconcile");
+  it("keeps tracker commands documented for operators", () => {
+    const docs = readRepoFile("docs/tracker-commands.md");
+    expect(docs).toContain("tracker list");
+    expect(docs).toContain("tracker reconcile");
   });
 
   it("keeps external-apply documented as an operator-facing command", () => {
@@ -52,7 +52,7 @@ describe("operator docs coverage", () => {
       "update-step",
       "clear-recovery",
       "monitor",
-      "logs"
+      "logs",
     ]) {
       expect(docs).toContain(cmd);
     }
@@ -66,7 +66,7 @@ describe("operator docs coverage", () => {
       "recoverable terminal failures",
       "momentum-native-coding",
       "mwf-*",
-      "operator convention"
+      "operator convention",
     ]) {
       expect(docs).toContain(phrase);
     }
