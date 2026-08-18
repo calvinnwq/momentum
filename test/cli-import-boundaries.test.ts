@@ -441,19 +441,17 @@ describe("M11 CLI import boundaries", () => {
   });
 
   it("allows only explicit renderer transitional imports", () => {
-    const updateIntentTypeEdge: ImportEdge = {
+    const intentTypeEdge: ImportEdge = {
       from: "src/renderers/evidence.ts",
-      to: "src/core/tracker/update-intent-generator.ts",
-      specifier: "../core/tracker/update-intent-generator.js",
+      to: "src/core/tracker/intent-generator.ts",
+      specifier: "../core/tracker/intent-generator.js",
       isTypeOnly: true,
       runtimeBindings: [],
     };
-    expect(rendererTransitionalImportIsAllowed(updateIntentTypeEdge)).toBe(
-      true,
-    );
+    expect(rendererTransitionalImportIsAllowed(intentTypeEdge)).toBe(true);
     expect(
       rendererTransitionalImportIsAllowed({
-        ...updateIntentTypeEdge,
+        ...intentTypeEdge,
         isTypeOnly: false,
         runtimeBindings: ["evaluateGoalForTrackerSatisfiedIntents"],
       }),

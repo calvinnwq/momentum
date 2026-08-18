@@ -14,7 +14,7 @@
  * every collapsed row remain in scope for rollup counts, mismatches, evidence,
  * and pending intents.
  *
- * Pending external update intents are read from local durable state and
+ * Pending intents are read from local durable state and
  * scoped to the same TrackerItem / Goal set so the rollup never widens past
  * the operator's filter context. Stale pending intents are flagged via a
  * configurable TTL (default 30 days); the rollup never auto-deletes intents.
@@ -26,10 +26,7 @@ import {
   listTrackerReconciliationRuns,
   type TrackerReconciliationRun,
 } from "../tracker/reconciliation-runs.js";
-import {
-  listUpdateIntents,
-  type UpdateIntent,
-} from "../intent/update-intents.js";
+import { listIntents, type Intent } from "../intent/intents.js";
 import {
   summarizeIntentApplyAuditsForIntent,
   type IntentApplyAudit,
@@ -182,8 +179,8 @@ export type ProjectRollupCounts = {
     goalsWithoutEvidence: number;
   };
   mismatches: Record<ProjectRollupMismatchKind, number>;
-  pendingUpdateIntents: number;
-  staleUpdateIntents: number;
+  pendingIntents: number;
+  staleIntents: number;
 };
 
 export type ProjectRollup = {
@@ -199,9 +196,9 @@ export type ProjectRollup = {
   totalMismatchCount: number;
   truncatedMismatches: boolean;
   reconciliationWarnings: ProjectRollupReconciliationWarning[];
-  pendingUpdateIntents: ProjectRollupPendingIntentSummary[];
-  totalPendingUpdateIntentCount: number;
-  truncatedPendingUpdateIntents: boolean;
+  pendingIntents: ProjectRollupPendingIntentSummary[];
+  totalPendingIntentCount: number;
+  truncatedPendingIntents: boolean;
   externalApply: ProjectRollupExternalApply;
   nextAction: ProjectRollupNextAction;
 };
@@ -317,12 +314,12 @@ export function buildProjectRollup(
     totalMismatchCount: mismatches.length,
     truncatedMismatches,
     reconciliationWarnings,
-    pendingUpdateIntents: pendingIntents.slice(
+    pendingIntents: pendingIntents.slice(
       0,
       PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
     ),
-    totalPendingUpdateIntentCount: pendingIntents.length,
-    truncatedPendingUpdateIntents: truncatedPendingIntents,
+    totalPendingIntentCount: pendingIntents.length,
+    truncatedPendingIntents: truncatedPendingIntents,
     externalApply,
     nextAction,
   };
@@ -895,8 +892,8 @@ function computeCounts(
       goalsWithoutEvidence,
     },
     mismatches: mismatchCounts,
-    pendingUpdateIntents: pendingIntents.length,
-    staleUpdateIntents: stalePendingIntents,
+    pendingIntents: pendingIntents.length,
+    staleIntents: stalePendingIntents,
   };
 }
 
@@ -1107,13 +1104,13 @@ function buildPendingIntentSummaries(
   const itemIds = new Set(items.flatMap((item) => item.rollupTrackerItemIds));
   const goalIds = new Set(goals.keys());
 
-  const listOptions: Parameters<typeof listUpdateIntents>[1] = {
+  const listOptions: Parameters<typeof listIntents>[1] = {
     status: "pending",
   };
   if (filters.adapterKind !== undefined)
     listOptions.adapterKind = filters.adapterKind;
 
-  const intents = listUpdateIntents(db, listOptions);
+  const intents = listIntents(db, listOptions);
   const scoped = intents.filter((intent) => {
     if (!filtersScoped) return true;
     if (intent.trackerItemId) return itemIds.has(intent.trackerItemId);
@@ -1136,14 +1133,14 @@ function isRollupScoped(filters: ProjectRollupFilters): boolean {
   );
 }
 
-function pendingIntentOrder(a: UpdateIntent, b: UpdateIntent): number {
+function pendingIntentOrder(a: Intent, b: Intent): number {
   if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
   return a.id < b.id ? -1 : 1;
 }
 
 function toPendingIntentSummary(
   db: MomentumDb,
-  intent: UpdateIntent,
+  intent: Intent,
   now: number,
   staleThresholdMs: number,
 ): ProjectRollupPendingIntentSummary {
@@ -1230,7 +1227,7 @@ function pickNextAction(
     return {
       kind: "review_pending_intents",
       message:
-        `${pendingIntents.length} pending external update intent(s)${staleSuffix}; ` +
+        `${pendingIntents.length} pending intent(s)${staleSuffix}; ` +
         "review with `momentum intent list --status pending` and apply/skip/cancel with a reason.",
       detail: { total: pendingIntents.length, stale, intentIds },
     };
@@ -1238,7 +1235,7 @@ function pickNextAction(
   if (counts.mismatches.goal_done_tracker_not_done > 0) {
     return {
       kind: "address_mismatch",
-      message: `${counts.mismatches.goal_done_tracker_not_done} goal-done/tracker-not-done mismatch(es); queue external update intent or update the tracker item.`,
+      message: `${counts.mismatches.goal_done_tracker_not_done} goal-done/tracker-not-done mismatch(es); queue an intent or update the tracker item.`,
       detail: { mismatchKind: "goal_done_tracker_not_done" },
     };
   }

@@ -1,6 +1,6 @@
 import {
   DEFAULT_INTENT_APPLY_POLICY,
-  type UpdateIntentApplyPolicy,
+  type IntentApplyPolicy,
 } from "./policy.js";
 
 export const LINEAR_EXTERNAL_APPLY_PREFLIGHT_STATUSES = Object.freeze([
@@ -35,7 +35,7 @@ type EnvSnapshot = Record<string, string | undefined>;
 
 export function preflightLinearExternalApply(input: {
   env: EnvSnapshot;
-  intentApplyPolicy?: UpdateIntentApplyPolicy | null;
+  intentApplyPolicy?: IntentApplyPolicy | null;
   targetExternalId?: string | null;
 }): LinearExternalApplyPreflightResult {
   const target = input.targetExternalId?.trim() ?? "";

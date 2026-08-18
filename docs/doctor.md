@@ -189,7 +189,7 @@ mirrors this with an `evidence:` count line and a last-record line.
 ## External apply block
 
 The JSON `externalApply` block reports global audit-ledger state across
-all update intents in the data directory:
+all intents in the data directory:
 
 ```json
 {
@@ -201,7 +201,7 @@ all update intents in the data directory:
 }
 ```
 
-- `intentApplyStateCounts` — `{idle, in_flight, blocked}` across all update intents (not just pending).
+- `intentApplyStateCounts` — `{idle, in_flight, blocked}` across all intents (not just pending).
 - `auditCounts` — `{claimed, succeeded, failed, blocked, audit_incomplete}` across all audit rows.
 - `totalAttempts` — total audit rows.
 - `latestAttempt` — the most recent audit row (or `null`), prefixed with `intentId` to identify the source intent; see [Audit row shape](intent-commands.md#audit-row-shape) for the full field list.

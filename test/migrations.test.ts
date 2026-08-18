@@ -100,11 +100,9 @@ describe("applyQueueMigrations", () => {
       expect(tableNames(db)).toContain("tracker_snapshots");
       expect(tableNames(db)).toContain("tracker_reconciliation_runs");
       expect(tableNames(db)).toContain("evidence_records");
-      expect(tableNames(db)).toContain("update_intents");
+      expect(tableNames(db)).toContain("intents");
 
-      const updateIntentColumns = getColumns(db, "update_intents").map(
-        (row) => row.name,
-      );
+      const intentColumns = getColumns(db, "intents").map((row) => row.name);
       for (const col of [
         "id",
         "adapter_kind",
@@ -126,10 +124,7 @@ describe("applyQueueMigrations", () => {
         "skipped_at",
         "canceled_at",
       ]) {
-        expect(
-          updateIntentColumns,
-          `missing update_intents column: ${col}`,
-        ).toContain(col);
+        expect(intentColumns, `missing intents column: ${col}`).toContain(col);
       }
 
       const evidenceColumns = getColumns(db, "evidence_records").map(
@@ -227,19 +222,18 @@ describe("applyQueueMigrations", () => {
       expect(indexes).toContain("idx_evidence_records_source_type");
       expect(indexes).toContain("idx_evidence_records_occurred_at");
       expect(indexes).toContain("idx_evidence_records_run_step");
-      expect(indexes).toContain("idx_update_intents_idempotency_key");
-      expect(indexes).toContain("idx_update_intents_status");
-      expect(indexes).toContain("idx_update_intents_goal");
-      expect(indexes).toContain("idx_update_intents_tracker_item");
-      expect(indexes).toContain("idx_update_intents_evidence");
-      expect(indexes).toContain("idx_update_intents_adapter_target");
-      expect(indexes).toContain("idx_update_intents_created_at");
+      expect(indexes).toContain("idx_intents_idempotency_key");
+      expect(indexes).toContain("idx_intents_status");
+      expect(indexes).toContain("idx_intents_goal");
+      expect(indexes).toContain("idx_intents_tracker_item");
+      expect(indexes).toContain("idx_intents_evidence");
+      expect(indexes).toContain("idx_intents_adapter_target");
+      expect(indexes).toContain("idx_intents_created_at");
       expect(indexes).toContain("idx_workflow_events_run_cursor");
 
-      expect(
-        updateIntentColumns,
-        "missing update_intents column: apply_state",
-      ).toContain("apply_state");
+      expect(intentColumns, "missing intents column: apply_state").toContain(
+        "apply_state",
+      );
 
       expect(tableNames(db)).toContain("intent_apply_audits");
       expect(tableNames(db)).toContain("workflow_events");
@@ -427,15 +421,13 @@ describe("applyQueueMigrations", () => {
 
     const upgraded = openDb(dataDir);
     try {
-      const updateIntentCols = getColumns(upgraded, "update_intents").map(
-        (row) => row.name,
-      );
-      expect(updateIntentCols).toContain("apply_state");
+      const intentCols = getColumns(upgraded, "intents").map((row) => row.name);
+      expect(intentCols).toContain("apply_state");
       expect(tableNames(upgraded)).toContain("intent_apply_audits");
       const preserved = upgraded
         .prepare(
           `SELECT id, status, apply_state, reason
-             FROM update_intents WHERE id = 'intent_legacy_1'`,
+             FROM intents WHERE id = 'intent_legacy_1'`,
         )
         .get() as {
         id: string;
@@ -700,12 +692,12 @@ describe("applyQueueMigrations", () => {
     }
   });
 
-  it("enforces the unique index on update_intents.idempotency_key", () => {
+  it("enforces the unique index on intents.idempotency_key", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
       const insert = db.prepare(
-        `INSERT INTO update_intents
+        `INSERT INTO intents
            (id, adapter_kind, intent_type, payload_json, reason,
             status, idempotency_key, created_at, updated_at)
          VALUES (?, ?, ?, '{}', ?, 'pending', ?, 1, 1)`,
@@ -721,15 +713,15 @@ describe("applyQueueMigrations", () => {
     }
   });
 
-  it("creates the update_intents table idempotently across openDb reopens", () => {
+  it("creates the intents table idempotently across openDb reopens", () => {
     const dataDir = makeTempDir();
     const a = openDb(dataDir);
-    const intentColsBefore = getColumns(a, "update_intents").length;
+    const intentColsBefore = getColumns(a, "intents").length;
     a.close();
 
     const b = openDb(dataDir);
     try {
-      expect(getColumns(b, "update_intents")).toHaveLength(intentColsBefore);
+      expect(getColumns(b, "intents")).toHaveLength(intentColsBefore);
     } finally {
       b.close();
     }

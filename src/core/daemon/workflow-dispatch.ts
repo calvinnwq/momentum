@@ -39,13 +39,9 @@ import { getLatestIntentApplyAudit } from "../intent/apply-audits.js";
 import {
   loadMomentumPolicy,
   resolveIntentApplyPolicy,
-  type UpdateIntentApplyPolicy,
+  type IntentApplyPolicy,
 } from "../intent/policy.js";
-import {
-  createUpdateIntent,
-  listUpdateIntents,
-  type UpdateIntent,
-} from "../intent/update-intents.js";
+import { createIntent, listIntents, type Intent } from "../intent/intents.js";
 import {
   getTrackerItemById,
   listTrackerItems,
@@ -3290,7 +3286,7 @@ function resolveDaemonExternalApplyContext(
 
 function resolveLinearRefreshAlreadyAppliedContext(
   lifecycle: TrackerRefreshLifecyclePlan | null,
-  applied: readonly UpdateIntent[],
+  applied: readonly Intent[],
   trackerItemsById: ReadonlyMap<string, TrackerItem>,
   latestAuditsByIntentId: ReadonlyMap<
     string,
@@ -3331,7 +3327,7 @@ function seedLinearRefreshStatusUpdateIntent(input: {
   issueScopeIdentifier: string | null;
   now: number;
 }):
-  | { ok: true; intent: UpdateIntent; trackerItem: TrackerItem }
+  | { ok: true; intent: Intent; trackerItem: TrackerItem }
   | { ok: false; reason: string } {
   const issueScopeIdentifier = input.issueScopeIdentifier?.trim() || null;
   if (issueScopeIdentifier === null) {
@@ -3361,7 +3357,7 @@ function seedLinearRefreshStatusUpdateIntent(input: {
   }
 
   const trackerItem = matches[0]!;
-  const intent = createUpdateIntent(
+  const intent = createIntent(
     input.db,
     {
       adapterKind: "linear",
@@ -3385,9 +3381,9 @@ function seedLinearRefreshStatusUpdateIntent(input: {
 }
 
 function appendIntentIfMissing(
-  intents: readonly UpdateIntent[],
-  intent: UpdateIntent,
-): UpdateIntent[] {
+  intents: readonly Intent[],
+  intent: Intent,
+): Intent[] {
   if (intents.some((candidate) => candidate.id === intent.id)) {
     return [...intents];
   }
@@ -3397,8 +3393,8 @@ function appendIntentIfMissing(
 function findPendingLinearExternalApplyIntents(
   db: MomentumDb,
   issueScopeIdentifier: string,
-): UpdateIntent[] {
-  return listUpdateIntents(db, {
+): Intent[] {
+  return listIntents(db, {
     status: "pending",
     adapterKind: "linear",
   }).filter((intent) =>
@@ -3409,8 +3405,8 @@ function findPendingLinearExternalApplyIntents(
 function findAppliedLinearExternalApplyIntents(
   db: MomentumDb,
   issueScopeIdentifier: string,
-): UpdateIntent[] {
-  return listUpdateIntents(db, {
+): Intent[] {
+  return listIntents(db, {
     status: "applied",
     adapterKind: "linear",
   }).filter((intent) =>
@@ -3420,7 +3416,7 @@ function findAppliedLinearExternalApplyIntents(
 
 function pendingLinearIntentMatchesIssueScope(
   db: MomentumDb,
-  intent: UpdateIntent,
+  intent: Intent,
   issueScopeIdentifier: string,
 ): boolean {
   if (issueScopeIdentifier.trim().length === 0) return false;
@@ -3438,7 +3434,7 @@ function pendingLinearIntentMatchesIssueScope(
 
 function loadLinearRefreshTrackerItems(
   db: MomentumDb,
-  intents: readonly UpdateIntent[],
+  intents: readonly Intent[],
 ): ReadonlyMap<string, TrackerItem> {
   const out = new Map<string, TrackerItem>();
   for (const intent of intents) {
@@ -3452,7 +3448,7 @@ function loadLinearRefreshTrackerItems(
 
 function loadLatestLinearRefreshAudits(
   db: MomentumDb,
-  intents: readonly UpdateIntent[],
+  intents: readonly Intent[],
 ) {
   const out = new Map<
     string,
@@ -3466,7 +3462,7 @@ function loadLatestLinearRefreshAudits(
 }
 
 type LinearRefreshPolicyResolution =
-  | { ok: true; value: UpdateIntentApplyPolicy }
+  | { ok: true; value: IntentApplyPolicy }
   | {
       ok: false;
       code: string;
@@ -3509,7 +3505,7 @@ function linearRefreshRefusalReason(
 }
 
 function linearRefreshAlreadyAppliedSuccess(
-  intent: UpdateIntent,
+  intent: Intent,
   source: TrackerItem,
   audit: NonNullable<ReturnType<typeof getLatestIntentApplyAudit>>,
 ): ExecuteExternalApplySuccess {

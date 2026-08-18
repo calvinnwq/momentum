@@ -34,7 +34,7 @@ import type {
   LinearExternalUpdateSuccess,
 } from "../src/adapters/linear-external-update-client.js";
 import type { LinearIssueRefreshClient } from "../src/adapters/linear-issue-refresh.js";
-import { getUpdateIntentById } from "../src/core/intent/update-intents.js";
+import { getIntentById } from "../src/core/intent/intents.js";
 
 const tempRoots: string[] = [];
 
@@ -113,7 +113,7 @@ function insertIntent(
       ? "linear_issue_id_123"
       : args.targetExternalId;
   db.prepare(
-    `INSERT INTO update_intents
+    `INSERT INTO intents
        (id, adapter_kind, target_external_id, intent_type, payload_json,
         reason, tracker_item_id, status, idempotency_key, created_at, updated_at,
         applied_at, skipped_at, canceled_at, decision_reason)
@@ -538,7 +538,7 @@ describe("executeExternalApply two-phase happy path", () => {
     try {
       const { intentId } = seedHappyPath(db);
       const repoPath = makeRepo(externalApplyAllowedPolicy());
-      const intent = getUpdateIntentById(db, intentId);
+      const intent = getIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
       const idempotencyMarker = expectedIdempotencyMarker(
         intentId,
@@ -586,7 +586,7 @@ describe("executeExternalApply two-phase happy path", () => {
       expect(result.audit.reconcile.warning).toBeNull();
 
       const applyState = db
-        .prepare("SELECT apply_state FROM update_intents WHERE id = ?")
+        .prepare("SELECT apply_state FROM intents WHERE id = ?")
         .get(intentId) as { apply_state: string };
       expect(applyState.apply_state).toBe("idle");
     } finally {
@@ -681,9 +681,7 @@ describe("executeExternalApply two-phase happy path", () => {
       expect(result.context.mutationKind).toBe("status_transition");
       expect(result.external.statusTransitioned).toBe(true);
       expect(result.external.nextStateName).toBe("Done");
-      expect(getUpdateIntentById(db, "intent_status_update")?.status).toBe(
-        "applied",
-      );
+      expect(getIntentById(db, "intent_status_update")?.status).toBe("applied");
 
       expect(spy.calls).toHaveLength(1);
       const sent = spy.calls[0]!;
@@ -742,7 +740,7 @@ describe("executeExternalApply two-phase happy path", () => {
     try {
       const { intentId } = seedHappyPath(db);
       const repoPath = makeRepo(externalApplyAllowedPolicy());
-      const intent = getUpdateIntentById(db, intentId);
+      const intent = getIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
       const idempotencyMarker = expectedIdempotencyMarker(
         intentId,
@@ -782,7 +780,7 @@ describe("executeExternalApply two-phase happy path", () => {
     try {
       const { intentId } = seedHappyPath(db);
       const repoPath = makeRepo(externalApplyAllowedPolicy());
-      const intent = getUpdateIntentById(db, intentId);
+      const intent = getIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
       const idempotencyMarker = expectedIdempotencyMarker(
         intentId,
@@ -828,7 +826,7 @@ describe("executeExternalApply two-phase happy path", () => {
     try {
       const { intentId } = seedHappyPath(db);
       const repoPath = makeRepo(externalApplyAllowedPolicy());
-      const intent = getUpdateIntentById(db, intentId);
+      const intent = getIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
       const idempotencyMarker = expectedIdempotencyMarker(
         intentId,
@@ -874,7 +872,7 @@ describe("executeExternalApply two-phase happy path", () => {
     try {
       const { intentId } = seedHappyPath(db);
       const repoPath = makeRepo(externalApplyAllowedPolicy());
-      const intent = getUpdateIntentById(db, intentId);
+      const intent = getIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
       const idempotencyMarker = expectedIdempotencyMarker(
         intentId,
@@ -923,7 +921,7 @@ describe("executeExternalApply two-phase happy path", () => {
     try {
       const { intentId } = seedHappyPath(db);
       const repoPath = makeRepo(externalApplyAllowedPolicy());
-      const intent = getUpdateIntentById(db, intentId);
+      const intent = getIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
       const idempotencyMarker = expectedIdempotencyMarker(
         intentId,
@@ -937,7 +935,7 @@ describe("executeExternalApply two-phase happy path", () => {
           repoPath,
           deps: {
             buildLinearClient: () => spy.client,
-            updateIntentApplyAuditReconcile: () => {
+            intentApplyAuditReconcile: () => {
               throw new Error("simulated reconcile update failure");
             },
             now: () => 2200,
@@ -1094,10 +1092,10 @@ describe("executeExternalApply concurrency and write failures", () => {
       expect(result.audit?.lifecycleState).toBe("failed");
       expect(result.audit?.resultCode).toBe("write_rejected");
 
-      const intent = getUpdateIntentById(db, intentId);
+      const intent = getIntentById(db, intentId);
       expect(intent?.status).toBe("pending");
       const applyState = db
-        .prepare("SELECT apply_state FROM update_intents WHERE id = ?")
+        .prepare("SELECT apply_state FROM intents WHERE id = ?")
         .get(intentId) as { apply_state: string };
       expect(applyState.apply_state).toBe("idle");
     } finally {
@@ -1145,7 +1143,7 @@ describe("executeExternalApply concurrency and write failures", () => {
       expect(result.audit?.resultCode).toBe("failed_finalize_failed");
 
       const applyState = db
-        .prepare("SELECT apply_state FROM update_intents WHERE id = ?")
+        .prepare("SELECT apply_state FROM intents WHERE id = ?")
         .get(intentId) as { apply_state: string };
       expect(applyState.apply_state).toBe("blocked");
     } finally {
@@ -1159,7 +1157,7 @@ describe("executeExternalApply concurrency and write failures", () => {
     try {
       const { intentId } = seedHappyPath(db);
       const repoPath = makeRepo(externalApplyAllowedPolicy());
-      const intent = getUpdateIntentById(db, intentId);
+      const intent = getIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
       const idempotencyMarker = expectedIdempotencyMarker(
         intentId,
@@ -1199,11 +1197,11 @@ describe("executeExternalApply concurrency and write failures", () => {
       expect(result.context.reconcile.status).toBe("deferred");
 
       const applyState = db
-        .prepare("SELECT apply_state FROM update_intents WHERE id = ?")
+        .prepare("SELECT apply_state FROM intents WHERE id = ?")
         .get(intentId) as { apply_state: string };
       expect(applyState.apply_state).toBe("blocked");
 
-      const intentAfter = getUpdateIntentById(db, intentId);
+      const intentAfter = getIntentById(db, intentId);
       expect(intentAfter?.status).toBe("pending");
 
       const latest = getLatestIntentApplyAudit(db, intentId);
@@ -1221,7 +1219,7 @@ describe("executeExternalApply concurrency and write failures", () => {
     try {
       const { intentId } = seedHappyPath(db);
       const repoPath = makeRepo(externalApplyAllowedPolicy());
-      const intent = getUpdateIntentById(db, intentId);
+      const intent = getIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
       const idempotencyMarker = expectedIdempotencyMarker(
         intentId,
@@ -1236,7 +1234,7 @@ describe("executeExternalApply concurrency and write failures", () => {
           deps: {
             buildLinearClient: () => spy.client,
             now: () => 850,
-            markUpdateIntentApplied: () => ({
+            markIntentApplied: () => ({
               ok: false,
               code: "intent_already_terminal",
               message: "simulated mark-applied failure",
@@ -1256,11 +1254,11 @@ describe("executeExternalApply concurrency and write failures", () => {
       });
 
       const applyState = db
-        .prepare("SELECT apply_state FROM update_intents WHERE id = ?")
+        .prepare("SELECT apply_state FROM intents WHERE id = ?")
         .get(intentId) as { apply_state: string };
       expect(applyState.apply_state).toBe("blocked");
 
-      const intentAfter = getUpdateIntentById(db, intentId);
+      const intentAfter = getIntentById(db, intentId);
       expect(intentAfter?.status).toBe("pending");
 
       const latest = getLatestIntentApplyAudit(db, intentId);
@@ -1278,7 +1276,7 @@ describe("executeExternalApply concurrency and write failures", () => {
     try {
       const { intentId } = seedHappyPath(db);
       const repoPath = makeRepo(externalApplyAllowedPolicy());
-      const intent = getUpdateIntentById(db, intentId);
+      const intent = getIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
       const idempotencyMarker = expectedIdempotencyMarker(
         intentId,
@@ -1293,9 +1291,9 @@ describe("executeExternalApply concurrency and write failures", () => {
           deps: {
             buildLinearClient: () => spy.client,
             now: () => 875,
-            markUpdateIntentApplied: (db, input) => {
+            markIntentApplied: (db, input) => {
               db.prepare(
-                `UPDATE update_intents
+                `UPDATE intents
                     SET status = 'applied',
                         decision_reason = 'external_apply: concurrent operator',
                         applied_at = ?,
@@ -1320,7 +1318,7 @@ describe("executeExternalApply concurrency and write failures", () => {
       expect(result.audit.resultCode).toBe("applied");
 
       const applyState = db
-        .prepare("SELECT apply_state FROM update_intents WHERE id = ?")
+        .prepare("SELECT apply_state FROM intents WHERE id = ?")
         .get(intentId) as { apply_state: string };
       expect(applyState.apply_state).toBe("idle");
     } finally {
@@ -1398,7 +1396,7 @@ describe("executeExternalApply concurrency and write failures", () => {
       expect(result.audit?.resultCode).toBe("failed_finalize_failed");
 
       const applyState = db
-        .prepare("SELECT apply_state FROM update_intents WHERE id = ?")
+        .prepare("SELECT apply_state FROM intents WHERE id = ?")
         .get(intentId) as { apply_state: string };
       expect(applyState.apply_state).toBe("blocked");
     } finally {

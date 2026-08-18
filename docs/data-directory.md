@@ -23,7 +23,7 @@ Momentum never modifies the data directory outside the resolved path. Each store
 
 ```text
 <data-dir>/
-  momentum.db                  # SQLite (goals, jobs, events, repo_locks, daemon_runs, tracker_items, tracker_snapshots, tracker_reconciliation_runs, evidence_records, update_intents, intent_apply_audits, workflow_runs, workflow_steps, workflow_approvals, workflow_leases, workflow_events, workflow_definitions, step_definitions, workflow_run_lineage, workflow_run_coding_compatibility, workflow_run_import_metadata, executor_* tables)
+  momentum.db                  # SQLite (goals, jobs, events, repo_locks, daemon_runs, tracker_items, tracker_snapshots, tracker_reconciliation_runs, evidence_records, intents, intent_apply_audits, workflow_runs, workflow_steps, workflow_approvals, workflow_leases, workflow_events, workflow_definitions, step_definitions, workflow_run_lineage, workflow_run_coding_compatibility, workflow_run_import_metadata, executor_* tables)
   openclaw-supervisor/
     <encoded-run-id>.json      # Per-run OpenClaw supervise cursor/digest suppression state
     <encoded-run-id>.auto-actions.jsonl
@@ -48,8 +48,10 @@ Momentum never modifies the data directory outside the resolved path. Each store
 A single `momentum.db` per data directory backs durable state across all goals:
 
 When an existing data directory is opened, the durable source-to-tracker migration renames `source_items`, `source_snapshots`, and `source_reconciliation_runs` to their `tracker_*` replacements in place.
-It also renames `source_item_id` to `tracker_item_id` in the snapshot, evidence, and update-intent tables while preserving rows, IDs, links, timestamps, and index behavior.
-If a database contains an ambiguous mixture of legacy and tracker-named objects, migration fails closed for operator inspection instead of creating parallel empty tables.
+It also renames `source_item_id` to `tracker_item_id` in the snapshot, evidence, and intent tables while preserving rows, IDs, links, timestamps, and index behavior.
+The durable intent rename then moves the legacy `update_intents` table to `intents` in place, migrating its index names and letting SQLite rewrite the audit-ledger foreign key, again preserving rows, IDs, idempotency keys, decisions, and timestamps.
+The same upgrade rewrites any persisted `mirroring_external_state` executor-round state to `supervising_delegate` without changing round semantics.
+If a database contains an ambiguous mixture of legacy and renamed objects, migration fails closed for operator inspection instead of creating parallel empty tables.
 
 - `goals` — durable goal rows from the retired goal-first lane, including `state`, `current_iteration`, `completion_reason`, `needs_manual_recovery`, and manual-recovery metadata; `recovery clear`, daemon recovery surfaces, and `doctor` still read them.
 - `jobs` — stored `goal_iteration` job rows from the retired goal-first lane; nothing claims them anymore, but daemon startup recovery and `daemon status` still read and reconcile stale rows.
@@ -65,8 +67,8 @@ If a database contains an ambiguous mixture of legacy and tracker-named objects,
 - `tracker_snapshots` — point-in-time JSON snapshots captured during reconciliation.
 - `tracker_reconciliation_runs` — per-run summary (counts, pagination flags, classification breakdown).
 - `evidence_records` — normalized agent-workflow rows ingested via `evidence ingest`, including nullable `run_id` / `step_id` workflow linkage columns indexed by `(run_id, step_id)` for run and step evidence lookups.
-- `update_intents` — durable external-tracker update intents in `pending` / `applied` / `skipped` / `canceled` states, plus an `apply_state` column tracking the per-intent external-apply CAS state (`idle` / `in_flight` / `blocked`).
-- `intent_apply_audits` — append-only audit ledger for external-apply attempts on `update_intents`; one row per claim with lifecycle (`claimed` / `succeeded` / `failed` / `blocked` / `audit_incomplete`), idempotency marker, preview/result fields, and reconcile metadata.
+- `intents` — durable external-tracker intents in `pending` / `applied` / `skipped` / `canceled` states, plus an `apply_state` column tracking the per-intent external-apply CAS state (`idle` / `in_flight` / `blocked`).
+- `intent_apply_audits` — append-only audit ledger for external-apply attempts on `intents`; one row per claim with lifecycle (`claimed` / `succeeded` / `failed` / `blocked` / `audit_incomplete`), idempotency marker, preview/result fields, and reconcile metadata.
 - `workflow_runs` - durable workflow run rows keyed by `runId`, carrying `state`, identity columns (`goal_id`, `repo_path`, `objective`, `issue_scope_json`, `approval_boundary`, `skill_revision`, nullable `workflow_definition_key` / `workflow_definition_version` provenance for definition-started runs), the run `source` (`agent-workflow`, `workflow-definition`, or `momentum-native-coding`) plus optional `source_artifact_path`, the captured `plan_json` body, optional batch grouping, monitor advisory columns (`monitor_last_seen_state`, `monitor_terminal`, `monitor_step`, `monitor_last_seen_digest`, `monitor_last_emitted_digest`, `monitor_last_seen_at`, `monitor_last_emitted_at`), the per-run `needs_manual_recovery` flag, run-scoped manual-recovery fields (`manual_recovery_reason`, `manual_recovery_at`) used by live recovery and scheduler-lane stale workflow-lease recovery when `recovery.md` rendering is best-effort or absent, and lifecycle timestamps.
   The digest and timestamp advisory columns are also the native progress-monitor suppression baseline: `workflow run monitor --advance` and `workflow run watch --once` can refresh `monitor_last_seen_digest` / `monitor_last_seen_at` and, only when a meaningful tick or throttled supervisor advisory emits, `monitor_last_emitted_digest` / `monitor_last_emitted_at` for `momentum-native-coding` runs.
   The retired `route_json` compatibility column no longer exists on current databases.
@@ -144,7 +146,7 @@ If a database contains an ambiguous mixture of legacy and tracker-named objects,
   Live-wrapper-owned rounds filled by a configured daemon/watch host-binding file can include `verification-log` artifact paths or precise recovery codes from result parsing, moved HEAD, lost dispatch lease, git, commit, or reset failures.
   A `delegate-supervisor` handoff normally completes one durable round, and each normal continuation read completes another; a round reopened after gate resolution resumes in place.
   Only the attempt's first completed handoff may receive an immediate second read in the same dispatcher pass; later passes and retry attempts perform one tick and continuation-only daemon cycles wait the configured poll interval.
-  If the process stops after a durable handoff intent or completed handoff exists but before classification, the unclassified running, capturing-result, or `mirroring_external_state` round remains resumable under the same attempt and does not authorize another handoff.
+  If the process stops after a durable handoff intent or completed handoff exists but before classification, the unclassified running, capturing-result, or `supervising_delegate` round remains resumable under the same attempt and does not authorize another handoff.
   Native `mechanism_completed` checkpoint reattachment semantics are owned by [Executor SDK](executor-sdk.md#envelope-facade).
   A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
   Each read keeps the raw response digest in `inputDigest`, stores its semantic progress digest in `resultDigest`, refreshes durable liveness, and carries the last semantic-progress time across rounds.

@@ -31,7 +31,7 @@ const JOB_QUEUE_COLUMNS: ColumnSpec[] = [
   { name: "error_path", type: "TEXT" },
 ];
 
-const UPDATE_INTENT_M6_COLUMNS: ColumnSpec[] = [
+const INTENT_M6_COLUMNS: ColumnSpec[] = [
   { name: "apply_state", type: "TEXT NOT NULL DEFAULT 'idle'" },
 ];
 
@@ -265,8 +265,8 @@ CREATE INDEX IF NOT EXISTS idx_tracker_reconciliation_runs_adapter_started
   ON tracker_reconciliation_runs(adapter_kind, started_at);
 `;
 
-const UPDATE_INTENTS_DDL = `
-CREATE TABLE IF NOT EXISTS update_intents (
+const INTENTS_DDL = `
+CREATE TABLE IF NOT EXISTS intents (
   id TEXT PRIMARY KEY,
   adapter_kind TEXT NOT NULL,
   target_external_id TEXT,
@@ -288,32 +288,32 @@ CREATE TABLE IF NOT EXISTS update_intents (
   canceled_at INTEGER
 ) STRICT;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_update_intents_idempotency_key
-  ON update_intents(idempotency_key);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_intents_idempotency_key
+  ON intents(idempotency_key);
 
-CREATE INDEX IF NOT EXISTS idx_update_intents_status
-  ON update_intents(status);
+CREATE INDEX IF NOT EXISTS idx_intents_status
+  ON intents(status);
 
-CREATE INDEX IF NOT EXISTS idx_update_intents_goal
-  ON update_intents(goal_id) WHERE goal_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_intents_goal
+  ON intents(goal_id) WHERE goal_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_update_intents_tracker_item
-  ON update_intents(tracker_item_id) WHERE tracker_item_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_intents_tracker_item
+  ON intents(tracker_item_id) WHERE tracker_item_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_update_intents_evidence
-  ON update_intents(evidence_record_id) WHERE evidence_record_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_intents_evidence
+  ON intents(evidence_record_id) WHERE evidence_record_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_update_intents_adapter_target
-  ON update_intents(adapter_kind, target_external_id);
+CREATE INDEX IF NOT EXISTS idx_intents_adapter_target
+  ON intents(adapter_kind, target_external_id);
 
-CREATE INDEX IF NOT EXISTS idx_update_intents_created_at
-  ON update_intents(created_at);
+CREATE INDEX IF NOT EXISTS idx_intents_created_at
+  ON intents(created_at);
 `;
 
 const INTENT_APPLY_AUDITS_DDL = `
 CREATE TABLE IF NOT EXISTS intent_apply_audits (
   id TEXT PRIMARY KEY,
-  intent_id TEXT NOT NULL REFERENCES update_intents(id),
+  intent_id TEXT NOT NULL REFERENCES intents(id),
   adapter_kind TEXT NOT NULL,
   provider TEXT NOT NULL,
   external_target_external_id TEXT,
@@ -1900,6 +1900,16 @@ function migrateWorkflowVocabulary(
       }
     }
 
+    // NAM-06 delegate-supervision round-state rename: the long-lived external
+    // mirror lane state moves from `mirroring_external_state` to
+    // `supervising_delegate`. Only the round-state value changes; the
+    // transition graph, classification, and recovery semantics are identical.
+    if (columnExists(db, "executor_rounds", "state")) {
+      db.prepare(
+        "UPDATE executor_rounds SET state = 'supervising_delegate' WHERE state = 'mirroring_external_state'",
+      ).run();
+    }
+
     if (
       columnExists(db, "workflow_runs", "id") &&
       columnExists(db, "workflow_runs", "route_json")
@@ -2156,6 +2166,12 @@ function workflowVocabularyMigrationNeeded(
   if (
     columnHasSubstring(db, "workflow_runs", "route_json", '"no-mistakes"') ||
     columnHasSubstring(db, "workflow_runs", "route_json", '"linear-refresh"')
+  ) {
+    return true;
+  }
+
+  if (
+    columnHasValue(db, "executor_rounds", "state", "mirroring_external_state")
   ) {
     return true;
   }
@@ -2504,6 +2520,94 @@ function migrateTrackerSchemaRename(db: MomentumDb): void {
   }
 }
 
+// The NAM-06 update-intent -> intent durable rename. Old-name indexes are
+// dropped by the rename; the intent-named replacements are recreated from the
+// fresh DDL inside the same transaction. RENAME TO rewrites referencing
+// foreign-key clauses (intent_apply_audits.intent_id) but keeps index names,
+// so the names are migrated explicitly.
+const INTENT_TABLE_RENAME: readonly [string, string] = [
+  "update_intents",
+  "intents",
+];
+
+const INTENT_INDEX_RENAME_DROPS: readonly string[] = [
+  "idx_update_intents_idempotency_key",
+  "idx_update_intents_status",
+  "idx_update_intents_goal",
+  "idx_update_intents_tracker_item",
+  "idx_update_intents_evidence",
+  "idx_update_intents_adapter_target",
+  "idx_update_intents_created_at",
+];
+
+/**
+ * Whether the durable intent graph still carries the pre-rename
+ * `update_intents` table name. Exported so read-only opens route a pre-rename
+ * database through the full migration chain.
+ */
+export function intentSchemaMigrationNeeded(db: MomentumDb): boolean {
+  return tableExists(db, INTENT_TABLE_RENAME[0]);
+}
+
+/**
+ * Refuse an ambiguous partially renamed intent graph without mutating
+ * anything: an `intents` table beside a still-present `update_intents` table
+ * cannot be renamed losslessly and parks the open for operator inspection.
+ * Hoisted into the fail-closed block at the top of `applyQueueMigrations` so
+ * the refusal lands before any earlier migration commits;
+ * `migrateIntentSchemaRename` re-checks as defense.
+ */
+function assertIntentSchemaRenameUnambiguous(db: MomentumDb): void {
+  const [legacyTable, intentTable] = INTENT_TABLE_RENAME;
+  if (tableExists(db, legacyTable) && tableExists(db, intentTable)) {
+    throw new Error(
+      `intent schema migration refused: both ${legacyTable} and ${intentTable} exist; ` +
+        "resolve the ambiguous partial state before reopening this database",
+    );
+  }
+}
+
+/**
+ * Rename the durable intent table from `update_intents` to `intents`, in
+ * place, losslessly, and exactly once.
+ *
+ * Runs after the tracker rename (which renames `update_intents.source_item_id`
+ * to `tracker_item_id` while the legacy table name is still in place) and
+ * before the additive DDL pass so a legacy database is renamed rather than
+ * gaining an empty `intents` table beside a populated `update_intents` one.
+ * `ALTER TABLE ... RENAME TO` rewrites the referencing foreign-key clause in
+ * `intent_apply_audits` (SQLite non-legacy alter semantics), so row bytes,
+ * ids, idempotency keys, decisions, errors, timestamps, and links are
+ * untouched; only names change. Old-name indexes are dropped and their
+ * intent-named equivalents recreated in the same transaction.
+ */
+function migrateIntentSchemaRename(db: MomentumDb): void {
+  if (!intentSchemaMigrationNeeded(db)) return;
+
+  assertIntentSchemaRenameUnambiguous(db);
+
+  const [legacyTable, intentTable] = INTENT_TABLE_RENAME;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec(`ALTER TABLE ${legacyTable} RENAME TO ${intentTable}`);
+    for (const indexName of INTENT_INDEX_RENAME_DROPS) {
+      db.exec(`DROP INDEX IF EXISTS ${indexName}`);
+    }
+    db.exec(INTENTS_DDL);
+
+    const violations = db.prepare("PRAGMA foreign_key_check").all();
+    if (violations.length > 0) {
+      throw new Error(
+        "intent schema migration produced foreign-key violations; rolling back",
+      );
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function applyQueueMigrations(
   db: MomentumDb,
   options: QueueMigrationOptions = {},
@@ -2520,15 +2624,18 @@ export function applyQueueMigrations(
   // refused database stays byte-identical to its pre-open state.
   if (
     routeStatePlan.deferredUntilBaseComplete !== true &&
-    trackerSchemaMigrationNeeded(db)
+    (trackerSchemaMigrationNeeded(db) || intentSchemaMigrationNeeded(db))
   ) {
     assertWorkflowRouteStatePlanCurrent(db, routeStatePlan);
   }
   // Fail closed before any mutation, part three: an ambiguous partially
-  // renamed tracker graph must refuse the whole migration chain up front, so
-  // the refused database stays byte-identical to its pre-open state.
+  // renamed tracker or intent graph must refuse the whole migration chain up
+  // front, so the refused database stays byte-identical to its pre-open state.
   if (trackerSchemaMigrationNeeded(db)) {
     assertTrackerSchemaRenameUnambiguous(db);
+  }
+  if (intentSchemaMigrationNeeded(db)) {
+    assertIntentSchemaRenameUnambiguous(db);
   }
   // Fail closed before any mutation, part four: the partial SDK-05 invocation
   // phase runs after the tracker rename and the additive pass, so its full
@@ -2540,7 +2647,7 @@ export function applyQueueMigrations(
   // phase before the partial migration inserts parent or attempt rows.
   // Otherwise the late refusal would strand a committed rename beside the
   // unmigrated legacy executor table.
-  if (trackerSchemaMigrationNeeded(db)) {
+  if (trackerSchemaMigrationNeeded(db) || intentSchemaMigrationNeeded(db)) {
     assertPartialLegacyInvocationMigrationPreconditions(db);
   }
   // Runs before the tracker rename and the main additive pass because it must
@@ -2553,6 +2660,11 @@ export function applyQueueMigrations(
   // additive pass so legacy source-named tracker tables are renamed instead
   // of coexisting with freshly created tracker-named tables.
   migrateTrackerSchemaRename(db);
+  // Runs after the tracker rename (which retargets the legacy
+  // `update_intents.source_item_id` column while the old table name is still
+  // in place) and before the additive pass so a legacy database is renamed
+  // instead of coexisting with a freshly created `intents` table.
+  migrateIntentSchemaRename(db);
   db.exec("BEGIN");
   try {
     if (tableExists(db, "jobs")) {
@@ -2576,10 +2688,10 @@ export function applyQueueMigrations(
       }
     }
     db.exec(EVIDENCE_RECORDS_LINKAGE_INDEX_DDL);
-    db.exec(UPDATE_INTENTS_DDL);
-    if (tableExists(db, "update_intents")) {
-      for (const column of UPDATE_INTENT_M6_COLUMNS) {
-        ensureColumn(db, "update_intents", column);
+    db.exec(INTENTS_DDL);
+    if (tableExists(db, "intents")) {
+      for (const column of INTENT_M6_COLUMNS) {
+        ensureColumn(db, "intents", column);
       }
     }
     db.exec(INTENT_APPLY_AUDITS_DDL);

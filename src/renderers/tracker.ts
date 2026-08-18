@@ -10,9 +10,9 @@ import type {
   LinearReconciliationFilters,
   ReconcileLinearTrackerResult,
 } from "../core/tracker/reconciliation.js";
-import type { EvaluateGoalForTrackerSatisfiedIntentResult } from "../core/tracker/update-intent-generator.js";
+import type { EvaluateGoalForTrackerSatisfiedIntentResult } from "../core/tracker/intent-generator.js";
 import { evidenceRecordToJsonShape } from "./evidence.js";
-import { updateIntentToJsonShape } from "./intent.js";
+import { intentToJsonShape } from "./intent.js";
 import {
   TRACKER_CONTRACT_SCHEMA_VERSION,
   write,
@@ -437,7 +437,7 @@ export function intentEvaluationToJsonShape(
   ) {
     return {
       outcome: result.outcome,
-      intent: updateIntentToJsonShape(result.intent),
+      intent: intentToJsonShape(result.intent),
       trackerItem: trackerItemToJsonShape(result.trackerItem),
       verificationEvidence: evidenceRecordToJsonShape(
         result.verificationEvidence,

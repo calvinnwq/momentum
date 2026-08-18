@@ -31,7 +31,7 @@
  *   - A round cannot silently skip the capture/state-mirror phase (contract
  *     "Round Lifecycle"): `succeeded` is unreachable straight from `pending` /
  *     `running` and must pass through `capturing_result` /
- *     `mirroring_external_state` (with optional `finalizing`). Result-bearing
+ *     `supervising_delegate` (with optional `finalizing`). Result-bearing
  *     executors capture a normalized result or mirrored external state there;
  *     the `script` executor may use `capturing_result` as a bare transition for
  *     exit-code-plus-log success.
@@ -90,7 +90,7 @@ export const EXECUTOR_ROUND_STATES = [
   "running",
   "capturing_result",
   "finalizing",
-  "mirroring_external_state",
+  "supervising_delegate",
   "waiting_operator",
   "manual_recovery_required",
   "blocked",
@@ -309,7 +309,7 @@ const ROUND_ALLOWED: Readonly<
 > = {
   pending: [
     "running",
-    "mirroring_external_state",
+    "supervising_delegate",
     "waiting_operator",
     ...ROUND_ABORTS,
   ],
@@ -318,11 +318,11 @@ const ROUND_ALLOWED: Readonly<
   // capture state, but as a bare exit-code/log capture with no result document.
   running: [
     "capturing_result",
-    "mirroring_external_state",
+    "supervising_delegate",
     "waiting_operator",
     ...ROUND_ABORTS,
   ],
-  mirroring_external_state: [
+  supervising_delegate: [
     "capturing_result",
     "finalizing",
     "succeeded",
@@ -340,7 +340,7 @@ const ROUND_ALLOWED: Readonly<
     "running",
     "capturing_result",
     "finalizing",
-    "mirroring_external_state",
+    "supervising_delegate",
     ...ROUND_ABORTS,
   ],
   manual_recovery_required: [],

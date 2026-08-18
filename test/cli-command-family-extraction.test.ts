@@ -70,7 +70,7 @@ describe("source/evidence/project/intent command family extraction", () => {
     });
   });
 
-  it("preserves update-intent empty list JSON output", async () => {
+  it("preserves intent empty list JSON output", async () => {
     const result = await run(["intent", "list", "--json"]);
 
     expect(result.code).toBe(0);

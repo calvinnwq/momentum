@@ -45,22 +45,21 @@ export const MOMENTUM_POLICY_FILENAME = "MOMENTUM.md";
  *   write-client path; public CLI execution may still be refused until the
  *   later two-phase apply slice is wired.
  */
-export const UPDATE_INTENT_APPLY_POLICIES = [
+export const INTENT_APPLY_POLICIES = [
   "create_intents_only",
-  "external_apply_allowed"
+  "external_apply_allowed",
 ] as const;
 
-export type UpdateIntentApplyPolicy =
-  (typeof UPDATE_INTENT_APPLY_POLICIES)[number];
+export type IntentApplyPolicy = (typeof INTENT_APPLY_POLICIES)[number];
 
-export const DEFAULT_INTENT_APPLY_POLICY: UpdateIntentApplyPolicy =
+export const DEFAULT_INTENT_APPLY_POLICY: IntentApplyPolicy =
   "create_intents_only";
 
 export type MomentumPolicyConfig = {
   runner: string | undefined;
   verification: readonly string[] | undefined;
   verificationTimeoutSec: number | undefined;
-  intentApplyPolicy: UpdateIntentApplyPolicy | undefined;
+  intentApplyPolicy: IntentApplyPolicy | undefined;
 };
 
 export type MomentumPolicy = {
@@ -87,8 +86,7 @@ export type MomentumPolicyParseError = {
 };
 
 export type MomentumPolicyParseResult =
-  | MomentumPolicyParseSuccess
-  | MomentumPolicyParseError;
+  MomentumPolicyParseSuccess | MomentumPolicyParseError;
 
 export type MomentumPolicyLoadAbsent = {
   ok: true;
@@ -125,7 +123,7 @@ const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\n---\r?\n?([\s\S]*)$/;
  * path).
  */
 export function resolvePolicyPath(
-  repoPath: string
+  repoPath: string,
 ):
   | { ok: true; path: string }
   | { ok: false; code: MomentumPolicyErrorCode; error: string } {
@@ -133,7 +131,7 @@ export function resolvePolicyPath(
     return {
       ok: false,
       code: "policy_path_invalid",
-      error: "repoPath must be a non-empty string."
+      error: "repoPath must be a non-empty string.",
     };
   }
   const absRepo = path.resolve(repoPath);
@@ -147,7 +145,7 @@ export function resolvePolicyPath(
     return {
       ok: false,
       code: "policy_path_invalid",
-      error: `MOMENTUM.md discovery is repo-root only; refusing path ${policyPath}.`
+      error: `MOMENTUM.md discovery is repo-root only; refusing path ${policyPath}.`,
     };
   }
   return { ok: true, path: policyPath };
@@ -160,7 +158,7 @@ export function loadMomentumPolicy(repoPath: string): MomentumPolicyLoadResult {
       ok: false,
       path: typeof repoPath === "string" ? repoPath : String(repoPath),
       code: resolved.code,
-      error: resolved.error
+      error: resolved.error,
     };
   }
   const policyPath = resolved.path;
@@ -177,25 +175,30 @@ export function loadMomentumPolicy(repoPath: string): MomentumPolicyLoadResult {
       ok: false,
       path: policyPath,
       code: "policy_file_unreadable",
-      error: `Cannot read ${MOMENTUM_POLICY_FILENAME}: ${detail}`
+      error: `Cannot read ${MOMENTUM_POLICY_FILENAME}: ${detail}`,
     };
   }
 
   const parsed = parseMomentumPolicy(content);
   if (!parsed.ok) {
-    return { ok: false, path: policyPath, code: parsed.code, error: parsed.error };
+    return {
+      ok: false,
+      path: policyPath,
+      code: parsed.code,
+      error: parsed.error,
+    };
   }
   return { ok: true, present: true, path: policyPath, policy: parsed.policy };
 }
 
 export function parseMomentumPolicy(
-  content: string
+  content: string,
 ): MomentumPolicyParseResult {
   if (typeof content !== "string") {
     return {
       ok: false,
       code: "policy_parse_invalid",
-      error: "MOMENTUM.md content must be a string."
+      error: "MOMENTUM.md content must be a string.",
     };
   }
 
@@ -213,11 +216,11 @@ export function parseMomentumPolicy(
           runner: undefined,
           verification: undefined,
           verificationTimeoutSec: undefined,
-          intentApplyPolicy: undefined
+          intentApplyPolicy: undefined,
         },
         notes: content.trim(),
-        rawFrontmatter: Object.freeze({})
-      }
+        rawFrontmatter: Object.freeze({}),
+      },
     };
   }
 
@@ -235,12 +238,12 @@ export function parseMomentumPolicy(
   if (!verificationResult.ok) return verificationResult;
 
   const timeoutResult = parsePolicyVerificationTimeout(
-    fields["verification_timeout_sec"]
+    fields["verification_timeout_sec"],
   );
   if (!timeoutResult.ok) return timeoutResult;
 
   const intentApplyResult = parsePolicyIntentApplyPolicy(
-    fields["intent_apply_policy"]
+    fields["intent_apply_policy"],
   );
   if (!intentApplyResult.ok) return intentApplyResult;
 
@@ -248,7 +251,7 @@ export function parseMomentumPolicy(
     runner: runnerResult.value,
     verification: verificationResult.value,
     verificationTimeoutSec: timeoutResult.value,
-    intentApplyPolicy: intentApplyResult.value
+    intentApplyPolicy: intentApplyResult.value,
   };
 
   return {
@@ -256,13 +259,13 @@ export function parseMomentumPolicy(
     policy: {
       config,
       notes: (body ?? "").trim(),
-      rawFrontmatter: Object.freeze({ ...fields })
-    }
+      rawFrontmatter: Object.freeze({ ...fields }),
+    },
   };
 }
 
 function parsePolicyRunner(
-  raw: unknown
+  raw: unknown,
 ): { ok: true; value: string | undefined } | MomentumPolicyParseError {
   if (raw === undefined || raw === null || raw === "") {
     return { ok: true, value: undefined };
@@ -278,7 +281,7 @@ function parsePolicyRunner(
 }
 
 function parsePolicyVerification(
-  raw: unknown
+  raw: unknown,
 ):
   | { ok: true; value: readonly string[] | undefined }
   | MomentumPolicyParseError {
@@ -287,7 +290,7 @@ function parsePolicyVerification(
   }
   if (!Array.isArray(raw)) {
     return schemaError(
-      "`verification` must be an array of strings when set in MOMENTUM.md."
+      "`verification` must be an array of strings when set in MOMENTUM.md.",
     );
   }
   const out: string[] = [];
@@ -295,7 +298,7 @@ function parsePolicyVerification(
     const item = raw[i];
     if (typeof item !== "string" || item.trim().length === 0) {
       return schemaError(
-        `\`verification[${i}]\` must be a non-empty string in MOMENTUM.md.`
+        `\`verification[${i}]\` must be a non-empty string in MOMENTUM.md.`,
       );
     }
     out.push(item);
@@ -304,50 +307,46 @@ function parsePolicyVerification(
 }
 
 function parsePolicyVerificationTimeout(
-  raw: unknown
-):
-  | { ok: true; value: number | undefined }
-  | MomentumPolicyParseError {
+  raw: unknown,
+): { ok: true; value: number | undefined } | MomentumPolicyParseError {
   if (raw === undefined || raw === null || raw === "") {
     return { ok: true, value: undefined };
   }
   if (typeof raw !== "number" || !Number.isInteger(raw) || raw <= 0) {
     return schemaError(
-      "`verification_timeout_sec` must be a positive integer in MOMENTUM.md."
+      "`verification_timeout_sec` must be a positive integer in MOMENTUM.md.",
     );
   }
   return { ok: true, value: raw };
 }
 
 function parsePolicyIntentApplyPolicy(
-  raw: unknown
+  raw: unknown,
 ):
-  | { ok: true; value: UpdateIntentApplyPolicy | undefined }
+  | { ok: true; value: IntentApplyPolicy | undefined }
   | MomentumPolicyParseError {
   if (raw === undefined || raw === null || raw === "") {
     return { ok: true, value: undefined };
   }
   if (typeof raw !== "string") {
     return schemaError(
-      "`intent_apply_policy` must be a string when set in MOMENTUM.md."
+      "`intent_apply_policy` must be a string when set in MOMENTUM.md.",
     );
   }
   const trimmed = raw.trim();
   if (trimmed.length === 0) {
     return { ok: true, value: undefined };
   }
-  if (!isUpdateIntentApplyPolicy(trimmed)) {
+  if (!isIntentApplyPolicy(trimmed)) {
     return schemaError(
-      `\`intent_apply_policy\` must be one of: ${UPDATE_INTENT_APPLY_POLICIES.join(", ")}.`
+      `\`intent_apply_policy\` must be one of: ${INTENT_APPLY_POLICIES.join(", ")}.`,
     );
   }
   return { ok: true, value: trimmed };
 }
 
-function isUpdateIntentApplyPolicy(
-  value: string
-): value is UpdateIntentApplyPolicy {
-  return (UPDATE_INTENT_APPLY_POLICIES as readonly string[]).includes(value);
+function isIntentApplyPolicy(value: string): value is IntentApplyPolicy {
+  return (INTENT_APPLY_POLICIES as readonly string[]).includes(value);
 }
 
 function schemaError(message: string): MomentumPolicyParseError {
@@ -359,10 +358,8 @@ type YamlMapping = { [key: string]: YamlValue };
 type YamlValue = YamlScalar | string[] | YamlMapping;
 
 function parseSimpleYaml(
-  yaml: string
-):
-  | { ok: true; value: Record<string, YamlValue> }
-  | MomentumPolicyParseError {
+  yaml: string,
+): { ok: true; value: Record<string, YamlValue> } | MomentumPolicyParseError {
   const lines = yaml.split("\n");
   const fields: Record<string, YamlValue> = {};
   let i = 0;
@@ -377,7 +374,7 @@ function parseSimpleYaml(
       return {
         ok: false,
         code: "policy_parse_invalid",
-        error: `MOMENTUM.md frontmatter line ${i + 1} is indented; only top-level keys are supported.`
+        error: `MOMENTUM.md frontmatter line ${i + 1} is indented; only top-level keys are supported.`,
       };
     }
     const colonIdx = trimmed.indexOf(":");
@@ -385,7 +382,7 @@ function parseSimpleYaml(
       return {
         ok: false,
         code: "policy_parse_invalid",
-        error: `MOMENTUM.md frontmatter line ${i + 1} is missing a colon.`
+        error: `MOMENTUM.md frontmatter line ${i + 1} is missing a colon.`,
       };
     }
     const key = trimmed.slice(0, colonIdx).trim();
@@ -393,7 +390,7 @@ function parseSimpleYaml(
       return {
         ok: false,
         code: "policy_parse_invalid",
-        error: `MOMENTUM.md frontmatter line ${i + 1} is missing a key name.`
+        error: `MOMENTUM.md frontmatter line ${i + 1} is missing a key name.`,
       };
     }
     const rest = stripInlineComment(trimmed.slice(colonIdx + 1)).trim();
@@ -422,7 +419,7 @@ function parseSimpleYaml(
 
 function readBlockArray(
   lines: string[],
-  fromIndex: number
+  fromIndex: number,
 ):
   | { ok: true; value: string[]; consumed: number; nextIndex: number }
   | MomentumPolicyParseError {
@@ -443,7 +440,7 @@ function readBlockArray(
       return {
         ok: false,
         code: "policy_parse_invalid",
-        error: `MOMENTUM.md frontmatter line ${j + 1} is indented but not a list item.`
+        error: `MOMENTUM.md frontmatter line ${j + 1} is indented but not a list item.`,
       };
     }
     const itemText = trimmed === "-" ? "" : trimmed.slice(2).trim();
@@ -523,9 +520,7 @@ function indentWidth(line: string): number {
 }
 
 export type PolicyEffectiveFieldSource =
-  | "goal_frontmatter"
-  | "momentum_policy"
-  | "builtin_default";
+  "goal_frontmatter" | "momentum_policy" | "builtin_default";
 
 export type PolicyEffectiveSource = {
   verification: PolicyEffectiveFieldSource;
@@ -548,11 +543,13 @@ export type ResolvePolicyEffectiveValuesInput = {
   builtinDefaultVerificationTimeoutSec?: number;
 };
 
-export const BUILTIN_DEFAULT_VERIFICATION: readonly string[] = Object.freeze([]);
+export const BUILTIN_DEFAULT_VERIFICATION: readonly string[] = Object.freeze(
+  [],
+);
 export const BUILTIN_DEFAULT_VERIFICATION_TIMEOUT_SEC = 900;
 
 export function resolvePolicyEffectiveValues(
-  input: ResolvePolicyEffectiveValuesInput
+  input: ResolvePolicyEffectiveValuesInput,
 ): PolicyEffectiveValues {
   const builtinVerification =
     input.builtinDefaultVerification ?? BUILTIN_DEFAULT_VERIFICATION;
@@ -591,13 +588,13 @@ export function resolvePolicyEffectiveValues(
     verificationTimeoutSec,
     source: {
       verification: verificationSource,
-      verificationTimeoutSec: timeoutSource
-    }
+      verificationTimeoutSec: timeoutSource,
+    },
   };
 }
 
 export type ResolvedIntentApplyPolicy = {
-  value: UpdateIntentApplyPolicy;
+  value: IntentApplyPolicy;
   source: PolicyEffectiveFieldSource;
 };
 
@@ -608,7 +605,7 @@ export type ResolvedIntentApplyPolicy = {
  * boundary and any external-apply opt-in remain visible in one place.
  */
 export function resolveIntentApplyPolicy(
-  policyConfig: MomentumPolicyConfig | undefined
+  policyConfig: MomentumPolicyConfig | undefined,
 ): ResolvedIntentApplyPolicy {
   const policyValue = policyConfig?.intentApplyPolicy;
   if (policyValue !== undefined) {
@@ -625,7 +622,9 @@ export function resolveIntentApplyPolicy(
  * refuse it until the execution path is wired.
  */
 export function isExternalApplyAllowedByPolicy(
-  policyConfig: MomentumPolicyConfig | undefined
+  policyConfig: MomentumPolicyConfig | undefined,
 ): boolean {
-  return resolveIntentApplyPolicy(policyConfig).value === "external_apply_allowed";
+  return (
+    resolveIntentApplyPolicy(policyConfig).value === "external_apply_allowed"
+  );
 }

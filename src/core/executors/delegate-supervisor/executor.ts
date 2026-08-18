@@ -439,7 +439,7 @@ export class DelegateSupervisorExecutor implements Executor<
         ? active.round.roundId
         : startRound(
             context,
-            "mirroring_external_state",
+            "supervising_delegate",
             "Reading delegated external state.",
           );
     if (reattachingPriorHandoff) {
@@ -650,7 +650,7 @@ function startRound(
     DelegateSupervisorConfig,
     DelegateSupervisorHostBindings
   >,
-  state: "running" | "mirroring_external_state",
+  state: "running" | "supervising_delegate",
   summary: string,
 ): string {
   const attempt = context.state.attempt;
@@ -707,7 +707,7 @@ function observeDecision(
         decision.classification === "operator_decision_required" ||
         decision.classification === "approval_required"
           ? "waiting_operator"
-          : "mirroring_external_state",
+          : "supervising_delegate",
       inputDigest,
       resultDigest: mirrored?.progressDigest ?? null,
       commitSha: mirrored?.state.headSha ?? null,

@@ -123,7 +123,7 @@ export const EXECUTOR_OBSERVATION_PHASES = [
   "running",
   "capturing_result",
   "finalizing",
-  "mirroring_external_state",
+  "supervising_delegate",
   "waiting_operator",
 ] as const satisfies readonly ExecutorRoundState[];
 

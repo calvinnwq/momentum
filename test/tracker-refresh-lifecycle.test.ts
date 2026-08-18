@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildIdempotencyMarker } from "../src/adapters/external-update-adapter.js";
 import type { IntentApplyAudit } from "../src/core/intent/apply-audits.js";
-import type { UpdateIntent } from "../src/core/intent/update-intents.js";
+import type { Intent } from "../src/core/intent/intents.js";
 import type { TrackerItem } from "../src/core/tracker/items.js";
 import {
   planTrackerRefreshAlreadyAppliedReconciliation,
@@ -33,7 +33,7 @@ function tracker(overrides: Partial<TrackerItem> = {}): TrackerItem {
   };
 }
 
-function intent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {
+function intent(overrides: Partial<Intent> = {}): Intent {
   return {
     id: INTENT_ID,
     adapterKind: "linear",
@@ -59,7 +59,7 @@ function intent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {
 }
 
 function audit(
-  appliedIntent: UpdateIntent,
+  appliedIntent: Intent,
   overrides: Partial<IntentApplyAudit> = {},
 ): IntentApplyAudit {
   return {

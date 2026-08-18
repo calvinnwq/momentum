@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
-import { createUpdateIntent } from "../src/core/intent/update-intents.js";
+import { createIntent } from "../src/core/intent/intents.js";
 import {
   claimIntentApply,
   finalizeIntentApply,
@@ -182,7 +182,7 @@ function seedIntent(
   const db = openDb(dataDir);
   try {
     const { now, ...rest } = input;
-    const result = createUpdateIntent(
+    const result = createIntent(
       db,
       rest,
       now !== undefined ? { now: () => now } : {},
@@ -619,7 +619,7 @@ describe("momentum intent list", () => {
 
     const result = await run(["intent", "list", "--data-dir", dataDir]);
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain("Update intents: 1");
+    expect(result.stdout).toContain("Intents: 1");
     expect(result.stdout).toContain("Total available: 1");
     expect(result.stdout).toContain("Truncated: no");
     expect(result.stdout).toContain("Status: (any)");
@@ -819,7 +819,7 @@ describe("momentum intent list", () => {
       dataDir,
     ]);
     expect(text.code).toBe(0);
-    expect(text.stdout).toContain("Update intents: 2");
+    expect(text.stdout).toContain("Intents: 2");
     expect(text.stdout).toContain("Total available: 3");
     expect(text.stdout).toContain("Truncated: yes");
   });
@@ -946,7 +946,7 @@ describe("momentum intent get", () => {
       dataDir,
     ]);
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain(`Update intent: ${intentId}`);
+    expect(result.stdout).toContain(`Intent: ${intentId}`);
     expect(result.stdout).toContain("Adapter: linear");
     expect(result.stdout).toContain("Target external id: ext-77");
     expect(result.stdout).toContain("Intent type: source_satisfied");
@@ -1529,9 +1529,7 @@ describe.each([
       dataDir,
     ]);
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain(
-      `Update intent ${intentId} ${expectedStatus}`,
-    );
+    expect(result.stdout).toContain(`Intent ${intentId} ${expectedStatus}`);
     expect(result.stdout).toContain("Previous status: pending");
     expect(result.stdout).toContain(`Status: ${expectedStatus}`);
     expect(result.stdout).toContain("Decision reason: operator decision");
@@ -1594,7 +1592,7 @@ describe("momentum intent apply policy gating", () => {
     const db = openDb(dataDir);
     try {
       const row = db
-        .prepare("SELECT status FROM update_intents WHERE id = ?")
+        .prepare("SELECT status FROM intents WHERE id = ?")
         .get(intentId) as { status: string };
       expect(row.status).toBe("pending");
     } finally {
@@ -1733,7 +1731,7 @@ describe("momentum intent apply policy gating", () => {
     const db = openDb(dataDir);
     try {
       const row = db
-        .prepare("SELECT status FROM update_intents WHERE id = ?")
+        .prepare("SELECT status FROM intents WHERE id = ?")
         .get(intentId) as { status: string };
       expect(row.status).toBe("pending");
     } finally {
@@ -1984,9 +1982,7 @@ describe("momentum intent apply policy gating", () => {
     const db = openDb(dataDir);
     try {
       const row = db
-        .prepare(
-          "SELECT status, decision_reason FROM update_intents WHERE id = ?",
-        )
+        .prepare("SELECT status, decision_reason FROM intents WHERE id = ?")
         .get(intentId) as { status: string; decision_reason: string };
       expect(row.status).toBe("applied");
       expect(row.decision_reason).toBe("external_apply: operator decision");
@@ -2247,7 +2243,7 @@ describe("momentum intent apply policy gating", () => {
     const db = openDb(dataDir);
     try {
       const row = db
-        .prepare("SELECT status FROM update_intents WHERE id = ?")
+        .prepare("SELECT status FROM intents WHERE id = ?")
         .get(intentId) as { status: string };
       expect(row.status).toBe("pending");
     } finally {

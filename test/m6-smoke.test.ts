@@ -1630,7 +1630,7 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
             resultCode: string;
           } | null;
         };
-        pendingUpdateIntents: Array<{
+        pendingIntents: Array<{
           intentId: string;
           externalApply: {
             applyState: string;
@@ -1639,8 +1639,8 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
           };
         }>;
       };
-      expect(projectPayload.pendingUpdateIntents).toHaveLength(1);
-      const projectIntent = projectPayload.pendingUpdateIntents[0]!;
+      expect(projectPayload.pendingIntents).toHaveLength(1);
+      const projectIntent = projectPayload.pendingIntents[0]!;
       expect(projectIntent.intentId).toBe(intentId);
       expect(projectIntent.externalApply.applyState).toBe("idle");
       expect(projectIntent.externalApply.totalAttempts).toBe(1);
@@ -1905,7 +1905,7 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
           } | null;
         };
       };
-      // Intent stays pending — markUpdateIntentApplied was never reached.
+      // Intent stays pending — markIntentApplied was never reached.
       expect(intentGetPayload.intent.status).toBe("pending");
       // ...but the CAS column is blocked so any retry must be refused
       // at the claim guard before the external write path runs again.

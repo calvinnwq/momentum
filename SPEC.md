@@ -150,7 +150,7 @@ The first delegate-supervisor handoff completed anywhere in an attempt may use a
 Later passes and every retry attempt use one tick, even when a conclusively failed or cancelled prior external run allows the retry to launch a fresh run.
 Continuation-only passes observe the daemon poll interval before the next external-state read.
 If a crash leaves an unclassified running, capturing-result, or
-`mirroring_external_state` round with durable handoff intent or completed handoff evidence, stale
+`supervising_delegate` round with durable handoff intent or completed handoff evidence, stale
 auto-release dispatch-lease recovery releases the abandoned lease and makes
 that same attempt scheduler-resumable instead of parking the run or
 repeating the handoff.
@@ -301,7 +301,7 @@ A later loop iteration creates the next round under the same attempt, and a retr
 
 Agent-loop rounds reuse the repo-native executor state vocabulary rather than introducing a parallel pending/running/succeeded/failed/stale/recovered/canceled enum.
 Executor attempt states are `pending`, `preparing`, `running`, `pausing`, `waiting_operator`, `manual_recovery_required`, `blocked`, `failed`, `succeeded`, and `cancelled`.
-Round states are `pending`, `running`, `capturing_result`, `finalizing`, `mirroring_external_state`, `waiting_operator`, `manual_recovery_required`, `blocked`, `failed`, `succeeded`, and `cancelled`.
+Round states are `pending`, `running`, `capturing_result`, `finalizing`, `supervising_delegate`, `waiting_operator`, `manual_recovery_required`, `blocked`, `failed`, `succeeded`, and `cancelled`.
 `manual_recovery_required` carries stale, recovered, invalid, and unsafe-resume cases through recovery codes and durable evidence instead of adding non-repo state names.
 Stale in-flight work is detected from Momentum-owned leases and heartbeat/checkpoint age, then converted to durable recovery evidence before any continuation starts.
 
@@ -390,7 +390,7 @@ Structural preflight evidence uses a compact stable shape:
 
 External tracker writes are policy-gated and two-phase:
 
-1. claim one pending update intent
+1. claim one pending intent
 2. audit before write
 3. perform the external write only when repo policy allows it
 4. finalize and reconcile the touched issue
@@ -414,7 +414,7 @@ another Linear mutation.
 
 Tracker adapters are read-only with respect to external systems. They write only
 Momentum tracker tables, tracker snapshots, reconciliation runs, evidence, and
-local update intents. They must not mutate Goal, Iteration, Job, workflow,
+local intents. They must not mutate Goal, Iteration, Job, workflow,
 executor, git, or external-write state.
 
 Adapter testing stays layered:

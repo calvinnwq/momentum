@@ -4872,7 +4872,7 @@ describe("executor registration and SDK dispatch", () => {
               executor: attempt.executor,
               attemptNumber: attempt.attemptNumber,
               roundIndex: context.state.rounds.length,
-              state: "mirroring_external_state",
+              state: "supervising_delegate",
               agentProvider: null,
               model: null,
               effort: null,

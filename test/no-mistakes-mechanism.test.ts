@@ -9,7 +9,7 @@ import type { NoMistakesExternalState } from "../src/adapters/no-mistakes-execut
 import {
   MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES,
   parseNoMistakesExternalState,
-  readNoMistakesExternalState
+  readNoMistakesExternalState,
 } from "../src/core/executors/no-mistakes/mechanism.js";
 
 // Proves the no-mistakes executor *mechanism* — the external-state reader — turns
@@ -70,9 +70,9 @@ function fullSnapshotObject(): Record<string, unknown> {
         externalId: "F-1",
         title: "unhandled null",
         severity: "high",
-        detail: "line 42"
+        detail: "line 42",
       },
-      { externalId: "F-2", title: "missing test" }
+      { externalId: "F-2", title: "missing test" },
     ],
     selectedFindingIds: ["F-1"],
     decisions: [
@@ -82,11 +82,11 @@ function fullSnapshotObject(): Record<string, unknown> {
         allowedActions: ["squash", "rebase"],
         recommendedAction: "squash",
         chosenAction: "squash",
-        resolution: "delegated-policy: squash"
-      }
+        resolution: "delegated-policy: squash",
+      },
     ],
     prUrl: "https://github.com/x/y/pull/1",
-    ciState: "passed"
+    ciState: "passed",
   };
 }
 
@@ -109,9 +109,14 @@ describe("parseNoMistakesExternalState", () => {
           externalId: "F-1",
           title: "unhandled null",
           severity: "high",
-          detail: "line 42"
+          detail: "line 42",
         },
-        { externalId: "F-2", title: "missing test", severity: null, detail: null }
+        {
+          externalId: "F-2",
+          title: "missing test",
+          severity: null,
+          detail: null,
+        },
       ],
       selectedFindingIds: ["F-1"],
       decisions: [
@@ -121,11 +126,11 @@ describe("parseNoMistakesExternalState", () => {
           allowedActions: ["squash", "rebase"],
           recommendedAction: "squash",
           chosenAction: "squash",
-          resolution: "delegated-policy: squash"
-        }
+          resolution: "delegated-policy: squash",
+        },
       ],
       prUrl: "https://github.com/x/y/pull/1",
-      ciState: "passed"
+      ciState: "passed",
     };
     expect(read.value).toEqual(expected);
   });
@@ -149,7 +154,7 @@ describe("parseNoMistakesExternalState", () => {
     if (!read.ok) return;
     const decision = decideNoMistakesMirror(read.value);
     expect(decision.classification).toBe("continue");
-    expect(decision.roundState).toBe("mirroring_external_state");
+    expect(decision.roundState).toBe("supervising_delegate");
   });
 
   it("accepts null activeStep / prUrl and empty finding / decision arrays", () => {
@@ -159,7 +164,7 @@ describe("parseNoMistakesExternalState", () => {
       prUrl: null,
       findings: [],
       selectedFindingIds: [],
-      decisions: []
+      decisions: [],
     });
 
     const read = parseNoMistakesExternalState(raw);
@@ -178,8 +183,8 @@ describe("parseNoMistakesExternalState", () => {
       findings: [{ externalId: "F-9", title: "bare finding" }],
       selectedFindingIds: [],
       decisions: [
-        { externalId: "D-9", summary: "bare decision", allowedActions: ["ok"] }
-      ]
+        { externalId: "D-9", summary: "bare decision", allowedActions: ["ok"] },
+      ],
     });
 
     const read = parseNoMistakesExternalState(raw);
@@ -190,7 +195,7 @@ describe("parseNoMistakesExternalState", () => {
       externalId: "F-9",
       title: "bare finding",
       severity: null,
-      detail: null
+      detail: null,
     });
     expect(read.value.decisions[0]).toEqual({
       externalId: "D-9",
@@ -198,7 +203,7 @@ describe("parseNoMistakesExternalState", () => {
       allowedActions: ["ok"],
       recommendedAction: null,
       chosenAction: null,
-      resolution: null
+      resolution: null,
     });
   });
 
@@ -220,7 +225,7 @@ describe("parseNoMistakesExternalState", () => {
 
   it("rejects a non-string externalRunId", () => {
     const read = parseNoMistakesExternalState(
-      JSON.stringify({ ...fullSnapshotObject(), externalRunId: 7 })
+      JSON.stringify({ ...fullSnapshotObject(), externalRunId: 7 }),
     );
 
     expect(read.ok).toBe(false);
@@ -230,7 +235,7 @@ describe("parseNoMistakesExternalState", () => {
 
   it("rejects a non-string headSha", () => {
     const read = parseNoMistakesExternalState(
-      JSON.stringify({ ...fullSnapshotObject(), headSha: 12345 })
+      JSON.stringify({ ...fullSnapshotObject(), headSha: 12345 }),
     );
 
     expect(read.ok).toBe(false);
@@ -240,7 +245,7 @@ describe("parseNoMistakesExternalState", () => {
 
   it("rejects an activeStep that is neither string nor null", () => {
     const read = parseNoMistakesExternalState(
-      JSON.stringify({ ...fullSnapshotObject(), activeStep: 3 })
+      JSON.stringify({ ...fullSnapshotObject(), activeStep: 3 }),
     );
 
     expect(read.ok).toBe(false);
@@ -250,7 +255,7 @@ describe("parseNoMistakesExternalState", () => {
 
   it("rejects a non-string stepStatus", () => {
     const read = parseNoMistakesExternalState(
-      JSON.stringify({ ...fullSnapshotObject(), stepStatus: 1 })
+      JSON.stringify({ ...fullSnapshotObject(), stepStatus: 1 }),
     );
 
     expect(read.ok).toBe(false);
@@ -260,7 +265,7 @@ describe("parseNoMistakesExternalState", () => {
 
   it("rejects a non-string ciState", () => {
     const read = parseNoMistakesExternalState(
-      JSON.stringify({ ...fullSnapshotObject(), ciState: false })
+      JSON.stringify({ ...fullSnapshotObject(), ciState: false }),
     );
 
     expect(read.ok).toBe(false);
@@ -270,7 +275,7 @@ describe("parseNoMistakesExternalState", () => {
 
   it("rejects findings that are not an array", () => {
     const read = parseNoMistakesExternalState(
-      JSON.stringify({ ...fullSnapshotObject(), findings: "nope" })
+      JSON.stringify({ ...fullSnapshotObject(), findings: "nope" }),
     );
 
     expect(read.ok).toBe(false);
@@ -283,8 +288,8 @@ describe("parseNoMistakesExternalState", () => {
       JSON.stringify({
         ...fullSnapshotObject(),
         findings: ["F-1"],
-        selectedFindingIds: []
-      })
+        selectedFindingIds: [],
+      }),
     );
 
     expect(read.ok).toBe(false);
@@ -297,8 +302,8 @@ describe("parseNoMistakesExternalState", () => {
       JSON.stringify({
         ...fullSnapshotObject(),
         findings: [{ externalId: 1, title: "t" }],
-        selectedFindingIds: []
-      })
+        selectedFindingIds: [],
+      }),
     );
 
     expect(read.ok).toBe(false);
@@ -311,8 +316,8 @@ describe("parseNoMistakesExternalState", () => {
       JSON.stringify({
         ...fullSnapshotObject(),
         findings: [{ externalId: "F-1", title: 9 }],
-        selectedFindingIds: []
-      })
+        selectedFindingIds: [],
+      }),
     );
 
     expect(read.ok).toBe(false);
@@ -325,8 +330,8 @@ describe("parseNoMistakesExternalState", () => {
       JSON.stringify({
         ...fullSnapshotObject(),
         findings: [{ externalId: "F-1", title: "t", severity: 5 }],
-        selectedFindingIds: []
-      })
+        selectedFindingIds: [],
+      }),
     );
 
     expect(read.ok).toBe(false);
@@ -336,7 +341,7 @@ describe("parseNoMistakesExternalState", () => {
 
   it("rejects selectedFindingIds that contain a non-string", () => {
     const read = parseNoMistakesExternalState(
-      JSON.stringify({ ...fullSnapshotObject(), selectedFindingIds: [1] })
+      JSON.stringify({ ...fullSnapshotObject(), selectedFindingIds: [1] }),
     );
 
     expect(read.ok).toBe(false);
@@ -349,9 +354,9 @@ describe("parseNoMistakesExternalState", () => {
       JSON.stringify({
         ...fullSnapshotObject(),
         decisions: [
-          { externalId: "D-1", summary: "s", allowedActions: "squash" }
-        ]
-      })
+          { externalId: "D-1", summary: "s", allowedActions: "squash" },
+        ],
+      }),
     );
 
     expect(read.ok).toBe(false);
@@ -363,8 +368,8 @@ describe("parseNoMistakesExternalState", () => {
     const read = parseNoMistakesExternalState(
       JSON.stringify({
         ...fullSnapshotObject(),
-        decisions: [{ externalId: "D-1", summary: "s", allowedActions: [1] }]
-      })
+        decisions: [{ externalId: "D-1", summary: "s", allowedActions: [1] }],
+      }),
     );
 
     expect(read.ok).toBe(false);
@@ -375,7 +380,7 @@ describe("parseNoMistakesExternalState", () => {
   it("parses a well-typed but semantically bad snapshot for the brain to reject (unknown stepStatus)", () => {
     const raw = JSON.stringify({
       ...fullSnapshotObject(),
-      stepStatus: "exploding"
+      stepStatus: "exploding",
     });
 
     const read = parseNoMistakesExternalState(raw);
@@ -393,7 +398,7 @@ describe("parseNoMistakesExternalState", () => {
     const raw = JSON.stringify({
       ...fullSnapshotObject(),
       findings: [{ externalId: "F-1", title: "t" }],
-      selectedFindingIds: ["F-404"]
+      selectedFindingIds: ["F-404"],
     });
 
     const read = parseNoMistakesExternalState(raw);
@@ -423,9 +428,9 @@ describe("readNoMistakesExternalState", () => {
     const raw = Buffer.from(
       JSON.stringify({
         ...fullSnapshotObject(),
-        externalRunId: "nm-run-\ufffd("
+        externalRunId: "nm-run-\ufffd(",
       }).replace("\ufffd", "\xc3"),
-      "latin1"
+      "latin1",
     );
     const statePath = writeStateFileBytes(raw);
 
@@ -473,7 +478,7 @@ describe("readNoMistakesExternalState", () => {
       const stat = statSync(pathLike, options as fs.StatSyncOptions);
       fs.writeFileSync(
         statePath,
-        "x".repeat(MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES + 1)
+        "x".repeat(MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES + 1),
       );
       return stat;
     });

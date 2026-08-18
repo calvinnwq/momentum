@@ -136,8 +136,8 @@ const FORBIDDEN_TABLES = [
   "executor_findings",
   "executor_decisions",
   // External-write surfaces. The M6 write path is a separate adapter; M5
-  // reconciliation must never queue an update intent or an apply audit.
-  "update_intents",
+  // reconciliation must never queue an intent or an apply audit.
+  "intents",
   "intent_apply_audits",
   // Other runtime substrate the adapter has no business touching.
   "repo_locks",
@@ -247,7 +247,7 @@ function seedForbiddenTables(db: MomentumDb): void {
       VALUES
       ('evidence_existing', 'manual', 'note', 1019, 'Existing evidence', 'goal_existing', 'evidence-existing', 1019, 1019);
 
-    INSERT INTO update_intents
+    INSERT INTO intents
       (id, adapter_kind, target_external_id, intent_type, reason, goal_id, evidence_record_id, idempotency_key, created_at, updated_at)
       VALUES
       ('intent_existing', 'linear', 'issue-existing', 'comment', 'Existing intent', 'goal_existing', 'evidence_existing', 'intent-existing', 1020, 1020);

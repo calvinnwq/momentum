@@ -2,10 +2,10 @@ import type { MomentumDb } from "../../adapters/db.js";
 import type { EvidenceRecord } from "../evidence/records.js";
 import { getTrackerItemById, type TrackerItem } from "./items.js";
 import {
-  createUpdateIntent,
-  type UpdateIntent,
-  type UpdateIntentClock,
-} from "../intent/update-intents.js";
+  createIntent,
+  type Intent,
+  type IntentClock,
+} from "../intent/intents.js";
 
 /**
  * Default workflow evidence types that signal a Goal's verification step has
@@ -60,13 +60,13 @@ export type EvidenceInsufficientWarning = {
 export type EvaluateGoalForTrackerSatisfiedIntentResult =
   | {
       outcome: "intent_created";
-      intent: UpdateIntent;
+      intent: Intent;
       trackerItem: TrackerItem;
       verificationEvidence: EvidenceRecord;
     }
   | {
       outcome: "intent_replayed";
-      intent: UpdateIntent;
+      intent: Intent;
       trackerItem: TrackerItem;
       verificationEvidence: EvidenceRecord;
     }
@@ -120,7 +120,7 @@ type EvidenceRow = {
 export function evaluateGoalForTrackerSatisfiedIntents(
   db: MomentumDb,
   input: EvaluateGoalForTrackerSatisfiedIntentInput,
-  clock: UpdateIntentClock = {},
+  clock: IntentClock = {},
 ): EvaluateGoalForTrackerSatisfiedIntentResult[] {
   if (typeof input.goalId !== "string" || input.goalId.length === 0) {
     throw new Error(
@@ -210,7 +210,7 @@ export function evaluateGoalForTrackerSatisfiedIntents(
       trackerCurrentStatus: trackerItem.status,
     };
 
-    const created = createUpdateIntent(
+    const created = createIntent(
       db,
       {
         adapterKind: trackerItem.adapterKind,

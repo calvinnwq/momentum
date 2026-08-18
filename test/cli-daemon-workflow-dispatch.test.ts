@@ -792,7 +792,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  'Todo', '{}', 1, NULL, 1, 1)`,
       ).run();
       db.prepare(
-        `INSERT INTO update_intents
+        `INSERT INTO intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
             reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
@@ -886,9 +886,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     const verifyDb = openDb(dataDir);
     try {
       const intent = verifyDb
-        .prepare(
-          "SELECT status FROM update_intents WHERE id = 'intent_ngx1001'",
-        )
+        .prepare("SELECT status FROM intents WHERE id = 'intent_ngx1001'")
         .get() as { status: string } | undefined;
       expect(intent).toEqual({ status: "applied" });
       const step = verifyDb
@@ -1043,7 +1041,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         .prepare(
           `SELECT intent_type, payload_json, tracker_item_id, status,
                   idempotency_key
-             FROM update_intents
+             FROM intents
             WHERE tracker_item_id = 'source_ngx1001_seeded'
             ORDER BY created_at ASC`,
         )
@@ -1121,7 +1119,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  'Todo', '{}', 1, NULL, 1, 1)`,
       ).run();
       db.prepare(
-        `INSERT INTO update_intents
+        `INSERT INTO intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
             reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
@@ -1228,7 +1226,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  'Todo', '{}', 1, NULL, 1, 1)`,
       ).run();
       db.prepare(
-        `INSERT INTO update_intents
+        `INSERT INTO intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
             reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
@@ -1340,7 +1338,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  'Todo', '{}', 1, NULL, 1, 1)`,
       ).run();
       db.prepare(
-        `INSERT INTO update_intents
+        `INSERT INTO intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
             reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
@@ -1450,7 +1448,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  'Todo', '{}', 1, NULL, 1, 1)`,
       ).run();
       db.prepare(
-        `INSERT INTO update_intents
+        `INSERT INTO intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
             reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
@@ -1509,7 +1507,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       expect(round?.summary).toContain("resolve_intent_evidence");
       const intentRow = verifyDb
         .prepare(
-          "SELECT status FROM update_intents WHERE id = 'intent_ngx1004_invalid_target_state'",
+          "SELECT status FROM intents WHERE id = 'intent_ngx1004_invalid_target_state'",
         )
         .get() as { status: string } | undefined;
       expect(intentRow).toEqual({ status: "pending" });
@@ -1573,7 +1571,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  'Done', '{}', 1, NULL, 1, 1)`,
       ).run();
       db.prepare(
-        `INSERT INTO update_intents
+        `INSERT INTO intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
             reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
@@ -1723,7 +1721,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  'In Review', '{}', 1, NULL, 1, 1)`,
       ).run();
       db.prepare(
-        `INSERT INTO update_intents
+        `INSERT INTO intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
             reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
@@ -1734,7 +1732,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  NULL, NULL, NULL, NULL)`,
       ).run();
       db.prepare(
-        `INSERT INTO update_intents
+        `INSERT INTO intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
             reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
@@ -1835,7 +1833,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     const verifyDb = openDb(dataDir);
     try {
       const intent = verifyDb
-        .prepare("SELECT status FROM update_intents WHERE id = 'intent_ngx522'")
+        .prepare("SELECT status FROM intents WHERE id = 'intent_ngx522'")
         .get() as { status: string } | undefined;
       expect(intent).toEqual({ status: "applied" });
       const step = verifyDb

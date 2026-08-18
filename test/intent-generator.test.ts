@@ -7,11 +7,8 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   DEFAULT_VERIFICATION_EVIDENCE_TYPES,
   evaluateGoalForTrackerSatisfiedIntents,
-} from "../src/core/tracker/update-intent-generator.js";
-import {
-  getUpdateIntentById,
-  listUpdateIntents,
-} from "../src/core/intent/update-intents.js";
+} from "../src/core/tracker/intent-generator.js";
+import { getIntentById, listIntents } from "../src/core/intent/intents.js";
 
 const tempRoots: string[] = [];
 
@@ -164,9 +161,7 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
       expect(result.trackerItem.id).toBe("si-1");
       expect(result.verificationEvidence.id).toBe("ev-1");
 
-      expect(listUpdateIntents(db).map((i) => i.id)).toEqual([
-        result.intent.id,
-      ]);
+      expect(listIntents(db).map((i) => i.id)).toEqual([result.intent.id]);
     } finally {
       db.close();
     }
@@ -206,8 +201,8 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
       expect(replay.intent.id).toBe(first.intent.id);
       expect(replay.intent.createdAt).toBe(1000);
 
-      expect(listUpdateIntents(db).map((i) => i.id)).toEqual([first.intent.id]);
-      expect(getUpdateIntentById(db, first.intent.id)?.updatedAt).toBe(1000);
+      expect(listIntents(db).map((i) => i.id)).toEqual([first.intent.id]);
+      expect(getIntentById(db, first.intent.id)?.updatedAt).toBe(1000);
     } finally {
       db.close();
     }
@@ -293,7 +288,7 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
       )[0]!;
 
       expect(result.outcome).toBe("intent_created");
-      const intents = listUpdateIntents(db).sort((a, b) =>
+      const intents = listIntents(db).sort((a, b) =>
         (a.targetExternalId ?? "").localeCompare(b.targetExternalId ?? ""),
       );
       expect(intents.map((intent) => intent.targetExternalId)).toEqual([
@@ -355,7 +350,7 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
         "intent_replayed",
         "intent_replayed",
       ]);
-      expect(listUpdateIntents(db)).toHaveLength(2);
+      expect(listIntents(db)).toHaveLength(2);
     } finally {
       db.close();
     }
@@ -399,7 +394,7 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
         (result) => result.outcome === "evidence_insufficient",
       );
       expect(warning?.warning.trackerItemId).toBe("si-uncovered");
-      expect(listUpdateIntents(db)).toHaveLength(1);
+      expect(listIntents(db)).toHaveLength(1);
     } finally {
       db.close();
     }
@@ -435,7 +430,7 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
           .filter((result) => result.outcome === "evidence_insufficient")
           .map((result) => result.warning.trackerItemId),
       ).toEqual(["si-uncovered-a", "si-uncovered-b"]);
-      expect(listUpdateIntents(db)).toHaveLength(0);
+      expect(listIntents(db)).toHaveLength(0);
     } finally {
       db.close();
     }
@@ -473,7 +468,7 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
       expect(result.warning.reason).toMatch(/verification evidence/i);
 
       // No intent created.
-      expect(listUpdateIntents(db)).toEqual([]);
+      expect(listIntents(db)).toEqual([]);
     } finally {
       db.close();
     }
@@ -498,7 +493,7 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
       expect(result.outcome).toBe("goal_not_terminal");
       if (result.outcome !== "goal_not_terminal") return;
       expect(result.goalState).toBe("queued");
-      expect(listUpdateIntents(db)).toEqual([]);
+      expect(listIntents(db)).toEqual([]);
     } finally {
       db.close();
     }
@@ -529,7 +524,7 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
       expect(result.outcome).toBe("goal_state_not_completed");
       if (result.outcome !== "goal_state_not_completed") return;
       expect(result.goalState).toBe("failed");
-      expect(listUpdateIntents(db)).toEqual([]);
+      expect(listIntents(db)).toEqual([]);
     } finally {
       db.close();
     }
@@ -547,7 +542,7 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
       expect(result.outcome).toBe("no_tracker_link");
       if (result.outcome !== "no_tracker_link") return;
       expect(result.goalId).toBe("goal-4");
-      expect(listUpdateIntents(db)).toEqual([]);
+      expect(listIntents(db)).toEqual([]);
     } finally {
       db.close();
     }
@@ -573,7 +568,7 @@ describe("evaluateGoalForTrackerSatisfiedIntents", () => {
       if (result.outcome !== "tracker_already_terminal") return;
       expect(result.trackerItem.id).toBe("si-5");
       expect(result.trackerItem.status).toBe("Done");
-      expect(listUpdateIntents(db)).toEqual([]);
+      expect(listIntents(db)).toEqual([]);
     } finally {
       db.close();
     }

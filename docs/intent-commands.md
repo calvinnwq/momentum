@@ -1,10 +1,10 @@
 # Intent commands
 
-Operator-facing CLI envelopes for the `intent list`, `intent get`, `intent apply`, `intent skip`, and `intent cancel` commands. Intents are durable update-intent rows that tracker adapters and evidence ingestion record locally; the CLI applies one explicitly selected intent via `intent apply --external-apply` (gated by `MOMENTUM.md` `intent_apply_policy`). Bounded workflow daemon execution reuses that same policy-gated apply path for a built-in `tracker-refresh` / `external-apply` step only after proving repo policy, Linear auth, the run issue scope, a matching tracker item, one pending Linear `status_update` intent or deterministic seed evidence for the expected `Done` intent, a valid one-of `state` / `stateId` payload, and a stable idempotency marker, or after matching already-successful audit evidence that can be reconciled without another Linear mutation.
+Operator-facing CLI envelopes for the `intent list`, `intent get`, `intent apply`, `intent skip`, and `intent cancel` commands. Intents are durable intent rows that tracker adapters and evidence ingestion record locally; the CLI applies one explicitly selected intent via `intent apply --external-apply` (gated by `MOMENTUM.md` `intent_apply_policy`). Bounded workflow daemon execution reuses that same policy-gated apply path for a built-in `tracker-refresh` / `external-apply` step only after proving repo policy, Linear auth, the run issue scope, a matching tracker item, one pending Linear `status_update` intent or deterministic seed evidence for the expected `Done` intent, a valid one-of `state` / `stateId` payload, and a stable idempotency marker, or after matching already-successful audit evidence that can be reconciled without another Linear mutation.
 
 See also:
 
-- [docs/tracker-commands.md](tracker-commands.md) — tracker-adapter commands that produce update intents.
+- [docs/tracker-commands.md](tracker-commands.md) — tracker-adapter commands that produce intents.
 - [docs/doctor.md](doctor.md) — the `effectiveIntentApply` block (built-in default `create_intents_only` vs `external_apply_allowed` from `MOMENTUM.md`) and the `externalApply` audit-ledger aggregate.
 
 All JSON envelopes on this page report `schemaVersion: 2`, marking the tracker-named key contract; the legacy source-keyed shape never carried the marker.
@@ -15,7 +15,7 @@ All JSON envelopes on this page report `schemaVersion: 2`, marking the tracker-n
 momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--tracker-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]
 ```
 
-Lists update intents stored in the data directory.
+Lists intents stored in the data directory.
 
 Filters:
 
@@ -98,7 +98,7 @@ Text output prints the active filters, total/truncation counts, and a summary li
 momentum intent get <intent-id> [--data-dir <path>] [--json]
 ```
 
-Retrieves a single update intent by ID.
+Retrieves a single intent by ID.
 
 JSON output includes `ok`, `command`, `dataDir`, `schemaVersion`, an `intent` object with all intent fields, and an `externalApply` block with the same shape as the per-intent `externalApply` in `intent list` — `intentId`, `applyState`, `totalAttempts`, `counts`, and `latestAttempt`. When the intent does not exist, exits non-zero with `code: "intent_not_found"` and includes `intentId` in the error payload. Text output shows the intent ID, adapter kind, target external ID, type, status, reason, linked goal/tracker-item/evidence-record IDs, timestamps, and the external apply state, attempt counts, and latest attempt details.
 
@@ -108,7 +108,7 @@ JSON output includes `ok`, `command`, `dataDir`, `schemaVersion`, an `intent` ob
 momentum intent apply <intent-id> --reason <text> [--repo <path>] [--external-apply] [--data-dir <path>] [--json]
 ```
 
-Marks a pending update intent as applied with the required `--reason`. The transition is idempotent: applying an already-applied intent returns `intent_already_terminal` with the current status.
+Marks a pending intent as applied with the required `--reason`. The transition is idempotent: applying an already-applied intent returns `intent_already_terminal` with the current status.
 
 Policy resolution:
 
@@ -149,7 +149,7 @@ On terminal refusal, JSON output includes `currentStatus` and `applyPolicy`.
 momentum intent skip <intent-id> --reason <text> [--data-dir <path>] [--json]
 ```
 
-Marks a pending update intent as skipped with the required `--reason`. Refuses if the intent is already in a terminal state with `code: "intent_already_terminal"` and includes `currentStatus`. JSON output on success includes `previousStatus` and the `intent` object. Text output confirms the transition.
+Marks a pending intent as skipped with the required `--reason`. Refuses if the intent is already in a terminal state with `code: "intent_already_terminal"` and includes `currentStatus`. JSON output on success includes `previousStatus` and the `intent` object. Text output confirms the transition.
 
 ## `intent cancel`
 
@@ -157,4 +157,4 @@ Marks a pending update intent as skipped with the required `--reason`. Refuses i
 momentum intent cancel <intent-id> --reason <text> [--data-dir <path>] [--json]
 ```
 
-Marks a pending update intent as canceled with the required `--reason`. Refuses if the intent is already in a terminal state with `code: "intent_already_terminal"` and includes `currentStatus`. JSON output on success includes `previousStatus` and the `intent` object. Text output confirms the transition.
+Marks a pending intent as canceled with the required `--reason`. Refuses if the intent is already in a terminal state with `code: "intent_already_terminal"` and includes `currentStatus`. JSON output on success includes `previousStatus` and the `intent` object. Text output confirms the transition.

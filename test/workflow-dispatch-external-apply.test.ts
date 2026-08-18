@@ -9,7 +9,7 @@ import {
   type ExecuteExternalApplySuccess,
 } from "../src/core/intent/apply-execute.js";
 import type { IntentApplyAudit } from "../src/core/intent/apply-audits.js";
-import type { UpdateIntent } from "../src/core/intent/update-intents.js";
+import type { Intent } from "../src/core/intent/intents.js";
 import { planDispatchedExecutorTerminalization } from "../src/core/workflow/dispatch/executor-evidence.js";
 import { mapExternalApplyResultToExecutorResult } from "../src/core/workflow/dispatch/external-apply.js";
 
@@ -83,7 +83,7 @@ function makeExternal(
   };
 }
 
-function makeIntent(): UpdateIntent {
+function makeIntent(): Intent {
   return {
     id: "intent-001",
     adapterKind: "linear",

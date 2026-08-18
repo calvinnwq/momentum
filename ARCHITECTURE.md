@@ -22,7 +22,7 @@ src/index.ts -> src/cli.ts -> src/commands/ registry + command families -> domai
 `src/cli.ts` owns top-level parsing, global compatibility flags, route
 dispatch, and the remaining daemon / recovery / doctor compatibility
 surfaces. Extracted command-family modules own the workflow, OpenClaw, tracker,
-evidence, project rollup, and update-intent / intent surfaces. Shared help, IO,
+evidence, project rollup, and intent surfaces. Shared help, IO,
 reusable tracker / evidence / intent JSON shapes, and daemon / recovery / doctor
 output contracts live under `src/renderers/`. The goal-first CLI lane (goal
 start, top-level status / logs / handoff, worker run) is retired.

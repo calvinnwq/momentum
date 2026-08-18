@@ -14,11 +14,11 @@ import {
   type ExternalUpdateAdapterInput,
   type ExternalUpdateAdapterTarget,
 } from "../src/adapters/external-update-adapter.js";
-import type { UpdateIntent } from "../src/core/intent/update-intents.js";
+import type { Intent } from "../src/core/intent/intents.js";
 
-function buildIntent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {
+function buildIntent(overrides: Partial<Intent> = {}): Intent {
   return {
-    id: "update_intent_test_1",
+    id: "intent_test_1",
     adapterKind: "linear",
     targetExternalId: "linear-issue-1",
     intentType: "source_satisfied",
@@ -181,23 +181,21 @@ describe("buildIdempotencyMarker", () => {
   it("produces a stable marker shape keyed off adapter, intent id, and payload", () => {
     const marker = buildIdempotencyMarker({
       adapterKind: "linear",
-      intentId: "update_intent_1",
+      intentId: "intent_1",
       payload: { foo: "bar" },
     });
-    expect(marker.startsWith("momentum-intent:linear:update_intent_1:")).toBe(
-      true,
-    );
+    expect(marker.startsWith("momentum-intent:linear:intent_1:")).toBe(true);
   });
 
   it("returns the same marker for the same intent payload across calls", () => {
     const a = buildIdempotencyMarker({
       adapterKind: "linear",
-      intentId: "update_intent_1",
+      intentId: "intent_1",
       payload: { a: 1, b: "two" },
     });
     const b = buildIdempotencyMarker({
       adapterKind: "linear",
-      intentId: "update_intent_1",
+      intentId: "intent_1",
       payload: { b: "two", a: 1 },
     });
     expect(a).toBe(b);
@@ -206,17 +204,17 @@ describe("buildIdempotencyMarker", () => {
   it("returns different markers when intent id or payload differs", () => {
     const base = buildIdempotencyMarker({
       adapterKind: "linear",
-      intentId: "update_intent_1",
+      intentId: "intent_1",
       payload: { foo: "bar" },
     });
     const otherIntent = buildIdempotencyMarker({
       adapterKind: "linear",
-      intentId: "update_intent_2",
+      intentId: "intent_2",
       payload: { foo: "bar" },
     });
     const otherPayload = buildIdempotencyMarker({
       adapterKind: "linear",
-      intentId: "update_intent_1",
+      intentId: "intent_1",
       payload: { foo: "baz" },
     });
     expect(otherIntent).not.toBe(base);
@@ -232,13 +230,13 @@ describe("previewExternalUpdate", () => {
 
     const expectedMarker = buildIdempotencyMarker({
       adapterKind: "linear",
-      intentId: "update_intent_test_1",
+      intentId: "intent_test_1",
       payload: buildIntent().payload,
     });
 
     expect(result.preview).toMatchObject({
       adapterKind: "linear",
-      intentId: "update_intent_test_1",
+      intentId: "intent_test_1",
       intentType: "source_satisfied",
       mutationKind: "comment",
       idempotencyMarker: expectedMarker,

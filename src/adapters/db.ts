@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   applyQueueMigrations,
   applyWorkflowVocabularyMigration,
+  intentSchemaMigrationNeeded,
   trackerSchemaMigrationNeeded,
   workflowRunsRouteColumnRebuildNeeded,
 } from "./db/migrations.js";
@@ -175,7 +176,8 @@ export function openExistingDbMigratedReadOnly(
         databaseTableExists(migrationDb, "executor_invocations") ||
         routeStateMigrationNeeded(migrationDb) ||
         workflowRunsRouteColumnRebuildNeeded(migrationDb) ||
-        trackerSchemaMigrationNeeded(migrationDb);
+        trackerSchemaMigrationNeeded(migrationDb) ||
+        intentSchemaMigrationNeeded(migrationDb);
     } catch (error) {
       if (!isSqliteBusyError(error)) throw error;
       migrationBusy = true;

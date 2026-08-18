@@ -765,7 +765,7 @@ export type UpdateExecutorRoundOptions = {
 /**
  * Transition-gate a round to `update.toState` while capturing any provided
  * normalized-result fields. A round can never reach `succeeded` without first
- * passing through `capturing_result` / `mirroring_external_state`; the refusal
+ * passing through `capturing_result` / `supervising_delegate`; the refusal
  * leaves the durable row unchanged.
  *
  * @throws {ExecutorRoundNotFoundError} if no round has `roundId`.

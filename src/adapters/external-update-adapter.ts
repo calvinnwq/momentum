@@ -6,7 +6,7 @@
  * intentionally narrow:
  *
  *  - Defines the durable input shape an external apply needs (a pending
- *    `UpdateIntent`, the resolved target, optional tracker/evidence context,
+ *    `Intent`, the resolved target, optional tracker/evidence context,
  *    operator metadata, and policy metadata).
  *  - Defines a stable error code taxonomy that covers both preview-time and
  *    write-time failures, so callers can branch deterministically.
@@ -25,8 +25,8 @@ import { createHash } from "node:crypto";
 
 import type { EvidenceRecord } from "../core/evidence/records.js";
 import type { TrackerItem } from "../core/tracker/items.js";
-import type { UpdateIntentApplyPolicy } from "../core/intent/policy.js";
-import type { UpdateIntent } from "../core/intent/update-intents.js";
+import type { IntentApplyPolicy } from "../core/intent/policy.js";
+import type { Intent } from "../core/intent/intents.js";
 
 export const BUILTIN_EXTERNAL_UPDATE_ADAPTER_KINDS = Object.freeze([
   "linear",
@@ -74,12 +74,12 @@ export type ExternalUpdateAdapterOperator = {
 };
 
 export type ExternalUpdateAdapterPolicy = {
-  intentApplyPolicy: UpdateIntentApplyPolicy;
+  intentApplyPolicy: IntentApplyPolicy;
   allowStatusMutation: boolean;
 };
 
 export type ExternalUpdateAdapterInput = {
-  intent: UpdateIntent;
+  intent: Intent;
   target: ExternalUpdateAdapterTarget;
   trackerItem?: TrackerItem | null;
   evidenceRecord?: EvidenceRecord | null;
@@ -171,7 +171,7 @@ export function getExternalUpdateAdapter(
  * `status_update` support.
  */
 export function resolveExternalUpdateAdapterForIntent(
-  intent: Pick<UpdateIntent, "adapterKind" | "intentType">,
+  intent: Pick<Intent, "adapterKind" | "intentType">,
   adapters?: ReadonlyMap<string, ExternalUpdateAdapter>,
 ): ExternalUpdateAdapter | undefined {
   const adapter = getExternalUpdateAdapter(intent.adapterKind, adapters);

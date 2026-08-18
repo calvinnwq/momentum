@@ -48,7 +48,7 @@ describe("agent-loop contract docs", () => {
       "running",
       "capturing_result",
       "finalizing",
-      "mirroring_external_state",
+      "supervising_delegate",
       "waiting_operator",
       "manual_recovery_required",
       "blocked",

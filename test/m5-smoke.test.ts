@@ -305,7 +305,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
     });
   }, 60_000);
 
-  it("reports an empty intent list cleanly when no update intents exist", () => {
+  it("reports an empty intent list cleanly when no intents exist", () => {
     const dataDir = makeTempDir("momentum-smoke-m5-intent-data-");
     const result = runCliBinary([
       "intent",
@@ -355,7 +355,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
     });
     expect(payload["trackerItems"]).toEqual([]);
     expect(payload["mismatches"]).toEqual([]);
-    expect(payload["pendingUpdateIntents"]).toEqual([]);
+    expect(payload["pendingIntents"]).toEqual([]);
     expect(payload["reconciliationWarnings"]).toEqual([]);
     const nextAction = payload["nextAction"] as Record<string, unknown>;
     expect(typeof nextAction["kind"]).toBe("string");
@@ -762,7 +762,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
     }
   }, 60_000);
 
-  it("generates a source_satisfied update intent through tracker link for a completed goal and refuses --external-apply", async () => {
+  it("generates a source_satisfied intent through tracker link for a completed goal and refuses --external-apply", async () => {
     const dataDir = makeTempDir("momentum-smoke-m5-intent-gen-data-");
 
     const issue = {
@@ -1336,8 +1336,8 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       expect(mismatchCounts.tracker_done_goal_not_terminal).toBe(0);
       expect(mismatchCounts.evidence_missing_after_completion).toBe(0);
       expect(mismatchCounts.manual_recovery_required).toBe(0);
-      expect(counts["pendingUpdateIntents"]).toBe(1);
-      expect(counts["staleUpdateIntents"]).toBe(0);
+      expect(counts["pendingIntents"]).toBe(1);
+      expect(counts["staleIntents"]).toBe(0);
 
       // `project status` source-item summaries use `trackerItemId`, not the
       // bare `id` shape that `tracker list`/`tracker get` return — verify the
@@ -1370,7 +1370,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       expect(projectPayload["totalMismatchCount"]).toBe(1);
       expect(projectPayload["truncatedMismatches"]).toBe(false);
 
-      const pendingIntents = projectPayload["pendingUpdateIntents"] as Array<
+      const pendingIntents = projectPayload["pendingIntents"] as Array<
         Record<string, unknown>
       >;
       expect(pendingIntents).toHaveLength(1);
@@ -1384,8 +1384,8 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       });
       expect(typeof pendingIntents[0]?.["intentId"]).toBe("string");
       expect(typeof pendingIntents[0]?.["ageMs"]).toBe("number");
-      expect(projectPayload["totalPendingUpdateIntentCount"]).toBe(1);
-      expect(projectPayload["truncatedPendingUpdateIntents"]).toBe(false);
+      expect(projectPayload["totalPendingIntentCount"]).toBe(1);
+      expect(projectPayload["truncatedPendingIntents"]).toBe(false);
       expect(projectPayload["reconciliationWarnings"]).toEqual([]);
 
       // `pickNextAction` prioritizes pending intents above the

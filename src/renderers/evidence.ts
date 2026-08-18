@@ -1,6 +1,6 @@
 import type { EvidenceRecord } from "../core/evidence/records.js";
 import type { WorkflowEvidenceDiagnostic } from "../core/evidence/workflow.js";
-import type { EvaluateGoalForTrackerSatisfiedIntentResult } from "../core/tracker/update-intent-generator.js";
+import type { EvaluateGoalForTrackerSatisfiedIntentResult } from "../core/tracker/intent-generator.js";
 import { intentEvaluationToJsonShape } from "./tracker.js";
 import {
   TRACKER_CONTRACT_SCHEMA_VERSION,

@@ -397,8 +397,7 @@ describe("momentum CLI scaffold", () => {
   it("doctor --json surfaces audit lifecycle counts and the latest attempt across intents", async () => {
     const dataDir = makeTempDir("momentum-cli-doctor-externalapply-counts-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { createUpdateIntent } =
-      await import("../src/core/intent/update-intents.js");
+    const { createIntent } = await import("../src/core/intent/intents.js");
     const { claimIntentApply, finalizeIntentApply } =
       await import("../src/core/intent/apply-audits.js");
 
@@ -407,7 +406,7 @@ describe("momentum CLI scaffold", () => {
     let failedIntentId = "";
     let latestAuditId = "";
     try {
-      const failed = createUpdateIntent(
+      const failed = createIntent(
         db,
         {
           adapterKind: "linear",
@@ -419,7 +418,7 @@ describe("momentum CLI scaffold", () => {
         { now: () => 1_000 },
       );
       failedIntentId = failed.intent.id;
-      const succeeded = createUpdateIntent(
+      const succeeded = createIntent(
         db,
         {
           adapterKind: "linear",
@@ -557,14 +556,13 @@ describe("momentum CLI scaffold", () => {
   it("doctor --json reflects in_flight and blocked intent counts from the CAS column", async () => {
     const dataDir = makeTempDir("momentum-cli-doctor-externalapply-states-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { createUpdateIntent } =
-      await import("../src/core/intent/update-intents.js");
+    const { createIntent } = await import("../src/core/intent/intents.js");
     const { claimIntentApply, finalizeIntentApply } =
       await import("../src/core/intent/apply-audits.js");
 
     const db = openDb(dataDir);
     try {
-      const blocked = createUpdateIntent(
+      const blocked = createIntent(
         db,
         {
           adapterKind: "linear",
@@ -575,7 +573,7 @@ describe("momentum CLI scaffold", () => {
         },
         { now: () => 1_000 },
       );
-      const inflight = createUpdateIntent(
+      const inflight = createIntent(
         db,
         {
           adapterKind: "linear",
@@ -2731,8 +2729,7 @@ describe("momentum recovery clear", () => {
     const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
     const { ingestEvidenceRecord } =
       await import("../src/core/evidence/records.js");
-    const { listUpdateIntents } =
-      await import("../src/core/intent/update-intents.js");
+    const { listIntents } = await import("../src/core/intent/intents.js");
     const db = openDb(dataDir);
     let trackerItemId: string;
     try {
@@ -2794,7 +2791,7 @@ describe("momentum recovery clear", () => {
 
     const verifyDb = openDb(dataDir);
     try {
-      const intents = listUpdateIntents(verifyDb, {
+      const intents = listIntents(verifyDb, {
         status: "pending",
         goalId,
       });
@@ -3404,7 +3401,7 @@ describe("momentum CLI external apply post-apply reconciliation", () => {
         "https://linear.app/example/issue/NGX-CLI",
       );
       db.prepare(
-        `INSERT INTO update_intents
+        `INSERT INTO intents
            (id, adapter_kind, target_external_id, intent_type, payload_json,
             reason, tracker_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
@@ -3593,10 +3590,10 @@ describe("momentum project status", () => {
       totalMismatchCount: 0,
       truncatedMismatches: false,
       reconciliationWarnings: [],
-      pendingUpdateIntents: [],
+      pendingIntents: [],
     });
     expect(
-      (payload["counts"] as Record<string, unknown>)["pendingUpdateIntents"],
+      (payload["counts"] as Record<string, unknown>)["pendingIntents"],
     ).toBe(0);
     expect((payload["nextAction"] as Record<string, unknown>)["kind"]).toBe(
       "no_action_required",
@@ -4067,12 +4064,11 @@ describe("momentum project status", () => {
     expect(result.stderr).toContain("--stale-threshold-hours");
   });
 
-  it("surfaces pending update intents in the project status JSON payload", async () => {
+  it("surfaces pending intents in the project status JSON payload", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
     const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
-    const { createUpdateIntent } =
-      await import("../src/core/intent/update-intents.js");
+    const { createIntent } = await import("../src/core/intent/intents.js");
     const db = openDb(dataDir);
     const recentNow = Date.now();
     try {
@@ -4090,7 +4086,7 @@ describe("momentum project status", () => {
         },
         { now: () => recentNow },
       );
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -4115,9 +4111,7 @@ describe("momentum project status", () => {
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
-    const intents = payload["pendingUpdateIntents"] as Array<
-      Record<string, unknown>
-    >;
+    const intents = payload["pendingIntents"] as Array<Record<string, unknown>>;
     expect(intents).toHaveLength(1);
     expect(intents[0]).toMatchObject({
       adapterKind: "linear",
@@ -4126,22 +4120,21 @@ describe("momentum project status", () => {
       stale: false,
     });
     expect(
-      (payload["counts"] as Record<string, unknown>)["pendingUpdateIntents"],
+      (payload["counts"] as Record<string, unknown>)["pendingIntents"],
     ).toBe(1);
-    expect(
-      (payload["counts"] as Record<string, unknown>)["staleUpdateIntents"],
-    ).toBe(0);
+    expect((payload["counts"] as Record<string, unknown>)["staleIntents"]).toBe(
+      0,
+    );
     expect(payload["intentStaleThresholdMs"]).toBe(30 * 24 * 60 * 60 * 1000);
-    expect(payload["totalPendingUpdateIntentCount"]).toBe(1);
-    expect(payload["truncatedPendingUpdateIntents"]).toBe(false);
+    expect(payload["totalPendingIntentCount"]).toBe(1);
+    expect(payload["truncatedPendingIntents"]).toBe(false);
   });
 
   it("surfaces pending intents for legacy scalar project and milestone metadata", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
     const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
-    const { createUpdateIntent } =
-      await import("../src/core/intent/update-intents.js");
+    const { createIntent } = await import("../src/core/intent/intents.js");
     const db = openDb(dataDir);
     const recentNow = Date.now();
     try {
@@ -4162,7 +4155,7 @@ describe("momentum project status", () => {
         },
         { now: () => recentNow },
       );
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -4196,9 +4189,7 @@ describe("momentum project status", () => {
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
-    const intents = payload["pendingUpdateIntents"] as Array<
-      Record<string, unknown>
-    >;
+    const intents = payload["pendingIntents"] as Array<Record<string, unknown>>;
     expect(intents).toHaveLength(1);
     expect(payload["filters"]).toMatchObject({
       adapter: "linear",
@@ -4206,7 +4197,7 @@ describe("momentum project status", () => {
       milestoneName: "Momentum-Native Coding Workflow Adoption",
     });
     expect(
-      (payload["counts"] as Record<string, unknown>)["pendingUpdateIntents"],
+      (payload["counts"] as Record<string, unknown>)["pendingIntents"],
     ).toBe(1);
     expect((payload["nextAction"] as Record<string, unknown>)["kind"]).toBe(
       "review_pending_intents",
@@ -4217,8 +4208,7 @@ describe("momentum project status", () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
     const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
-    const { createUpdateIntent } =
-      await import("../src/core/intent/update-intents.js");
+    const { createIntent } = await import("../src/core/intent/intents.js");
     const db = openDb(dataDir);
     const recentNow = Date.now();
     try {
@@ -4236,7 +4226,7 @@ describe("momentum project status", () => {
         },
         { now: () => recentNow },
       );
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -4274,9 +4264,7 @@ describe("momentum project status", () => {
       totalAttempts: 0,
       latestAttempt: null,
     });
-    const intents = payload["pendingUpdateIntents"] as Array<
-      Record<string, unknown>
-    >;
+    const intents = payload["pendingIntents"] as Array<Record<string, unknown>>;
     expect(intents).toHaveLength(1);
     expect(intents[0]?.["externalApply"]).toEqual({
       applyState: "idle",
@@ -4307,8 +4295,7 @@ describe("momentum project status", () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
     const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
-    const { createUpdateIntent } =
-      await import("../src/core/intent/update-intents.js");
+    const { createIntent } = await import("../src/core/intent/intents.js");
     const { claimIntentApply, finalizeIntentApply } =
       await import("../src/core/intent/apply-audits.js");
     const db = openDb(dataDir);
@@ -4330,7 +4317,7 @@ describe("momentum project status", () => {
         },
         { now: () => recentNow },
       );
-      const succeeded = createUpdateIntent(
+      const succeeded = createIntent(
         db,
         {
           adapterKind: "linear",
@@ -4357,7 +4344,7 @@ describe("momentum project status", () => {
         },
         { now: () => recentNow + 1 },
       );
-      const blocked = createUpdateIntent(
+      const blocked = createIntent(
         db,
         {
           adapterKind: "linear",
@@ -4484,9 +4471,7 @@ describe("momentum project status", () => {
     expect(latest["lifecycleState"]).toBe("audit_incomplete");
     expect(latest["resultCode"]).toBe("audit_finalize_failed");
 
-    const intents = payload["pendingUpdateIntents"] as Array<
-      Record<string, unknown>
-    >;
+    const intents = payload["pendingIntents"] as Array<Record<string, unknown>>;
     expect(intents).toHaveLength(2);
     const succeededRow = intents.find(
       (intent) => intent["intentId"] === succeededIntentId,
@@ -4545,8 +4530,7 @@ describe("momentum project status", () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
     const { upsertTrackerItem } = await import("../src/core/tracker/items.js");
-    const { createUpdateIntent } =
-      await import("../src/core/intent/update-intents.js");
+    const { createIntent } = await import("../src/core/intent/intents.js");
     const db = openDb(dataDir);
     try {
       const item = upsertTrackerItem(
@@ -4563,7 +4547,7 @@ describe("momentum project status", () => {
         },
         { now: () => 1_000 },
       );
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -4590,12 +4574,10 @@ describe("momentum project status", () => {
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload["intentStaleThresholdMs"]).toBe(0);
-    expect(
-      (payload["counts"] as Record<string, unknown>)["staleUpdateIntents"],
-    ).toBe(1);
-    const intents = payload["pendingUpdateIntents"] as Array<
-      Record<string, unknown>
-    >;
+    expect((payload["counts"] as Record<string, unknown>)["staleIntents"]).toBe(
+      1,
+    );
+    const intents = payload["pendingIntents"] as Array<Record<string, unknown>>;
     expect(intents[0]?.["stale"]).toBe(true);
   });
 

@@ -14,11 +14,11 @@ import {
   type FetchLike,
   type LinearExternalUpdateInput,
 } from "../src/adapters/linear-external-update-client.js";
-import type { UpdateIntent } from "../src/core/intent/update-intents.js";
+import type { Intent } from "../src/core/intent/intents.js";
 
-function buildIntent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {
+function buildIntent(overrides: Partial<Intent> = {}): Intent {
   return {
-    id: "update_intent_test_1",
+    id: "intent_test_1",
     adapterKind: "linear",
     targetExternalId: "linear-issue-1",
     intentType: "source_satisfied",
@@ -935,7 +935,7 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
     const preview = buildPreview();
     const expectedMarker = buildIdempotencyMarker({
       adapterKind: "linear",
-      intentId: "update_intent_test_1",
+      intentId: "intent_test_1",
       payload: buildIntent().payload,
     });
     expect(preview.idempotencyMarker).toBe(expectedMarker);

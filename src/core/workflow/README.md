@@ -113,7 +113,7 @@ Generic retry recovery requires a bounded regular result whose exact digest matc
 If a verified commit is staged when the process stops, recovery accepts that otherwise-dirty index only when the `finalizing` receipt matches the current base `HEAD`, staged tree, configured artifact paths, result digest, and successful result, with no unstaged or untracked changes.
 Repository ownership and commit evidence are checked again immediately before the recovered commit.
 Finalized binding-backed delegate state must match the repository's current full `HEAD`.
-After a durable handoff intent or completed handoff exists, an unclassified running, capturing-result, or `mirroring_external_state` round remains scheduler-resumable across stale auto-release dispatch-lease recovery instead of being parked or relaunched.
+After a durable handoff intent or completed handoff exists, an unclassified running, capturing-result, or `supervising_delegate` round remains scheduler-resumable across stale auto-release dispatch-lease recovery instead of being parked or relaunched.
 A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
 An attempt classified `waiting_operator` before a crash reuses or recreates its workflow gate from the durable decision selector and unresolved decision when stale dispatch recovery releases the abandoned lease.
 An earlier crash after the delegate persisted a mirrored gate checkpoint, gate-eligible decision, and `waiting_operator` observation leaves the unclassified round resumable so the same attempt can finish classification and gate parking.

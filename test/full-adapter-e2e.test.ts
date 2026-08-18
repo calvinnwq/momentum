@@ -309,7 +309,7 @@ function goalLoopRoundInputs(
 // agent-once / agent-loop adapters' passing verification gate. The snapshot's
 // identity is corroborated against the expected identity pinned at start, and a
 // completed-with-CI-passed snapshot settles the long-lived round straight to
-// `succeeded` from `mirroring_external_state` (no intervening capture phase).
+// `succeeded` from `supervising_delegate` (no intervening capture phase).
 const NO_MISTAKES_IDENTITY = {
   externalRunId: "nm-run-ngx-372",
   branch: "feat/ngx-372",
@@ -803,7 +803,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       // adapters, the mirror does not drive an agent Momentum chose: it reflects an
       // external review gate's state as untrusted evidence to classify. The landed
       // adapter materializes the durable attempt + the single long-lived mirror
-      // round (born in `mirroring_external_state`), pins the expected external
+      // round (born in `supervising_delegate`), pins the expected external
       // identity, then runs the first poll. A corroborated `completed` snapshot with
       // CI passed settles the round straight to terminal `succeeded` — the mirror's
       // equivalent of the other adapters' passing verification gate. Its

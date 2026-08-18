@@ -19,7 +19,7 @@ import {
 import {
   evaluateGoalForTrackerSatisfiedIntents,
   type EvaluateGoalForTrackerSatisfiedIntentResult,
-} from "../../core/tracker/update-intent-generator.js";
+} from "../../core/tracker/intent-generator.js";
 
 type ParsedFlags = {
   args: string[];
