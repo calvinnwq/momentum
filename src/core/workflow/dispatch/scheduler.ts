@@ -1665,7 +1665,7 @@ function hasResumableDelegateCheckpoint(
     activeRound.classification === null &&
     (activeRound.state === "running" ||
       activeRound.state === "capturing_result" ||
-      activeRound.state === "mirroring_external_state");
+      activeRound.state === "supervising_delegate");
   const interruptedGate =
     activeRound.classification === null &&
     activeRound.state === "waiting_operator" &&

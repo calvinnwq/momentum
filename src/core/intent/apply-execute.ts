@@ -34,15 +34,15 @@ import {
   claimIntentApply as claimIntentApplyFn,
   finalizeIntentApply as finalizeIntentApplyFn,
   markIntentApplyAuditIncomplete as markIntentApplyAuditIncompleteFn,
-  updateIntentApplyAuditReconcile as updateIntentApplyAuditReconcileFn,
+  intentApplyAuditReconcile as intentApplyAuditReconcileFn,
   type ClaimIntentApplyInput,
   type ClaimIntentApplyResult,
   type FinalizeIntentApplyInput,
   type FinalizeIntentApplyResult,
   type IntentApplyAudit,
   type IntentApplyAuditReconcile,
-  type UpdateIntentApplyAuditReconcileInput,
-  type UpdateIntentApplyAuditReconcileResult,
+  type IntentApplyAuditReconcileInput,
+  type IntentApplyAuditReconcileResult,
 } from "./apply-audits.js";
 import type { MomentumDb } from "../../adapters/db.js";
 import {
@@ -77,7 +77,7 @@ import {
   resolveIntentApplyPolicy,
   type MomentumPolicyLoadResult,
   type PolicyEffectiveFieldSource,
-  type UpdateIntentApplyPolicy,
+  type IntentApplyPolicy,
 } from "./policy.js";
 import { preflightLinearExternalApplyAuth } from "./external-apply-preflight.js";
 import { getTrackerItemById } from "../tracker/items.js";
@@ -86,11 +86,11 @@ import {
   type PostApplyReconcileOutcomeCode,
 } from "./post-apply-reconcile.js";
 import {
-  getUpdateIntentById,
-  markUpdateIntentApplied as markUpdateIntentAppliedFn,
-  type UpdateIntent,
-  type UpdateIntentDecisionResult,
-} from "./update-intents.js";
+  getIntentById,
+  markIntentApplied as markIntentAppliedFn,
+  type Intent,
+  type IntentDecisionResult,
+} from "./intents.js";
 
 export const LINEAR_API_KEY_ENV_VAR = "LINEAR_API_KEY";
 
@@ -156,18 +156,18 @@ export type ExecuteExternalApplyDeps = {
     db: MomentumDb,
     input: FinalizeIntentApplyInput,
   ) => FinalizeIntentApplyResult;
-  updateIntentApplyAuditReconcile?: (
+  intentApplyAuditReconcile?: (
     db: MomentumDb,
-    input: UpdateIntentApplyAuditReconcileInput,
-  ) => UpdateIntentApplyAuditReconcileResult;
+    input: IntentApplyAuditReconcileInput,
+  ) => IntentApplyAuditReconcileResult;
   previewExternalUpdate?: (
     input: ExternalUpdateAdapterInput,
     options: { adapters?: ReadonlyMap<string, ExternalUpdateAdapter> },
   ) => ExternalUpdateAdapterPreviewResult;
-  markUpdateIntentApplied?: (
+  markIntentApplied?: (
     db: MomentumDb,
     input: { intentId: string; decisionReason: string; now?: number },
-  ) => UpdateIntentDecisionResult;
+  ) => IntentDecisionResult;
   now?: () => number;
 };
 
@@ -183,7 +183,7 @@ export type ExecuteExternalApplyInput = {
 };
 
 export type ExecuteExternalApplyResolvedPolicy = {
-  value: UpdateIntentApplyPolicy;
+  value: IntentApplyPolicy;
   source: PolicyEffectiveFieldSource | "missing_repo";
 };
 
@@ -202,7 +202,7 @@ export type ExecuteExternalApplyReconcile = {
 
 export type ExecuteExternalApplyContext = {
   intentId: string;
-  intentStatus: UpdateIntent["status"];
+  intentStatus: Intent["status"];
   adapterKind: string;
   intentType: string;
   target: ExecuteExternalApplyTarget;
@@ -230,7 +230,7 @@ export type ExecuteExternalApplySuccess = {
   ok: true;
   resultCode: "applied" | "already_applied";
   context: ExecuteExternalApplyContext;
-  intent: UpdateIntent;
+  intent: Intent;
   audit: IntentApplyAudit;
   external: ExecuteExternalApplyExternalResult;
 };
@@ -240,7 +240,7 @@ export type ExecuteExternalApplyFailure = {
   code: ExecuteExternalApplyErrorCode;
   message: string;
   context: ExecuteExternalApplyContext;
-  intent: UpdateIntent | null;
+  intent: Intent | null;
   audit: IntentApplyAudit | null;
   external: ExecuteExternalApplyExternalResult | null;
 };
@@ -264,14 +264,13 @@ export async function executeExternalApply(
   const claimFn = deps.claimIntentApply ?? claimIntentApplyFn;
   const finalizeFn = deps.finalizeIntentApply ?? finalizeIntentApplyFn;
   const previewFn = deps.previewExternalUpdate ?? previewExternalUpdateFn;
-  const markAppliedFn =
-    deps.markUpdateIntentApplied ?? markUpdateIntentAppliedFn;
+  const markAppliedFn = deps.markIntentApplied ?? markIntentAppliedFn;
   const loadPolicyFn = deps.loadPolicy ?? loadMomentumPolicyFn;
   const buildLinearClient = deps.buildLinearClient ?? defaultBuildLinearClient;
   const buildLinearRefreshClient =
     deps.buildLinearRefreshClient ?? defaultBuildLinearRefreshClient;
   const updateReconcileFn =
-    deps.updateIntentApplyAuditReconcile ?? updateIntentApplyAuditReconcileFn;
+    deps.intentApplyAuditReconcile ?? intentApplyAuditReconcileFn;
 
   if (
     typeof input.intentId !== "string" ||
@@ -288,11 +287,11 @@ export async function executeExternalApply(
     );
   }
 
-  const intent = getUpdateIntentById(input.db, input.intentId);
+  const intent = getIntentById(input.db, input.intentId);
   if (!intent) {
     return earlyFailure({
       code: "intent_not_found",
-      message: `Update intent not found: ${input.intentId}`,
+      message: `Intent not found: ${input.intentId}`,
       contextBase: {
         intentId: input.intentId,
         intentStatus: "pending",
@@ -324,7 +323,7 @@ export async function executeExternalApply(
   if (intent.status !== "pending") {
     return earlyFailure({
       code: "intent_already_terminal",
-      message: `Update intent ${intent.id} is already ${intent.status}; refusing to re-apply.`,
+      message: `Intent ${intent.id} is already ${intent.status}; refusing to re-apply.`,
       intent,
       contextBase: {
         ...intentBaseContext,
@@ -390,7 +389,7 @@ export async function executeExternalApply(
   if (typeof targetExternalId !== "string" || targetExternalId.length === 0) {
     return earlyFailure({
       code: "target_missing",
-      message: `Update intent ${intent.id} has no resolved external target id.`,
+      message: `Intent ${intent.id} has no resolved external target id.`,
       intent,
       contextBase: {
         ...intentBaseContext,
@@ -716,7 +715,7 @@ export async function executeExternalApply(
   });
 
   if (!markApplied.ok) {
-    const currentIntent = getUpdateIntentById(input.db, intent.id);
+    const currentIntent = getIntentById(input.db, intent.id);
     if (
       markApplied.code === "intent_already_terminal" &&
       markApplied.currentStatus === "applied" &&
@@ -823,7 +822,7 @@ export async function executeExternalApply(
 }
 
 function resolveStatusMutationConfig(input: {
-  intent: UpdateIntent;
+  intent: Intent;
   explicitStatusMutation: LinearStatusMutationConfig | null;
 }):
   | { ok: true; statusMutation: LinearStatusMutationConfig | null }
@@ -864,7 +863,7 @@ function resolveStatusMutationConfig(input: {
 }
 
 function buildExternalSuccess(args: {
-  intent: UpdateIntent;
+  intent: Intent;
   adapter: ExternalUpdateAdapter;
   target: ExternalUpdateAdapterTarget;
   policyResolution: { applyPolicy: ExecuteExternalApplyResolvedPolicy };
@@ -912,8 +911,8 @@ async function reconcileSuccessfulExternalApply(args: {
   refreshClient: LinearIssueRefreshClient | null;
   updateReconcileFn: (
     db: MomentumDb,
-    input: UpdateIntentApplyAuditReconcileInput,
-  ) => UpdateIntentApplyAuditReconcileResult;
+    input: IntentApplyAuditReconcileInput,
+  ) => IntentApplyAuditReconcileResult;
   now: () => number;
 }): Promise<{
   audit: IntentApplyAudit;
@@ -933,7 +932,7 @@ async function reconcileSuccessfulExternalApply(args: {
     status: outcome.code,
     warning: outcome.code === "success" ? null : outcome.detail,
   };
-  let updated: UpdateIntentApplyAuditReconcileResult;
+  let updated: IntentApplyAuditReconcileResult;
   try {
     updated = args.updateReconcileFn(args.db, {
       auditId: args.audit.id,
@@ -1100,7 +1099,7 @@ function resolvePolicy(args: {
 }
 
 function identifyUnsupportedReason(
-  intent: UpdateIntent,
+  intent: Intent,
   adapters: ReadonlyMap<string, ExternalUpdateAdapter> | undefined,
 ): {
   code: "unsupported_adapter" | "unsupported_intent_type";
@@ -1189,7 +1188,7 @@ function emptyTarget(): ExecuteExternalApplyTarget {
 
 type EarlyFailureContextBase = {
   intentId: string;
-  intentStatus: UpdateIntent["status"];
+  intentStatus: Intent["status"];
   adapterKind: string;
   intentType: string;
   target: ExecuteExternalApplyTarget;
@@ -1203,7 +1202,7 @@ type EarlyFailureContextBase = {
 function earlyFailure(args: {
   code: ExecuteExternalApplyErrorCode;
   message: string;
-  intent?: UpdateIntent | null;
+  intent?: Intent | null;
   contextBase: EarlyFailureContextBase;
 }): ExecuteExternalApplyFailure {
   const context: ExecuteExternalApplyContext = {
@@ -1235,7 +1234,7 @@ function earlyFailure(args: {
 function buildExternalFailure(args: {
   code: ExecuteExternalApplyErrorCode;
   message: string;
-  intent: UpdateIntent;
+  intent: Intent;
   audit: IntentApplyAudit;
   finalize: FinalizeIntentApplyResult;
   contextBase: EarlyFailureContextBase;

@@ -32,14 +32,14 @@ import {
 // through real SQLite. The pure tests assert the decision/projection *shape*; this
 // asserts that the real durable layer actually honors the mirror-specific lifecycle:
 //
-//   - The single long-lived round is born directly in `mirroring_external_state`
+//   - The single long-lived round is born directly in `supervising_delegate`
 //     with no agent/model/effort and no result document (no-mistakes owns its own
 //     pipeline; the mirror only reflects external state).
 //   - A still-`running` external run heartbeats the round *in place* — a same-state
-//     `mirroring_external_state` -> `mirroring_external_state` transition the graph
+//     `supervising_delegate` -> `supervising_delegate` transition the graph
 //     allows via its `from === to` shortcut, the mirror's `continue`.
 //   - A trustworthy `completed` snapshot reaches `succeeded` *directly* from
-//     `mirroring_external_state` with no intervening capture — the mirror crux,
+//     `supervising_delegate` with no intervening capture — the mirror crux,
 //     parallel to (but simpler than) the single-shot `script` family's bare capture,
 //     because the round is already in the capture/mirror phase.
 //   - A gate settles into a durable, *non-terminal* `waiting_operator` (finished_at
@@ -82,7 +82,7 @@ function makeTempDir(): string {
 // Foreign keys are enforced, so the attempt needs a real (workflow_run_id,
 // step_run_id) and the round needs a real attempt. Seed the minimal parent rows,
 // the durable `running` mirror attempt, and the single mirror round born in
-// `mirroring_external_state` — the live starting point every poll updates.
+// `supervising_delegate` — the live starting point every poll updates.
 function openMirrorRoundDb(): MomentumDb {
   const db = openDb(makeTempDir());
   db.prepare(
@@ -134,13 +134,13 @@ function externalState(
 }
 
 describe("no-mistakes mirror round persistence — round-start", () => {
-  it("inserts a durable mirror round born in mirroring_external_state with no agent/model and no result", () => {
+  it("inserts a durable mirror round born in supervising_delegate with no agent/model and no result", () => {
     const db = openMirrorRoundDb();
 
     const round = loadExecutorRound(db, ROUND_ID);
     expect(round).not.toBeUndefined();
     // Born directly in the capture/mirror phase, not `running`.
-    expect(round!.state).toBe("mirroring_external_state");
+    expect(round!.state).toBe("supervising_delegate");
     expect(round!.executor).toBe("no-mistakes");
     expect(round!.roundIndex).toBe(0);
     expect(round!.classification).toBeNull();
@@ -159,7 +159,7 @@ describe("no-mistakes mirror round persistence — round-start", () => {
 });
 
 describe("no-mistakes mirror round persistence — running snapshot", () => {
-  it("heartbeats the round in place (mirroring_external_state -> mirroring_external_state) on continue", () => {
+  it("heartbeats the round in place (supervising_delegate -> supervising_delegate) on continue", () => {
     const db = openMirrorRoundDb();
 
     const plan = planNoMistakesRoundPersistence({
@@ -175,7 +175,7 @@ describe("no-mistakes mirror round persistence — running snapshot", () => {
     );
 
     // The same-state transition is legal and keeps the round live for the next poll.
-    expect(final.state).toBe("mirroring_external_state");
+    expect(final.state).toBe("supervising_delegate");
     expect(final.classification).toBe("continue");
     expect(final.recoveryCode).toBeNull();
     expect(final.humanGate).toBeNull();
@@ -187,7 +187,7 @@ describe("no-mistakes mirror round persistence — running snapshot", () => {
 });
 
 describe("no-mistakes mirror round persistence — completed snapshot", () => {
-  it("reaches succeeded directly from mirroring_external_state when CI agrees and decisions are resolved", () => {
+  it("reaches succeeded directly from supervising_delegate when CI agrees and decisions are resolved", () => {
     const db = openMirrorRoundDb();
 
     const plan = planNoMistakesRoundPersistence({
@@ -207,7 +207,7 @@ describe("no-mistakes mirror round persistence — completed snapshot", () => {
     expect(plan.decision.classification).toBe("complete");
 
     // Unlike the single-shot families, the mirror needs no bare capture to reach
-    // succeeded: the round is already in mirroring_external_state, from which the
+    // succeeded: the round is already in supervising_delegate, from which the
     // transition graph allows a direct hop to succeeded.
     const final = updateExecutorRound(
       db,

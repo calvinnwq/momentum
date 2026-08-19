@@ -382,8 +382,8 @@ describe("tracker schema rename migration", () => {
       );
       // The unrelated evidence source label column stays.
       expect(columnNames(db, "evidence_records")).toContain("source");
-      expect(columnNames(db, "update_intents")).toContain("tracker_item_id");
-      expect(columnNames(db, "update_intents")).not.toContain("source_item_id");
+      expect(columnNames(db, "intents")).toContain("tracker_item_id");
+      expect(columnNames(db, "intents")).not.toContain("source_item_id");
       // Unrelated workflow provenance columns stay.
       expect(columnNames(db, "workflow_runs")).toContain("source");
       expect(columnNames(db, "workflow_runs")).toContain(
@@ -398,7 +398,7 @@ describe("tracker schema rename migration", () => {
         "idx_tracker_snapshots_item_observed",
         "idx_tracker_reconciliation_runs_adapter_started",
         "idx_evidence_records_tracker_item",
-        "idx_update_intents_tracker_item",
+        "idx_intents_tracker_item",
         // Unrelated evidence-source index keeps its name.
         "idx_evidence_records_source_type",
       ]) {
@@ -465,7 +465,7 @@ describe("tracker schema rename migration", () => {
       expect(evidence.ingest_key).toBe("ingest-key-1");
 
       const intent = db
-        .prepare("SELECT * FROM update_intents WHERE id = ?")
+        .prepare("SELECT * FROM intents WHERE id = ?")
         .get(seededBefore.intentId) as Record<string, unknown>;
       expect(intent.tracker_item_id).toBe(seededBefore.linkedItemId);
       // Durable intent identity and payload bytes stay frozen.
@@ -515,7 +515,7 @@ describe("tracker schema rename migration", () => {
 
       // The dependent tables' renamed columns point at the renamed parent:
       // SQLite's rename rewrote the foreign-key clauses to tracker_items.
-      for (const table of ["evidence_records", "update_intents"]) {
+      for (const table of ["evidence_records", "intents"]) {
         const foreignKeys = db
           .prepare(`PRAGMA foreign_key_list(${table})`)
           .all() as Array<{ table: string; from: string }>;
@@ -545,7 +545,7 @@ describe("tracker schema rename migration", () => {
       expect(() =>
         db
           .prepare(
-            `INSERT INTO update_intents
+            `INSERT INTO intents
                (id, adapter_kind, intent_type, reason, tracker_item_id,
                 idempotency_key, created_at, updated_at)
              VALUES ('intent_dangling', 'linear', 'source_satisfied', 'dangling',
@@ -607,12 +607,12 @@ describe("tracker schema rename migration", () => {
       // The dependent tables are created fresh by the additive pass, already
       // tracker-named, together with their tracker-item indexes.
       expect(tables).toContain("evidence_records");
-      expect(tables).toContain("update_intents");
+      expect(tables).toContain("intents");
       expect(columnNames(db, "evidence_records")).toContain("tracker_item_id");
-      expect(columnNames(db, "update_intents")).toContain("tracker_item_id");
+      expect(columnNames(db, "intents")).toContain("tracker_item_id");
       const indexes = indexNames(db);
       expect(indexes).toContain("idx_evidence_records_tracker_item");
-      expect(indexes).toContain("idx_update_intents_tracker_item");
+      expect(indexes).toContain("idx_intents_tracker_item");
 
       const items = db
         .prepare("SELECT id, external_id FROM tracker_items")

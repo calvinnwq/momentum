@@ -71,11 +71,9 @@ describe("executor loop contract", () => {
       ok: false,
       errorCode: "executor_attempt_terminal",
     });
-    expect(
-      transitionExecutorRound("running", "mirroring_external_state"),
-    ).toEqual({
+    expect(transitionExecutorRound("running", "supervising_delegate")).toEqual({
       ok: true,
-      state: "mirroring_external_state",
+      state: "supervising_delegate",
     });
     expect(transitionExecutorRound("failed", "running")).toMatchObject({
       ok: false,

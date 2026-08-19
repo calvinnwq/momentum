@@ -146,7 +146,7 @@ class PollingSupervisor implements Executor<
   ): ExecutorTickResult {
     const round = emptyRound(
       context.state.attempt as ExecutorAttemptRecord,
-      "mirroring_external_state",
+      "supervising_delegate",
     );
     context.envelope.startRound(roundStartForSdk(round));
     context.envelope.recordArtifact(round.roundId, {
@@ -218,7 +218,7 @@ describe("executor SDK core contract", () => {
             additionalProperties: false,
           },
           tick(context) {
-            const round = emptyRound(attempt, "mirroring_external_state");
+            const round = emptyRound(attempt, "supervising_delegate");
             context.envelope.startRound(roundStartForSdk(round));
             context.envelope.recordDecision(round.roundId, {
               decisionId: `${round.roundId}-decision`,
@@ -277,7 +277,7 @@ describe("executor SDK core contract", () => {
 
     // The executor recorded observations and evidence but did not classify.
     const beforeDecision = loadExecutorRound(db, tick.roundId);
-    expect(beforeDecision?.state).toBe("mirroring_external_state");
+    expect(beforeDecision?.state).toBe("supervising_delegate");
     expect(beforeDecision?.classification).toBeNull();
     expect(beforeDecision?.executorRecommendation).toBeNull();
     expect(loadExecutorAttempt(db, attempt.attemptId)?.state).toBe("running");
@@ -407,7 +407,7 @@ describe("executor SDK core contract", () => {
 
     envelope.facade.startRound(start);
     const observed = envelope.facade.observeRound(round.roundId, {
-      phase: "mirroring_external_state",
+      phase: "supervising_delegate",
       summary: "bounded progress",
       toState: "cancelled",
       classification: "complete",
@@ -417,7 +417,7 @@ describe("executor SDK core contract", () => {
       humanGate: "manual_recovery_required",
     } as unknown as Parameters<typeof envelope.facade.observeRound>[1]);
     expect(observed).toMatchObject({
-      state: "mirroring_external_state",
+      state: "supervising_delegate",
       summary: "bounded progress",
       classification: null,
       executorRecommendation: null,
@@ -432,7 +432,31 @@ describe("executor SDK core contract", () => {
       } as unknown as Parameters<typeof envelope.facade.observeRound>[1]),
     ).toThrow("observation phase");
     expect(loadExecutorRound(db, round.roundId)?.state).toBe(
-      "mirroring_external_state",
+      "supervising_delegate",
+    );
+  });
+
+  it("normalizes the legacy mirror phase at the SDK boundary", () => {
+    const { db, attempt } = openExecutorDb("agent-once");
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      attemptId: attempt.attemptId,
+      now: () => 25,
+    });
+    const round = emptyRound(attempt, "running");
+
+    const started = envelope.facade.startRound({
+      ...roundStartForSdk(round),
+      state: "mirroring_external_state",
+    });
+    expect(started.state).toBe("supervising_delegate");
+
+    const observed = envelope.facade.observeRound(round.roundId, {
+      phase: "mirroring_external_state",
+    });
+    expect(observed.state).toBe("supervising_delegate");
+    expect(loadExecutorRound(db, round.roundId)?.state).toBe(
+      "supervising_delegate",
     );
   });
 
@@ -497,7 +521,7 @@ describe("executor SDK core contract", () => {
       attemptId: attempt.attemptId,
       now: () => 25,
     });
-    const round = emptyRound(attempt, "mirroring_external_state");
+    const round = emptyRound(attempt, "supervising_delegate");
     envelope.facade.startRound(roundStartForSdk(round));
 
     expect(() =>
@@ -599,7 +623,7 @@ describe("executor SDK core contract", () => {
     ).toThrow();
 
     expect(loadExecutorRound(db, round.roundId)).toMatchObject({
-      state: "mirroring_external_state",
+      state: "supervising_delegate",
       summary: null,
     });
     expect(listExecutorCheckpointsForRound(db, round.roundId)).toMatchObject([
@@ -694,7 +718,7 @@ describe("executor SDK core contract", () => {
       attemptId: attempt.attemptId,
       now: () => 30,
     });
-    const round = emptyRound(attempt, "mirroring_external_state");
+    const round = emptyRound(attempt, "supervising_delegate");
     envelope.facade.startRound(roundStartForSdk(round));
     envelope.applyDaemonDecision(
       {
@@ -829,7 +853,7 @@ describe("executor SDK core contract", () => {
       expect(write).toThrow("attempt inv-agent-once is terminal");
     }
     expect(loadExecutorRound(db, round.roundId)?.state).toBe(
-      "mirroring_external_state",
+      "supervising_delegate",
     );
   });
 
@@ -840,7 +864,7 @@ describe("executor SDK core contract", () => {
       attemptId: attempt.attemptId,
       now: () => 40,
     });
-    const round = emptyRound(attempt, "mirroring_external_state");
+    const round = emptyRound(attempt, "supervising_delegate");
     envelope.facade.startRound(roundStartForSdk(round));
     db.exec(`
       CREATE TRIGGER fail_attempt_settlement
@@ -874,7 +898,7 @@ describe("executor SDK core contract", () => {
 
     expect(loadExecutorAttempt(db, attempt.attemptId)?.state).toBe("running");
     expect(loadExecutorRound(db, round.roundId)).toMatchObject({
-      state: "mirroring_external_state",
+      state: "supervising_delegate",
       classification: null,
     });
     expect(listExecutorCheckpointsForRound(db, round.roundId)).toEqual([]);
@@ -887,7 +911,7 @@ describe("executor SDK core contract", () => {
       attemptId: attempt.attemptId,
       now: () => 40,
     });
-    const round = emptyRound(attempt, "mirroring_external_state");
+    const round = emptyRound(attempt, "supervising_delegate");
     envelope.facade.startRound(roundStartForSdk(round));
 
     expect(() =>
@@ -907,7 +931,7 @@ describe("executor SDK core contract", () => {
 
     expect(loadExecutorAttempt(db, attempt.attemptId)?.state).toBe("running");
     expect(loadExecutorRound(db, round.roundId)).toMatchObject({
-      state: "mirroring_external_state",
+      state: "supervising_delegate",
       classification: null,
     });
     expect(listExecutorCheckpointsForRound(db, round.roundId)).toEqual([]);
@@ -920,7 +944,7 @@ describe("executor SDK core contract", () => {
       attemptId: attempt.attemptId,
       now: () => 40,
     });
-    const round = emptyRound(attempt, "mirroring_external_state");
+    const round = emptyRound(attempt, "supervising_delegate");
     envelope.facade.startRound(roundStartForSdk(round));
 
     expect(() =>
@@ -940,7 +964,7 @@ describe("executor SDK core contract", () => {
 
     expect(loadExecutorAttempt(db, attempt.attemptId)?.state).toBe("running");
     expect(loadExecutorRound(db, round.roundId)).toMatchObject({
-      state: "mirroring_external_state",
+      state: "supervising_delegate",
       classification: null,
     });
     expect(listExecutorCheckpointsForRound(db, round.roundId)).toEqual([]);
@@ -953,7 +977,7 @@ describe("executor SDK core contract", () => {
       attemptId: attempt.attemptId,
       now: () => 40,
     });
-    const round = emptyRound(attempt, "mirroring_external_state");
+    const round = emptyRound(attempt, "supervising_delegate");
     envelope.facade.startRound(roundStartForSdk(round));
     const invalid = [
       {
@@ -1029,7 +1053,7 @@ describe("executor SDK core contract", () => {
 
     expect(loadExecutorAttempt(db, attempt.attemptId)?.state).toBe("running");
     expect(loadExecutorRound(db, round.roundId)).toMatchObject({
-      state: "mirroring_external_state",
+      state: "supervising_delegate",
       classification: null,
     });
     expect(listExecutorCheckpointsForRound(db, round.roundId)).toEqual([]);
@@ -1046,7 +1070,7 @@ describe("executor SDK core contract", () => {
 
     const requestedRoundId = `${currentAttempt.attemptId}::round-2`;
     const occupiedRound = {
-      ...emptyRound(priorAttempt, "mirroring_external_state"),
+      ...emptyRound(priorAttempt, "supervising_delegate"),
       roundId: requestedRoundId,
       roundIndex: 0,
     };
@@ -1070,7 +1094,7 @@ describe("executor SDK core contract", () => {
     });
     const started = envelope.facade.startRound(
       roundStartForSdk({
-        ...emptyRound(currentAttempt, "mirroring_external_state"),
+        ...emptyRound(currentAttempt, "supervising_delegate"),
         roundId: requestedRoundId,
         roundIndex: 1,
       }),
@@ -1115,7 +1139,7 @@ function roundStartForSdk(round: ExecutorRoundRecord): ExecutorRoundStart {
   } = round;
   return {
     ...start,
-    state: "mirroring_external_state",
+    state: "supervising_delegate",
     ...(verificationResults !== undefined
       ? { verificationResults: [...verificationResults] }
       : {}),

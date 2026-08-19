@@ -207,11 +207,11 @@ export function classifyDelegateSupervisorState(
     case "running":
       return {
         classification: "continue",
-        roundState: "mirroring_external_state",
+        roundState: "supervising_delegate",
         attemptState: "running",
         humanGate: null,
         recoveryCode: null,
-        reason: `${subject} run is still in progress; keep mirroring`,
+        reason: `${subject} run is still in progress; keep supervising`,
       };
     case "awaiting_decision": {
       if (state.decisions.length === 0) {

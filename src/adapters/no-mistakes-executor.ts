@@ -40,7 +40,7 @@
  * semantics:
  *
  *   - `running` is `continue`: the external pipeline is still working, so the
- *     mirror round stays in `mirroring_external_state` and the daemon polls
+ *     mirror round stays in `supervising_delegate` and the daemon polls
  *     again. No human gate; nothing is decided yet.
  *   - `awaiting_decision` is `operator_decision_required`: no-mistakes surfaced a
  *     decision point. Momentum mirrors it as a durable `waiting_operator` gate
@@ -224,7 +224,7 @@ export type NoMistakesExternalState = {
  * The daemon's decision for one mirrored no-mistakes snapshot. Unlike the
  * single-shot decision, a no-mistakes decision is not always terminal: a
  * still-running external run is `continue` (the round stays in
- * `mirroring_external_state`, the attempt stays `running`), and a gate is
+ * `supervising_delegate`, the attempt stays `running`), and a gate is
  * `waiting_operator` (a durable, non-terminal pause). `recoveryCode` is a
  * {@link NoMistakesRecoveryCode} for any non-clean settle, or `null` otherwise.
  */
@@ -296,7 +296,7 @@ export function noMistakesAttemptId(
 /**
  * Mint the deterministic, reattachable round id for the single mirror round under
  * a no-mistakes attempt. The mirror is one long-lived round (index 0) that
- * lives in `mirroring_external_state` while the external run is in progress, so
+ * lives in `supervising_delegate` while the external run is in progress, so
  * the id is fixed by the attempt id alone — consistent with the
  * `(attempt_id, round_index)` uniqueness the persistence layer enforces.
  */
@@ -387,7 +387,7 @@ export type PlanNoMistakesRoundStartInput = {
  *
  * Two mirror-specific differences from the single-shot round-start projection:
  *
- *   - The round is born in `mirroring_external_state`, not `running`. The mirror
+ *   - The round is born in `supervising_delegate`, not `running`. The mirror
  *     reflects external no-mistakes state rather than running local work, so it
  *     enters the capture/mirror phase directly; from there every decided round
  *     state ({@link decideNoMistakesMirror}) is a legal transition.
@@ -419,7 +419,7 @@ export function planNoMistakesRoundStart(
     executor: NO_MISTAKES_EXECUTOR,
     attemptNumber: attempt.attemptNumber,
     roundIndex: 0,
-    state: "mirroring_external_state",
+    state: "supervising_delegate",
     classification: null,
     startedAt: input.startedAt,
     heartbeatAt: input.startedAt,
@@ -458,7 +458,7 @@ export type PlanNoMistakesRoundPersistenceInput = {
  * {@link roundUpdate} through `updateExecutorRound`, stamping the daemon clock the
  * pure projection cannot supply. Unlike the single-shot / agent-loop plans there is
  * no separate capture patch: the mirror round already lives in
- * `mirroring_external_state` (the capture/mirror phase), from which the round
+ * `supervising_delegate` (the capture/mirror phase), from which the round
  * transition graph allows reaching `succeeded` directly, so one patch carries the
  * whole decision.
  */
@@ -470,7 +470,7 @@ export type NoMistakesRoundPersistencePlan = {
 /**
  * Project a mirror decision into the single durable round patch that carries it.
  * The patch transitions the round to the decided `roundState` — a `continue`
- * decision keeps it in `mirroring_external_state` (a legal same-state heartbeat),
+ * decision keeps it in `supervising_delegate` (a legal same-state heartbeat),
  * a gate moves it to `waiting_operator`, and a settle moves it to its terminal —
  * and stamps the classification, the preserved recovery code, the human gate, and
  * the decision `reason` as the round's durable `summary` (the mirror has no

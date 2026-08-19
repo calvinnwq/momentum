@@ -2,12 +2,9 @@ import type { IntentApplyAudit } from "../core/intent/apply-audits.js";
 import type { IntentApplyAuditSummary } from "../core/intent/apply-audits.js";
 import type {
   PolicyEffectiveFieldSource,
-  UpdateIntentApplyPolicy,
+  IntentApplyPolicy,
 } from "../core/intent/policy.js";
-import type {
-  UpdateIntent,
-  UpdateIntentStatus,
-} from "../core/intent/update-intents.js";
+import type { Intent, IntentStatus } from "../core/intent/intents.js";
 import {
   TRACKER_CONTRACT_SCHEMA_VERSION,
   write,
@@ -23,7 +20,7 @@ export type IntentCommand =
   | "intent cancel";
 
 export type IntentApplyPolicySummary = {
-  effective: UpdateIntentApplyPolicy;
+  effective: IntentApplyPolicy;
   source: PolicyEffectiveFieldSource;
   externalApplyRequested: boolean;
   externalApplyPerformed: boolean;
@@ -71,14 +68,12 @@ export type IntentFailure = {
   trackerItemId?: string;
   evidenceRecordId?: string;
   status?: string;
-  currentStatus?: UpdateIntentStatus;
+  currentStatus?: IntentStatus;
   applyPolicy?: IntentApplyPolicySummary;
   externalApply?: IntentExternalApplySummary;
 };
 
-export function updateIntentToJsonShape(
-  record: UpdateIntent,
-): Record<string, unknown> {
+export function intentToJsonShape(record: Intent): Record<string, unknown> {
   return {
     id: record.id,
     adapterKind: record.adapterKind,
@@ -242,7 +237,7 @@ export function emitIntentListSuccess(
       evidenceRecordId?: string | null;
       limit?: number;
     };
-    intents: readonly UpdateIntent[];
+    intents: readonly Intent[];
     auditSummaries: ReadonlyMap<string, IntentApplyAuditSummary | null>;
     totalAvailable: number;
     truncated: boolean;
@@ -273,7 +268,7 @@ export function emitIntentListSuccess(
     totalAvailable,
     truncated,
     intents: intents.map((record) => ({
-      ...updateIntentToJsonShape(record),
+      ...intentToJsonShape(record),
       externalApply: intentApplyAuditSummaryToJsonShape(
         auditSummaries.get(record.id) ?? null,
       ),
@@ -286,7 +281,7 @@ export function emitIntentListSuccess(
   }
 
   const lines: string[] = [
-    `Update intents: ${intents.length}`,
+    `Intents: ${intents.length}`,
     `Total available: ${totalAvailable}`,
     `Truncated: ${truncated ? "yes" : "no"}`,
     `Status: ${statusFilter ?? "(any)"}`,
@@ -322,7 +317,7 @@ export function emitIntentGetSuccess(
   io: CliIo,
   input: {
     dataDir: string;
-    record: UpdateIntent;
+    record: Intent;
     auditSummary: IntentApplyAuditSummary | null;
   },
 ): number {
@@ -333,7 +328,7 @@ export function emitIntentGetSuccess(
     command: "intent get",
     dataDir,
     schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
-    intent: updateIntentToJsonShape(record),
+    intent: intentToJsonShape(record),
     externalApply,
   };
 
@@ -343,7 +338,7 @@ export function emitIntentGetSuccess(
   }
 
   const lines: string[] = [
-    `Update intent: ${record.id}`,
+    `Intent: ${record.id}`,
     `Adapter: ${record.adapterKind}`,
     `Target external id: ${record.targetExternalId ?? "(none)"}`,
     `Intent type: ${record.intentType}`,
@@ -373,8 +368,8 @@ export function emitIntentDecisionSuccess(
   input: {
     command: IntentCommand;
     dataDir: string;
-    previousStatus: UpdateIntentStatus;
-    record: UpdateIntent;
+    previousStatus: IntentStatus;
+    record: Intent;
     applyPolicy?: IntentApplyPolicySummary;
   },
 ): number {
@@ -384,7 +379,7 @@ export function emitIntentDecisionSuccess(
     dataDir: input.dataDir,
     schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     previousStatus: input.previousStatus,
-    intent: updateIntentToJsonShape(input.record),
+    intent: intentToJsonShape(input.record),
   };
   if (input.applyPolicy !== undefined) {
     payload["applyPolicy"] = input.applyPolicy;
@@ -397,7 +392,7 @@ export function emitIntentDecisionSuccess(
 
   const record = input.record;
   const lines: string[] = [
-    `Update intent ${record.id} ${record.status}`,
+    `Intent ${record.id} ${record.status}`,
     `Adapter: ${record.adapterKind}`,
     `Target external id: ${record.targetExternalId ?? "(none)"}`,
     `Intent type: ${record.intentType}`,
@@ -425,7 +420,7 @@ export function emitIntentExternalApplySuccess(
   io: CliIo,
   input: {
     dataDir: string;
-    record: UpdateIntent;
+    record: Intent;
     applyPolicy: IntentApplyPolicySummary;
     externalApply: IntentExternalApplySummary;
   },
@@ -436,7 +431,7 @@ export function emitIntentExternalApplySuccess(
     dataDir: input.dataDir,
     schemaVersion: TRACKER_CONTRACT_SCHEMA_VERSION,
     previousStatus: "pending",
-    intent: updateIntentToJsonShape(input.record),
+    intent: intentToJsonShape(input.record),
     applyPolicy: input.applyPolicy,
     externalApply: input.externalApply,
   };
@@ -452,7 +447,7 @@ export function emitIntentExternalApplySuccess(
     ? "performed"
     : "already present";
   const lines: string[] = [
-    `Update intent ${record.id} ${record.status}`,
+    `Intent ${record.id} ${record.status}`,
     `Adapter: ${record.adapterKind}`,
     `Target external id: ${record.targetExternalId ?? "(none)"}`,
     `Intent type: ${record.intentType}`,

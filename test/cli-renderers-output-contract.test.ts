@@ -7,13 +7,13 @@ import { runCli } from "../src/cli.js";
 import { evidenceRecordToJsonShape } from "../src/renderers/evidence.js";
 import {
   intentApplyAuditToJsonShape,
-  updateIntentToJsonShape,
+  intentToJsonShape,
 } from "../src/renderers/intent.js";
 import { trackerItemToJsonShape } from "../src/renderers/tracker.js";
 import type { EvidenceRecord } from "../src/core/evidence/records.js";
 import type { IntentApplyAudit } from "../src/core/intent/apply-audits.js";
 import type { TrackerItem } from "../src/core/tracker/items.js";
-import type { UpdateIntent } from "../src/core/intent/update-intents.js";
+import type { Intent } from "../src/core/intent/intents.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
@@ -160,7 +160,7 @@ describe("shared renderer output contracts", () => {
       createdAt: 21,
       updatedAt: 22,
     };
-    const intent: UpdateIntent = {
+    const intent: Intent = {
       id: "intent-1",
       adapterKind: "linear",
       targetExternalId: "lin-1",
@@ -250,7 +250,7 @@ describe("shared renderer output contracts", () => {
       createdAt: 21,
       updatedAt: 22,
     });
-    expect(updateIntentToJsonShape(intent)).toEqual({
+    expect(intentToJsonShape(intent)).toEqual({
       id: "intent-1",
       adapterKind: "linear",
       targetExternalId: "lin-1",

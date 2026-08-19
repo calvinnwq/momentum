@@ -14,7 +14,7 @@ import {
   getIntentApplyAuditById,
   getLatestIntentApplyAudit,
   listIntentApplyAudits,
-  type ClaimIntentApplyInput
+  type ClaimIntentApplyInput,
 } from "../src/core/intent/apply-audits.js";
 
 const tempRoots: string[] = [];
@@ -34,17 +34,17 @@ function makeTempDir(prefix = "momentum-intent-apply-audits-"): string {
 
 function insertIntent(db: MomentumDb, id: string, payload = "{}"): void {
   db.prepare(
-    `INSERT INTO update_intents
+    `INSERT INTO intents
        (id, adapter_kind, target_external_id, intent_type, payload_json,
         reason, status, idempotency_key, created_at, updated_at)
      VALUES (?, 'linear', 'NGX-test', 'source_satisfied', ?,
-             'goal completed with evidence', 'pending', ?, 1, 1)`
+             'goal completed with evidence', 'pending', ?, 1, 1)`,
   ).run(id, payload, `idemp:${id}`);
 }
 
 function baseClaim(
   intentId: string,
-  overrides: Partial<ClaimIntentApplyInput> = {}
+  overrides: Partial<ClaimIntentApplyInput> = {},
 ): ClaimIntentApplyInput {
   return {
     intentId,
@@ -54,7 +54,7 @@ function baseClaim(
       externalId: "NGX-test",
       externalKey: "NGX-123",
       url: "https://linear.app/example/issue/NGX-123",
-      title: "Example issue"
+      title: "Example issue",
     },
     operatorReason: "verified done",
     operatorActor: "operator@example.com",
@@ -65,7 +65,7 @@ function baseClaim(
     idempotencyMarker:
       "momentum-intent:linear:" + intentId + ":deadbeefcafef00d",
     now: 100,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -77,7 +77,7 @@ describe("intent apply state vocabulary", () => {
       "succeeded",
       "failed",
       "blocked",
-      "audit_incomplete"
+      "audit_incomplete",
     ]);
   });
 });
@@ -94,13 +94,11 @@ describe("intent apply audit ledger", () => {
       expect(claim.audit.requestedAt).toBe(100);
       expect(claim.audit.finishedAt).toBeNull();
       expect(claim.audit.idempotencyMarker).toContain(
-        "momentum-intent:linear:intent_a:"
+        "momentum-intent:linear:intent_a:",
       );
 
       const intentRow = db
-        .prepare(
-          "SELECT apply_state FROM update_intents WHERE id = 'intent_a'"
-        )
+        .prepare("SELECT apply_state FROM intents WHERE id = 'intent_a'")
         .get() as { apply_state: string };
       expect(intentRow.apply_state).toBe("in_flight");
 
@@ -111,9 +109,9 @@ describe("intent apply audit ledger", () => {
         resultMessage: "ok",
         externalRefs: {
           commentId: "comment_1",
-          commentUrl: "https://linear.app/example/comment/1"
+          commentUrl: "https://linear.app/example/comment/1",
         },
-        now: 200
+        now: 200,
       });
       if (!finalize.ok) {
         throw new Error(`expected ok finalize, got ${finalize.code}`);
@@ -123,13 +121,11 @@ describe("intent apply audit ledger", () => {
       expect(finalize.audit.resultStatus).toBe("succeeded");
       expect(finalize.audit.externalRefs.commentId).toBe("comment_1");
       expect(finalize.audit.externalRefs.commentUrl).toBe(
-        "https://linear.app/example/comment/1"
+        "https://linear.app/example/comment/1",
       );
 
       const after = db
-        .prepare(
-          "SELECT apply_state FROM update_intents WHERE id = 'intent_a'"
-        )
+        .prepare("SELECT apply_state FROM intents WHERE id = 'intent_a'")
         .get() as { apply_state: string };
       expect(after.apply_state).toBe("idle");
     } finally {
@@ -149,14 +145,12 @@ describe("intent apply audit ledger", () => {
         lifecycleState: "failed",
         resultCode: "write_rejected",
         resultMessage: "Linear rejected the mutation",
-        now: 250
+        now: 250,
       });
       if (!finalize.ok) throw new Error("finalize must succeed");
       expect(finalize.audit.lifecycleState).toBe("failed");
       const row = db
-        .prepare(
-          "SELECT apply_state FROM update_intents WHERE id = 'intent_b'"
-        )
+        .prepare("SELECT apply_state FROM intents WHERE id = 'intent_b'")
         .get() as { apply_state: string };
       expect(row.apply_state).toBe("idle");
     } finally {
@@ -179,18 +173,16 @@ describe("intent apply audit ledger", () => {
           "external write succeeded but audit finalize did not complete",
         externalRefs: {
           commentId: "comment_late",
-          commentUrl: "https://linear.app/example/comment/late"
+          commentUrl: "https://linear.app/example/comment/late",
         },
-        now: 300
+        now: 300,
       });
       if (!finalize.ok) throw new Error("finalize must succeed");
       expect(finalize.audit.lifecycleState).toBe("audit_incomplete");
       expect(finalize.audit.externalRefs.commentId).toBe("comment_late");
 
       const intent = db
-        .prepare(
-          "SELECT apply_state FROM update_intents WHERE id = 'intent_c'"
-        )
+        .prepare("SELECT apply_state FROM intents WHERE id = 'intent_c'")
         .get() as { apply_state: string };
       expect(intent.apply_state).toBe("blocked");
 
@@ -214,10 +206,7 @@ describe("intent apply audit ledger", () => {
       insertIntent(db, "intent_d");
       const first = claimIntentApply(db, baseClaim("intent_d"));
       if (!first.ok) throw new Error("first claim must succeed");
-      const second = claimIntentApply(
-        db,
-        baseClaim("intent_d", { now: 110 })
-      );
+      const second = claimIntentApply(db, baseClaim("intent_d", { now: 110 }));
       if (second.ok) throw new Error("second claim must refuse");
       expect(second.code).toBe("intent_apply_in_progress");
       expect(second.currentApplyState).toBe("in_flight");
@@ -249,7 +238,7 @@ describe("intent apply audit ledger", () => {
       insertIntent(db, "intent_e");
       const missing = finalizeIntentApply(db, {
         auditId: "unknown_audit",
-        lifecycleState: "failed"
+        lifecycleState: "failed",
       });
       if (missing.ok) throw new Error("expected refusal");
       expect(missing.code).toBe("audit_not_found");
@@ -258,12 +247,12 @@ describe("intent apply audit ledger", () => {
       if (!claim.ok) throw new Error("claim must succeed");
       const first = finalizeIntentApply(db, {
         auditId: claim.audit.id,
-        lifecycleState: "succeeded"
+        lifecycleState: "succeeded",
       });
       if (!first.ok) throw new Error("first finalize must succeed");
       const second = finalizeIntentApply(db, {
         auditId: claim.audit.id,
-        lifecycleState: "failed"
+        lifecycleState: "failed",
       });
       if (second.ok) throw new Error("second finalize must refuse");
       expect(second.code).toBe("audit_already_finalized");
@@ -282,13 +271,10 @@ describe("intent apply audit ledger", () => {
       if (!first.ok) throw new Error("first claim must succeed");
       const done = finalizeIntentApply(db, {
         auditId: first.audit.id,
-        lifecycleState: "failed"
+        lifecycleState: "failed",
       });
       if (!done.ok) throw new Error("finalize must succeed");
-      const second = claimIntentApply(
-        db,
-        baseClaim("intent_f", { now: 500 })
-      );
+      const second = claimIntentApply(db, baseClaim("intent_f", { now: 500 }));
       if (!second.ok) {
         throw new Error("second claim should succeed after release");
       }
@@ -310,7 +296,7 @@ describe("intent apply audit ledger", () => {
       finalizeIntentApply(db, {
         auditId: claim1.audit.id,
         lifecycleState: "failed",
-        now: 20
+        now: 20,
       });
 
       const claim2 = claimIntentApply(db, baseClaim("intent_g", { now: 30 }));
@@ -318,7 +304,7 @@ describe("intent apply audit ledger", () => {
       finalizeIntentApply(db, {
         auditId: claim2.audit.id,
         lifecycleState: "succeeded",
-        now: 40
+        now: 40,
       });
 
       const claim3 = claimIntentApply(db, baseClaim("intent_h", { now: 50 }));
@@ -334,11 +320,11 @@ describe("intent apply audit ledger", () => {
       const allG = listIntentApplyAudits(db, { intentId: "intent_g" });
       expect(allG.map((row) => row.id)).toEqual([
         claim2.audit.id,
-        claim1.audit.id
+        claim1.audit.id,
       ]);
 
       const claimedOnly = listIntentApplyAudits(db, {
-        lifecycleState: "claimed"
+        lifecycleState: "claimed",
       });
       expect(claimedOnly.map((row) => row.id)).toEqual([claim3.audit.id]);
 
@@ -364,8 +350,8 @@ describe("intent apply audit ledger", () => {
         finalizeIntentApply(db, {
           auditId: claim.audit.id,
           // @ts-expect-error - exercising runtime validation
-          lifecycleState: "claimed"
-        })
+          lifecycleState: "claimed",
+        }),
       ).toThrow(/finalizeIntentApply/);
     } finally {
       db.close();
@@ -378,13 +364,10 @@ describe("intent apply audit ledger", () => {
     try {
       insertIntent(db, "intent_j");
       expect(() =>
-        claimIntentApply(db, baseClaim("intent_j", { operatorReason: "" }))
+        claimIntentApply(db, baseClaim("intent_j", { operatorReason: "" })),
       ).toThrow(/operatorReason/);
       expect(() =>
-        claimIntentApply(
-          db,
-          baseClaim("intent_j", { idempotencyMarker: "" })
-        )
+        claimIntentApply(db, baseClaim("intent_j", { idempotencyMarker: "" })),
       ).toThrow(/idempotencyMarker/);
     } finally {
       db.close();

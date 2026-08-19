@@ -222,7 +222,7 @@ A legacy or migrated dispatch lineage whose first round is index 1 is not redisp
 For the first completed delegate-supervisor handoff in an attempt, the binding-backed dispatcher permits a second bounded tick in the same pass so the first external-state read follows that durable handoff immediately.
 Later passes and every retry attempt return to one tick, including a retry that launches a fresh external run.
 A continuation-only pass waits the configured daemon poll interval before the next external-state read.
-If a process dies after a durable handoff intent or completed handoff exists but before daemon classification, stale auto-release dispatch recovery releases the abandoned lease and re-drives that unclassified running, capturing-result, or `mirroring_external_state` round under the same attempt.
+If a process dies after a durable handoff intent or completed handoff exists but before daemon classification, stale auto-release dispatch recovery releases the abandoned lease and re-drives that unclassified running, capturing-result, or `supervising_delegate` round under the same attempt.
 The same recovery applies to a completed `continue` poll whose succeeded or failed round has a durable handoff in its history.
 It does not park the run merely because terminal classification is missing, and it does not repeat the external handoff.
 Native completed-mechanism reattachment without a resolved host-binding source follows the durable-envelope rule below: durable completion evidence must identify the current attempt, the current repository `HEAD` must exactly match the completed round's recorded commit SHA, expected settled base HEAD, or delegate handoff head, and an active unexpired repository lock must still match the run, attempt number, and canonical repository root.
@@ -320,6 +320,11 @@ When Momentum observes an unowned escaped descendant, loses ownership visibility
 - `recordRoundProgress()` to commit an observation and its supporting checkpoint batch atomically;
 - `heartbeat()` for liveness;
 - `recordArtifact()`, `recordCheckpoint()`, `recordFinding()`, and `recordDecision()` for append-only evidence.
+
+For compatibility, the facade accepts the legacy `mirroring_external_state`
+observation phase as input and normalizes it to the canonical
+`supervising_delegate` round state; newly persisted rounds always use the
+canonical value.
 
 It does not expose SQLite or terminal-classification methods. The daemon controller and frozen executor facade are separate runtime objects, not merely different TypeScript views of one object. The facade rejects evidence for another attempt, overlapping or gapped rounds, writes after either the round or attempt is terminal, and terminal states submitted through JavaScript or casted observation inputs. Every public write validates its complete payload at runtime, including round starts and observations, progress checkpoint batches, artifacts, checkpoints, findings, decisions, and daemon settlement. Observation updates use an explicit runtime field whitelist rather than spreading caller objects. State-dependent checks and writes are transactional; daemon-allocated checkpoint identity, terminal classification, and attempt settlement share one write transaction.
 Executor writes are available only while the attempt is `running`; a daemon transition to `waiting_operator` or any other non-running state revokes every facade write, including heartbeat, until daemon policy moves the attempt again.

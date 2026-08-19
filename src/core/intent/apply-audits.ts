@@ -2,14 +2,14 @@ import { randomUUID } from "node:crypto";
 
 import { isUniqueViolation, type MomentumDb } from "../../adapters/db.js";
 import type { ExternalUpdateMutationKind } from "../../adapters/external-update-adapter.js";
-import type { UpdateIntentApplyPolicy } from "./policy.js";
+import type { IntentApplyPolicy } from "./policy.js";
 
 export const INTENT_APPLY_LIFECYCLE_STATES = [
   "claimed",
   "succeeded",
   "failed",
   "blocked",
-  "audit_incomplete"
+  "audit_incomplete",
 ] as const;
 
 export type IntentApplyLifecycleState =
@@ -52,7 +52,7 @@ export type IntentApplyAudit = {
   finishedAt: number | null;
   operatorReason: string;
   operatorActor: string | null;
-  intentApplyPolicy: UpdateIntentApplyPolicy;
+  intentApplyPolicy: IntentApplyPolicy;
   allowStatusMutation: boolean;
   mutationKind: ExternalUpdateMutationKind;
   previewSummary: string;
@@ -74,7 +74,7 @@ export type ClaimIntentApplyInput = {
   target: IntentApplyAuditTarget;
   operatorReason: string;
   operatorActor?: string | null;
-  intentApplyPolicy: UpdateIntentApplyPolicy;
+  intentApplyPolicy: IntentApplyPolicy;
   allowStatusMutation: boolean;
   mutationKind: ExternalUpdateMutationKind;
   previewSummary: string;
@@ -83,9 +83,7 @@ export type ClaimIntentApplyInput = {
 };
 
 export type ClaimIntentApplyErrorCode =
-  | "intent_not_found"
-  | "intent_apply_in_progress"
-  | "intent_blocked";
+  "intent_not_found" | "intent_apply_in_progress" | "intent_blocked";
 
 export type ClaimIntentApplyResult =
   | { ok: true; audit: IntentApplyAudit }
@@ -109,8 +107,7 @@ export type FinalizeIntentApplyInput = {
 };
 
 export type FinalizeIntentApplyErrorCode =
-  | "audit_not_found"
-  | "audit_already_finalized";
+  "audit_not_found" | "audit_already_finalized";
 
 export type FinalizeIntentApplyResult =
   | { ok: true; audit: IntentApplyAudit }
@@ -130,13 +127,13 @@ export type MarkIntentApplyAuditIncompleteInput = {
   now?: number;
 };
 
-export type UpdateIntentApplyAuditReconcileInput = {
+export type IntentApplyAuditReconcileInput = {
   auditId: string;
   reconcile: IntentApplyAuditReconcile;
   now?: number;
 };
 
-export type UpdateIntentApplyAuditReconcileResult =
+export type IntentApplyAuditReconcileResult =
   | { ok: true; audit: IntentApplyAudit }
   | {
       ok: false;
@@ -165,7 +162,7 @@ type IntentApplyAuditRow = {
   finished_at: number | null;
   operator_reason: string;
   operator_actor: string | null;
-  intent_apply_policy: UpdateIntentApplyPolicy;
+  intent_apply_policy: IntentApplyPolicy;
   allow_status_mutation: number;
   mutation_kind: ExternalUpdateMutationKind;
   preview_summary: string;
@@ -183,7 +180,7 @@ type IntentApplyAuditRow = {
   updated_at: number;
 };
 
-type UpdateIntentApplyStateRow = {
+type IntentApplyStateRow = {
   id: string;
   apply_state: IntentApplyState;
 };
@@ -204,7 +201,7 @@ type UpdateIntentApplyStateRow = {
  */
 export function claimIntentApply(
   db: MomentumDb,
-  input: ClaimIntentApplyInput
+  input: ClaimIntentApplyInput,
 ): ClaimIntentApplyResult {
   validateNonEmpty(input.intentId, "intentId");
   validateNonEmpty(input.adapterKind, "adapterKind");
@@ -220,26 +217,24 @@ export function claimIntentApply(
   try {
     const claim = db
       .prepare(
-        `UPDATE update_intents
+        `UPDATE intents
             SET apply_state = 'in_flight',
                 updated_at = ?
           WHERE id = ? AND apply_state = 'idle'
-          RETURNING id, apply_state`
+          RETURNING id, apply_state`,
       )
-      .get(now, input.intentId) as UpdateIntentApplyStateRow | undefined;
+      .get(now, input.intentId) as IntentApplyStateRow | undefined;
 
     if (!claim) {
       const current = db
-        .prepare(
-          "SELECT id, apply_state FROM update_intents WHERE id = ?"
-        )
-        .get(input.intentId) as UpdateIntentApplyStateRow | undefined;
+        .prepare("SELECT id, apply_state FROM intents WHERE id = ?")
+        .get(input.intentId) as IntentApplyStateRow | undefined;
       db.exec("ROLLBACK");
       if (!current) {
         return {
           ok: false,
           code: "intent_not_found",
-          message: `Update intent not found: ${input.intentId}`
+          message: `Intent not found: ${input.intentId}`,
         };
       }
       if (current.apply_state === "blocked") {
@@ -248,9 +243,9 @@ export function claimIntentApply(
           ok: false,
           code: "intent_blocked",
           message:
-            `Update intent ${input.intentId} is blocked from external apply; ` +
+            `Intent ${input.intentId} is blocked from external apply; ` +
             `operator recovery must clear the block before another claim is possible.`,
-          currentApplyState: current.apply_state
+          currentApplyState: current.apply_state,
         };
         if (latest) failure.latestAuditId = latest.id;
         return failure;
@@ -260,7 +255,7 @@ export function claimIntentApply(
         ok: false,
         code: "intent_apply_in_progress",
         message: `Another external apply is already in progress for intent ${input.intentId}.`,
-        currentApplyState: current.apply_state
+        currentApplyState: current.apply_state,
       };
       if (inFlight) failure.latestAuditId = inFlight.id;
       return failure;
@@ -294,7 +289,7 @@ export function claimIntentApply(
                    NULL,
                    NULL, NULL,
                    ?, ?)
-           RETURNING *`
+           RETURNING *`,
         )
         .get(
           auditId,
@@ -314,7 +309,7 @@ export function claimIntentApply(
           input.previewSummary,
           input.idempotencyMarker,
           now,
-          now
+          now,
         ) as IntentApplyAuditRow;
     } catch (error) {
       db.exec("ROLLBACK");
@@ -323,7 +318,7 @@ export function claimIntentApply(
         const failure: ClaimIntentApplyResult = {
           ok: false,
           code: "intent_apply_in_progress",
-          message: `Another external apply is already in progress for intent ${input.intentId}.`
+          message: `Another external apply is already in progress for intent ${input.intentId}.`,
         };
         if (latest) failure.latestAuditId = latest.id;
         return failure;
@@ -350,18 +345,18 @@ export function claimIntentApply(
  */
 export function finalizeIntentApply(
   db: MomentumDb,
-  input: FinalizeIntentApplyInput
+  input: FinalizeIntentApplyInput,
 ): FinalizeIntentApplyResult {
   validateNonEmpty(input.auditId, "auditId");
   const lifecycleAsString = input.lifecycleState as string;
   if (
     !(INTENT_APPLY_LIFECYCLE_STATES as readonly string[]).includes(
-      lifecycleAsString
+      lifecycleAsString,
     ) ||
     lifecycleAsString === "claimed"
   ) {
     throw new Error(
-      `finalizeIntentApply: lifecycleState must be one of succeeded/failed/blocked/audit_incomplete (got "${lifecycleAsString}").`
+      `finalizeIntentApply: lifecycleState must be one of succeeded/failed/blocked/audit_incomplete (got "${lifecycleAsString}").`,
     );
   }
 
@@ -369,11 +364,11 @@ export function finalizeIntentApply(
   const externalRefs: IntentApplyAuditExternalRefs = {
     commentId: input.externalRefs?.commentId ?? null,
     commentUrl: input.externalRefs?.commentUrl ?? null,
-    stateTransitionId: input.externalRefs?.stateTransitionId ?? null
+    stateTransitionId: input.externalRefs?.stateTransitionId ?? null,
   };
   const reconcile: IntentApplyAuditReconcile = {
     status: input.reconcile?.status ?? null,
-    warning: input.reconcile?.warning ?? null
+    warning: input.reconcile?.warning ?? null,
   };
 
   db.exec("BEGIN");
@@ -386,7 +381,7 @@ export function finalizeIntentApply(
       return {
         ok: false,
         code: "audit_not_found",
-        message: `Intent apply audit not found: ${input.auditId}`
+        message: `Intent apply audit not found: ${input.auditId}`,
       };
     }
     if (existing.lifecycle_state !== "claimed") {
@@ -397,7 +392,7 @@ export function finalizeIntentApply(
         message:
           `Intent apply audit ${input.auditId} is already ${existing.lifecycle_state}; ` +
           `refusing to overwrite finalized lifecycle state.`,
-        currentLifecycleState: existing.lifecycle_state
+        currentLifecycleState: existing.lifecycle_state,
       };
     }
 
@@ -416,7 +411,7 @@ export function finalizeIntentApply(
                 reconcile_status = ?,
                 reconcile_warning = ?
           WHERE id = ? AND lifecycle_state = 'claimed'
-          RETURNING *`
+          RETURNING *`,
       )
       .get(
         input.lifecycleState,
@@ -430,7 +425,7 @@ export function finalizeIntentApply(
         externalRefs.stateTransitionId,
         reconcile.status,
         reconcile.warning,
-        input.auditId
+        input.auditId,
       ) as IntentApplyAuditRow | undefined;
 
     if (!row) {
@@ -438,7 +433,7 @@ export function finalizeIntentApply(
       return {
         ok: false,
         code: "audit_already_finalized",
-        message: `Intent apply audit ${input.auditId} transitioned concurrently; refusing to overwrite.`
+        message: `Intent apply audit ${input.auditId} transitioned concurrently; refusing to overwrite.`,
       };
     }
 
@@ -449,10 +444,10 @@ export function finalizeIntentApply(
         : "idle";
 
     db.prepare(
-      `UPDATE update_intents
+      `UPDATE intents
           SET apply_state = ?,
               updated_at = ?
-        WHERE id = ?`
+        WHERE id = ?`,
     ).run(nextApplyState, now, existing.intent_id);
 
     db.exec("COMMIT");
@@ -471,7 +466,7 @@ export function finalizeIntentApply(
  */
 export function markIntentApplyAuditIncomplete(
   db: MomentumDb,
-  input: MarkIntentApplyAuditIncompleteInput
+  input: MarkIntentApplyAuditIncompleteInput,
 ): FinalizeIntentApplyResult {
   validateNonEmpty(input.auditId, "auditId");
   validateNonEmpty(input.resultCode, "resultCode");
@@ -481,11 +476,11 @@ export function markIntentApplyAuditIncomplete(
   const externalRefs: IntentApplyAuditExternalRefs = {
     commentId: input.externalRefs?.commentId ?? null,
     commentUrl: input.externalRefs?.commentUrl ?? null,
-    stateTransitionId: input.externalRefs?.stateTransitionId ?? null
+    stateTransitionId: input.externalRefs?.stateTransitionId ?? null,
   };
   const reconcile: IntentApplyAuditReconcile = {
     status: input.reconcile?.status ?? "deferred",
-    warning: input.reconcile?.warning ?? null
+    warning: input.reconcile?.warning ?? null,
   };
 
   db.exec("BEGIN");
@@ -498,7 +493,7 @@ export function markIntentApplyAuditIncomplete(
       return {
         ok: false,
         code: "audit_not_found",
-        message: `Intent apply audit not found: ${input.auditId}`
+        message: `Intent apply audit not found: ${input.auditId}`,
       };
     }
 
@@ -517,7 +512,7 @@ export function markIntentApplyAuditIncomplete(
                 reconcile_status = ?,
                 reconcile_warning = ?
           WHERE id = ?
-          RETURNING *`
+          RETURNING *`,
       )
       .get(
         now,
@@ -529,7 +524,7 @@ export function markIntentApplyAuditIncomplete(
         externalRefs.stateTransitionId,
         reconcile.status,
         reconcile.warning,
-        input.auditId
+        input.auditId,
       ) as IntentApplyAuditRow | undefined;
 
     if (!row) {
@@ -537,15 +532,15 @@ export function markIntentApplyAuditIncomplete(
       return {
         ok: false,
         code: "audit_not_found",
-        message: `Intent apply audit not found: ${input.auditId}`
+        message: `Intent apply audit not found: ${input.auditId}`,
       };
     }
 
     db.prepare(
-      `UPDATE update_intents
+      `UPDATE intents
           SET apply_state = 'blocked',
               updated_at = ?
-        WHERE id = ?`
+        WHERE id = ?`,
     ).run(now, existing.intent_id);
 
     db.exec("COMMIT");
@@ -558,7 +553,7 @@ export function markIntentApplyAuditIncomplete(
 
 export function getIntentApplyAuditById(
   db: MomentumDb,
-  id: string
+  id: string,
 ): IntentApplyAudit | null {
   const row = db
     .prepare("SELECT * FROM intent_apply_audits WHERE id = ?")
@@ -568,7 +563,7 @@ export function getIntentApplyAuditById(
 
 export function getLatestIntentApplyAudit(
   db: MomentumDb,
-  intentId: string
+  intentId: string,
 ): IntentApplyAudit | null {
   const row = db
     .prepare(
@@ -576,16 +571,16 @@ export function getLatestIntentApplyAudit(
          FROM intent_apply_audits
         WHERE intent_id = ?
         ORDER BY created_at DESC, id DESC
-        LIMIT 1`
+        LIMIT 1`,
     )
     .get(intentId) as IntentApplyAuditRow | undefined;
   return row ? intentApplyAuditFromRow(row) : null;
 }
 
-export function updateIntentApplyAuditReconcile(
+export function intentApplyAuditReconcile(
   db: MomentumDb,
-  input: UpdateIntentApplyAuditReconcileInput
-): UpdateIntentApplyAuditReconcileResult {
+  input: IntentApplyAuditReconcileInput,
+): IntentApplyAuditReconcileResult {
   validateNonEmpty(input.auditId, "auditId");
   const now = input.now ?? Date.now();
   const row = db
@@ -595,19 +590,19 @@ export function updateIntentApplyAuditReconcile(
               reconcile_warning = ?,
               updated_at = ?
         WHERE id = ?
-        RETURNING *`
+        RETURNING *`,
     )
     .get(
       input.reconcile.status ?? null,
       input.reconcile.warning ?? null,
       now,
-      input.auditId
+      input.auditId,
     ) as IntentApplyAuditRow | undefined;
   if (!row) {
     return {
       ok: false,
       code: "audit_not_found",
-      message: `Intent apply audit not found: ${input.auditId}`
+      message: `Intent apply audit not found: ${input.auditId}`,
     };
   }
   return { ok: true, audit: intentApplyAuditFromRow(row) };
@@ -615,7 +610,7 @@ export function updateIntentApplyAuditReconcile(
 
 export function listIntentApplyAudits(
   db: MomentumDb,
-  options: ListIntentApplyAuditsOptions = {}
+  options: ListIntentApplyAuditsOptions = {},
 ): IntentApplyAudit[] {
   const clauses: string[] = [];
   const params: (string | number)[] = [];
@@ -638,7 +633,7 @@ export function listIntentApplyAudits(
          FROM intent_apply_audits
          ${where}
         ORDER BY created_at DESC, id DESC
-        ${limitClause}`
+        ${limitClause}`,
     )
     .all(...params) as IntentApplyAuditRow[];
   return rows.map(intentApplyAuditFromRow);
@@ -646,7 +641,7 @@ export function listIntentApplyAudits(
 
 export function countIntentApplyAuditsByLifecycleState(
   db: MomentumDb,
-  options: { intentId?: string } = {}
+  options: { intentId?: string } = {},
 ): IntentApplyAuditCounts {
   const params: string[] = [];
   let where = "";
@@ -659,7 +654,7 @@ export function countIntentApplyAuditsByLifecycleState(
       `SELECT lifecycle_state AS state, COUNT(*) AS c
          FROM intent_apply_audits
          ${where}
-        GROUP BY lifecycle_state`
+        GROUP BY lifecycle_state`,
     )
     .all(...params) as Array<{ state: IntentApplyLifecycleState; c: number }>;
   const counts: IntentApplyAuditCounts = {
@@ -667,7 +662,7 @@ export function countIntentApplyAuditsByLifecycleState(
     succeeded: 0,
     failed: 0,
     blocked: 0,
-    audit_incomplete: 0
+    audit_incomplete: 0,
   };
   for (const row of rows) {
     counts[row.state] = row.c;
@@ -686,17 +681,17 @@ export type IntentApplyAuditSummary = {
 /**
  * Per-intent audit summary used by CLI/operator surfaces. Returns null when
  * the intent does not exist. The `applyState` reflects the current CAS column
- * on `update_intents` so callers can render `idle | in_flight | blocked`
+ * on `intents` so callers can render `idle | in_flight | blocked`
  * alongside the latest attempt and lifecycle-state counts.
  */
 export function summarizeIntentApplyAuditsForIntent(
   db: MomentumDb,
-  intentId: string
+  intentId: string,
 ): IntentApplyAuditSummary | null {
   validateNonEmpty(intentId, "intentId");
   const intent = db
-    .prepare("SELECT id, apply_state FROM update_intents WHERE id = ?")
-    .get(intentId) as UpdateIntentApplyStateRow | undefined;
+    .prepare("SELECT id, apply_state FROM intents WHERE id = ?")
+    .get(intentId) as IntentApplyStateRow | undefined;
   if (!intent) return null;
 
   const counts = countIntentApplyAuditsByLifecycleState(db, { intentId });
@@ -713,15 +708,13 @@ export function summarizeIntentApplyAuditsForIntent(
     applyState: intent.apply_state,
     totalAttempts,
     counts,
-    latestAttempt
+    latestAttempt,
   };
 }
 
 export function countBlockedIntents(db: MomentumDb): number {
   const row = db
-    .prepare(
-      "SELECT COUNT(*) AS c FROM update_intents WHERE apply_state = 'blocked'"
-    )
+    .prepare("SELECT COUNT(*) AS c FROM intents WHERE apply_state = 'blocked'")
     .get() as { c: number };
   return row.c;
 }
@@ -729,19 +722,19 @@ export function countBlockedIntents(db: MomentumDb): number {
 export type IntentApplyStateCounts = Record<IntentApplyState, number>;
 
 export function countIntentsByApplyState(
-  db: MomentumDb
+  db: MomentumDb,
 ): IntentApplyStateCounts {
   const rows = db
     .prepare(
       `SELECT apply_state AS state, COUNT(*) AS c
-         FROM update_intents
-        GROUP BY apply_state`
+         FROM intents
+        GROUP BY apply_state`,
     )
     .all() as Array<{ state: IntentApplyState; c: number }>;
   const counts: IntentApplyStateCounts = {
     idle: 0,
     in_flight: 0,
-    blocked: 0
+    blocked: 0,
   };
   for (const row of rows) {
     counts[row.state] = row.c;
@@ -759,7 +752,7 @@ function intentApplyAuditFromRow(row: IntentApplyAuditRow): IntentApplyAudit {
       externalId: row.external_target_external_id,
       externalKey: row.external_target_external_key,
       url: row.external_target_url,
-      title: row.external_target_title
+      title: row.external_target_title,
     },
     requestedAt: row.requested_at,
     finishedAt: row.finished_at,
@@ -777,14 +770,14 @@ function intentApplyAuditFromRow(row: IntentApplyAuditRow): IntentApplyAudit {
     externalRefs: {
       commentId: row.external_ref_comment_id,
       commentUrl: row.external_ref_comment_url,
-      stateTransitionId: row.external_ref_state_transition_id
+      stateTransitionId: row.external_ref_state_transition_id,
     },
     reconcile: {
       status: row.reconcile_status,
-      warning: row.reconcile_warning
+      warning: row.reconcile_warning,
     },
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
   };
 }
 

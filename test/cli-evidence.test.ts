@@ -9,7 +9,7 @@ import {
   ingestEvidenceRecord,
   listEvidenceRecords,
 } from "../src/core/evidence/records.js";
-import { listUpdateIntents } from "../src/core/intent/update-intents.js";
+import { listIntents } from "../src/core/intent/intents.js";
 
 type RunResult = {
   code: number;
@@ -743,7 +743,7 @@ describe("momentum evidence ingest", () => {
 
     const db = openDb(dataDir);
     try {
-      const intents = listUpdateIntents(db, {
+      const intents = listIntents(db, {
         status: "pending",
         goalId: "g-evidence-intent",
       });
@@ -966,7 +966,7 @@ describe("momentum evidence ingest", () => {
 
     const db = openDb(dataDir);
     try {
-      const intents = listUpdateIntents(db, {
+      const intents = listIntents(db, {
         status: "pending",
         goalId: "g-source-intent",
       });

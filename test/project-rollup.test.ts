@@ -17,7 +17,7 @@ import {
   startTrackerReconciliationRun,
 } from "../src/core/tracker/reconciliation-runs.js";
 import { upsertTrackerItem } from "../src/core/tracker/items.js";
-import { createUpdateIntent } from "../src/core/intent/update-intents.js";
+import { createIntent } from "../src/core/intent/intents.js";
 
 const tempRoots: string[] = [];
 
@@ -117,8 +117,8 @@ describe("buildProjectRollup", () => {
         DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
       );
       expect(rollup.reconciliationWarnings).toEqual([]);
-      expect(rollup.pendingUpdateIntents).toEqual([]);
-      expect(rollup.counts.pendingUpdateIntents).toBe(0);
+      expect(rollup.pendingIntents).toEqual([]);
+      expect(rollup.counts.pendingIntents).toBe(0);
       expect(rollup.nextAction.kind).toBe("no_action_required");
     } finally {
       db.close();
@@ -1276,16 +1276,16 @@ describe("buildProjectRollup", () => {
     }
   });
 
-  it("reports an empty pendingUpdateIntents block when no intents exist", () => {
+  it("reports an empty pendingIntents block when no intents exist", () => {
     const db = openDb(makeTempDir());
     try {
       seedTrackerItem(db, { externalId: "issue-intent" });
       const rollup = buildProjectRollup(db, { now: 2_000_000 });
-      expect(rollup.pendingUpdateIntents).toEqual([]);
-      expect(rollup.counts.pendingUpdateIntents).toBe(0);
-      expect(rollup.counts.staleUpdateIntents).toBe(0);
-      expect(rollup.totalPendingUpdateIntentCount).toBe(0);
-      expect(rollup.truncatedPendingUpdateIntents).toBe(false);
+      expect(rollup.pendingIntents).toEqual([]);
+      expect(rollup.counts.pendingIntents).toBe(0);
+      expect(rollup.counts.staleIntents).toBe(0);
+      expect(rollup.totalPendingIntentCount).toBe(0);
+      expect(rollup.truncatedPendingIntents).toBe(false);
       expect(rollup.intentStaleThresholdMs).toBe(
         DEFAULT_INTENT_STALE_THRESHOLD_MS,
       );
@@ -1294,7 +1294,7 @@ describe("buildProjectRollup", () => {
     }
   });
 
-  it("surfaces pending update intents with stable summaries and ordering", () => {
+  it("surfaces pending intents with stable summaries and ordering", () => {
     const db = openDb(makeTempDir());
     try {
       seedGoal(db, { id: "goal-intents", state: "queued" });
@@ -1318,7 +1318,7 @@ describe("buildProjectRollup", () => {
         },
         { now: () => 1_991_000 },
       );
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -1331,7 +1331,7 @@ describe("buildProjectRollup", () => {
         },
         { now: () => 1_500 },
       );
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -1344,12 +1344,13 @@ describe("buildProjectRollup", () => {
       );
 
       const rollup = buildProjectRollup(db, { now: 2_000_000 });
-      expect(rollup.counts.pendingUpdateIntents).toBe(2);
-      expect(rollup.counts.staleUpdateIntents).toBe(0);
-      expect(
-        rollup.pendingUpdateIntents.map((intent) => intent.intentType),
-      ).toEqual(["comment_requested", "source_satisfied"]);
-      const first = rollup.pendingUpdateIntents[0];
+      expect(rollup.counts.pendingIntents).toBe(2);
+      expect(rollup.counts.staleIntents).toBe(0);
+      expect(rollup.pendingIntents.map((intent) => intent.intentType)).toEqual([
+        "comment_requested",
+        "source_satisfied",
+      ]);
+      const first = rollup.pendingIntents[0];
       expect(first?.adapterKind).toBe("linear");
       expect(first?.createdAt).toBe(1_400);
       expect(first?.ageMs).toBe(2_000_000 - 1_400);
@@ -1386,7 +1387,7 @@ describe("buildProjectRollup", () => {
         },
         { now: () => reconTime + 1 },
       );
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -1402,9 +1403,9 @@ describe("buildProjectRollup", () => {
       const withDefaultTtl = buildProjectRollup(db, {
         now: 1_000 + DEFAULT_INTENT_STALE_THRESHOLD_MS + 60_000,
       });
-      expect(withDefaultTtl.counts.pendingUpdateIntents).toBe(1);
-      expect(withDefaultTtl.counts.staleUpdateIntents).toBe(1);
-      expect(withDefaultTtl.pendingUpdateIntents[0]?.stale).toBe(true);
+      expect(withDefaultTtl.counts.pendingIntents).toBe(1);
+      expect(withDefaultTtl.counts.staleIntents).toBe(1);
+      expect(withDefaultTtl.pendingIntents[0]?.stale).toBe(true);
       expect(withDefaultTtl.nextAction.detail).toMatchObject({
         total: 1,
         stale: 1,
@@ -1414,14 +1415,14 @@ describe("buildProjectRollup", () => {
         now: 1_000 + DEFAULT_INTENT_STALE_THRESHOLD_MS + 60_000,
         intentStaleThresholdMs: 10 * DEFAULT_INTENT_STALE_THRESHOLD_MS,
       });
-      expect(withGenerousTtl.counts.staleUpdateIntents).toBe(0);
-      expect(withGenerousTtl.pendingUpdateIntents[0]?.stale).toBe(false);
+      expect(withGenerousTtl.counts.staleIntents).toBe(0);
+      expect(withGenerousTtl.pendingIntents[0]?.stale).toBe(false);
 
       const withTightTtl = buildProjectRollup(db, {
         now: 5_000,
         intentStaleThresholdMs: 1_000,
       });
-      expect(withTightTtl.counts.staleUpdateIntents).toBe(1);
+      expect(withTightTtl.counts.staleIntents).toBe(1);
     } finally {
       db.close();
     }
@@ -1447,7 +1448,7 @@ describe("buildProjectRollup", () => {
         projectName: "Beta",
         goalId: "goal-beta",
       });
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -1459,7 +1460,7 @@ describe("buildProjectRollup", () => {
         },
         { now: () => 1_000 },
       );
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -1471,7 +1472,7 @@ describe("buildProjectRollup", () => {
         },
         { now: () => 1_050 },
       );
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -1487,15 +1488,15 @@ describe("buildProjectRollup", () => {
         filters: { projectName: "Alpha" },
         now: 2_000,
       });
+      expect(alphaRollup.pendingIntents.map((intent) => intent.goalId)).toEqual(
+        ["goal-alpha"],
+      );
       expect(
-        alphaRollup.pendingUpdateIntents.map((intent) => intent.goalId),
-      ).toEqual(["goal-alpha"]);
-      expect(
-        alphaRollup.pendingUpdateIntents.map((intent) => intent.trackerItemId),
+        alphaRollup.pendingIntents.map((intent) => intent.trackerItemId),
       ).toEqual([alphaItemId]);
 
       const allRollup = buildProjectRollup(db, { now: 2_000 });
-      expect(allRollup.counts.pendingUpdateIntents).toBe(3);
+      expect(allRollup.counts.pendingIntents).toBe(3);
     } finally {
       db.close();
     }
@@ -1518,7 +1519,7 @@ describe("buildProjectRollup", () => {
         observedAt: 1_000,
         goalId: "goal-legacy",
       });
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -1539,8 +1540,8 @@ describe("buildProjectRollup", () => {
         now: 2_000,
       });
       expect(rollup.counts.trackerItems.total).toBe(1);
-      expect(rollup.counts.pendingUpdateIntents).toBe(1);
-      expect(rollup.pendingUpdateIntents[0]).toMatchObject({
+      expect(rollup.counts.pendingIntents).toBe(1);
+      expect(rollup.pendingIntents[0]).toMatchObject({
         goalId: "goal-legacy",
         trackerItemId: trackerItem.id,
       });
@@ -1566,7 +1567,7 @@ describe("buildProjectRollup", () => {
         observedAt: 1_000,
         goalId: null,
       });
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -1591,7 +1592,7 @@ describe("buildProjectRollup", () => {
         observedAt: 1_100,
         goalId: null,
       });
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -1608,9 +1609,7 @@ describe("buildProjectRollup", () => {
         now: 2_000,
       });
       expect(
-        byProjectName.pendingUpdateIntents.map(
-          (intent) => intent.trackerItemId,
-        ),
+        byProjectName.pendingIntents.map((intent) => intent.trackerItemId),
       ).toEqual([alphaItem.id]);
 
       const byProjectId = buildProjectRollup(db, {
@@ -1618,7 +1617,7 @@ describe("buildProjectRollup", () => {
         now: 2_000,
       });
       expect(
-        byProjectId.pendingUpdateIntents.map((intent) => intent.trackerItemId),
+        byProjectId.pendingIntents.map((intent) => intent.trackerItemId),
       ).toEqual([betaItem.id]);
     } finally {
       db.close();
@@ -1634,7 +1633,7 @@ describe("buildProjectRollup", () => {
         adapterKind: "linear",
         goalId: "goal-multi",
       });
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -1645,7 +1644,7 @@ describe("buildProjectRollup", () => {
         },
         { now: () => 1_000 },
       );
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "github",
@@ -1662,7 +1661,7 @@ describe("buildProjectRollup", () => {
         now: 2_000,
       });
       expect(
-        linearOnly.pendingUpdateIntents.map((intent) => intent.adapterKind),
+        linearOnly.pendingIntents.map((intent) => intent.adapterKind),
       ).toEqual(["linear"]);
     } finally {
       db.close();
@@ -1677,7 +1676,7 @@ describe("buildProjectRollup", () => {
         externalId: "issue-mixed",
         goalId: "goal-mixed",
       });
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -1688,7 +1687,7 @@ describe("buildProjectRollup", () => {
         },
         { now: () => 1_000 },
       );
-      const applied = createUpdateIntent(
+      const applied = createIntent(
         db,
         {
           adapterKind: "linear",
@@ -1700,14 +1699,12 @@ describe("buildProjectRollup", () => {
         { now: () => 1_100 },
       );
       db.prepare(
-        "UPDATE update_intents SET status = 'applied', applied_at = ?, updated_at = ? WHERE id = ?",
+        "UPDATE intents SET status = 'applied', applied_at = ?, updated_at = ? WHERE id = ?",
       ).run(1_500, 1_500, applied.intent.id);
 
       const rollup = buildProjectRollup(db, { now: 2_000 });
-      expect(rollup.counts.pendingUpdateIntents).toBe(1);
-      expect(rollup.pendingUpdateIntents[0]?.intentType).toBe(
-        "source_satisfied",
-      );
+      expect(rollup.counts.pendingIntents).toBe(1);
+      expect(rollup.pendingIntents[0]?.intentType).toBe("source_satisfied");
     } finally {
       db.close();
     }
@@ -1722,7 +1719,7 @@ describe("buildProjectRollup", () => {
         status: "In Progress",
         goalId: "goal-pending-source-satisfied",
       });
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",
@@ -1739,7 +1736,7 @@ describe("buildProjectRollup", () => {
 
       const rollup = buildProjectRollup(db, { now: 2_000 });
       expect(rollup.counts.mismatches.goal_done_tracker_not_done).toBe(1);
-      expect(rollup.counts.pendingUpdateIntents).toBe(1);
+      expect(rollup.counts.pendingIntents).toBe(1);
       expect(rollup.nextAction.kind).toBe("review_pending_intents");
       expect(rollup.nextAction.detail).toMatchObject({
         total: 1,
@@ -1762,7 +1759,7 @@ describe("buildProjectRollup", () => {
         externalId: "issue-recover-intent",
         goalId: "goal-recover-intent",
       });
-      createUpdateIntent(
+      createIntent(
         db,
         {
           adapterKind: "linear",

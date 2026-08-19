@@ -44,7 +44,7 @@ describe("executor-loop-reducer vocabulary", () => {
         "running",
         "capturing_result",
         "finalizing",
-        "mirroring_external_state",
+        "supervising_delegate",
         "waiting_operator",
         "manual_recovery_required",
         "blocked",
@@ -216,12 +216,12 @@ describe("transitionExecutorRound", () => {
     if (succeed.ok) expect(succeed.state).toBe("succeeded");
   });
 
-  it("accepts the external-mirror path pending -> mirroring_external_state -> succeeded", () => {
+  it("accepts the external-mirror path pending -> supervising_delegate -> succeeded", () => {
+    expect(transitionExecutorRound("pending", "supervising_delegate").ok).toBe(
+      true,
+    );
     expect(
-      transitionExecutorRound("pending", "mirroring_external_state").ok,
-    ).toBe(true);
-    expect(
-      transitionExecutorRound("mirroring_external_state", "succeeded").ok,
+      transitionExecutorRound("supervising_delegate", "succeeded").ok,
     ).toBe(true);
   });
 
@@ -236,7 +236,7 @@ describe("transitionExecutorRound", () => {
       "running",
       "capturing_result",
       "finalizing",
-      "mirroring_external_state",
+      "supervising_delegate",
     ] as const) {
       expect(
         transitionExecutorRound("waiting_operator", to).ok,
@@ -251,7 +251,7 @@ describe("transitionExecutorRound", () => {
       "running",
       "capturing_result",
       "finalizing",
-      "mirroring_external_state",
+      "supervising_delegate",
       "waiting_operator",
     ];
     const aborts: ExecutorRoundState[] = [

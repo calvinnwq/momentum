@@ -88,7 +88,7 @@ function seedParents(db: MomentumDb): void {
 }
 
 // Seed parents + a durable running attempt + the single mirror round born in
-// `mirroring_external_state` — the live starting point `runNoMistakesMirrorRound`
+// `supervising_delegate` — the live starting point `runNoMistakesMirrorRound`
 // polls against.
 function openMirrorRoundDb(): MomentumDb {
   const db = openDb(makeTempDir());
@@ -162,7 +162,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     });
 
     expect(result.decision.classification).toBe("continue");
-    expect(result.round.state).toBe("mirroring_external_state");
+    expect(result.round.state).toBe("supervising_delegate");
     expect(result.round.classification).toBe("continue");
     expect(result.round.recoveryCode).toBeNull();
     expect(result.round.humanGate).toBeNull();
@@ -193,7 +193,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     );
   });
 
-  it("reaches succeeded directly from mirroring_external_state on a corroborated completed snapshot", () => {
+  it("reaches succeeded directly from supervising_delegate on a corroborated completed snapshot", () => {
     const db = openMirrorRoundDb();
 
     const result = runNoMistakesMirrorRound({
@@ -516,9 +516,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       }),
     ).toThrow(/non-no-mistakes/i);
     expect(readCalls).toBe(0);
-    expect(loadExecutorRound(db, ROUND_ID)!.state).toBe(
-      "mirroring_external_state",
-    );
+    expect(loadExecutorRound(db, ROUND_ID)!.state).toBe("supervising_delegate");
   });
 });
 
@@ -861,7 +859,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       read: okReader({ stepStatus: "running" }),
       polledAt: 2_000,
     });
-    expect(first.round.state).toBe("mirroring_external_state");
+    expect(first.round.state).toBe("supervising_delegate");
 
     const second = runNoMistakesMirrorRound({
       db,
@@ -869,7 +867,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       read: okReader({ stepStatus: "running" }),
       polledAt: 3_000,
     });
-    expect(second.round.state).toBe("mirroring_external_state");
+    expect(second.round.state).toBe("supervising_delegate");
 
     const third = runNoMistakesMirrorRound({
       db,
@@ -894,7 +892,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       read,
       polledAt: 2_000,
     });
-    expect(first.round.state).toBe("mirroring_external_state");
+    expect(first.round.state).toBe("supervising_delegate");
 
     const stalled = runNoMistakesMirrorRound({
       db,
@@ -1009,7 +1007,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     });
 
     expect(moved.decision.classification).toBe("continue");
-    expect(moved.round.state).toBe("mirroring_external_state");
+    expect(moved.round.state).toBe("supervising_delegate");
     expect(moved.round.recoveryCode).toBeNull();
   });
 
@@ -1038,9 +1036,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       }),
     ).toThrow(/checkpoint/i);
 
-    expect(loadExecutorRound(db, ROUND_ID)!.state).toBe(
-      "mirroring_external_state",
-    );
+    expect(loadExecutorRound(db, ROUND_ID)!.state).toBe("supervising_delegate");
     expect(loadExecutorAttempt(db, ATTEMPT_ID)!.state).toBe("running");
     expect(
       listExecutorCheckpointsForRound(db, ROUND_ID).map((c) => c.stage),
@@ -1065,14 +1061,14 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     expect(gated.round.state).toBe("waiting_operator");
 
     // The operator resolved the decision and the run is moving again: a legal
-    // waiting_operator -> mirroring_external_state resume.
+    // waiting_operator -> supervising_delegate resume.
     const resumed = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
       read: okReader({ stepStatus: "running" }),
       polledAt: 3_000,
     });
-    expect(resumed.round.state).toBe("mirroring_external_state");
+    expect(resumed.round.state).toBe("supervising_delegate");
     expect(resumed.round.finishedAt).toBeNull();
     expect(loadExecutorAttempt(db, ATTEMPT_ID)!.state).toBe("running");
   });
@@ -1255,7 +1251,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       db,
       ROUND_ID,
       {
-        toState: "mirroring_external_state",
+        toState: "supervising_delegate",
         classification: "continue",
         finishedAt: null,
       },
@@ -1314,7 +1310,7 @@ describe("runNoMistakesMirrorStep — materialize attempt + round + first poll",
     return () => (t += 1_000);
   }
 
-  it("materializes a durable running attempt and a mirror round born in mirroring_external_state with deterministic ids", () => {
+  it("materializes a durable running attempt and a mirror round born in supervising_delegate with deterministic ids", () => {
     expect(expectedIdentityIsRequired).toBe(true);
     const { db, result } = runStep(okReader({ stepStatus: "running" }));
 
@@ -1342,7 +1338,7 @@ describe("runNoMistakesMirrorStep — materialize attempt + round + first poll",
   it("leaves both the round mirroring and the attempt running on a still-running first poll", () => {
     const { result } = runStep(okReader({ stepStatus: "running" }));
 
-    expect(result.round.round.state).toBe("mirroring_external_state");
+    expect(result.round.round.state).toBe("supervising_delegate");
     expect(result.attempt.state).toBe("running");
     // Neither is terminal — the daemon scheduler ticks the round again later.
     expect(result.attempt.finishedAt).toBeNull();

@@ -1,8 +1,8 @@
 import { buildIdempotencyMarker } from "../../../adapters/external-update-adapter.js";
 import type { IntentApplyAudit } from "../../intent/apply-audits.js";
-import type { UpdateIntent } from "../../intent/update-intents.js";
+import type { Intent } from "../../intent/intents.js";
 import type { TrackerItem } from "../../tracker/items.js";
-import type { UpdateIntentApplyPolicy } from "../../intent/policy.js";
+import type { IntentApplyPolicy } from "../../intent/policy.js";
 
 export type TrackerRefreshLifecyclePhase = "preflight" | "apply" | "reconcile";
 
@@ -44,10 +44,10 @@ export type TrackerRefreshLifecyclePlan = {
 
 export type TrackerRefreshLifecycleInput = {
   env: Record<string, string | undefined>;
-  intentApplyPolicy: UpdateIntentApplyPolicy;
+  intentApplyPolicy: IntentApplyPolicy;
   issueScopeIdentifier?: string | null;
-  pendingIntents: readonly UpdateIntent[];
-  appliedIntents?: readonly UpdateIntent[];
+  pendingIntents: readonly Intent[];
+  appliedIntents?: readonly Intent[];
   trackerItemsById: ReadonlyMap<string, TrackerItem>;
   latestAuditsByIntentId?: ReadonlyMap<string, IntentApplyAudit>;
   expectedOperatorReason: string | null;
@@ -274,7 +274,7 @@ function planCurrentAppliedEvidence(
 }
 
 function validateIntent(
-  intent: UpdateIntent,
+  intent: Intent,
   source: TrackerItem | null,
   issueScopeIdentifier: string,
 ):
@@ -314,7 +314,7 @@ function validateIntent(
 }
 
 function validateAppliedIntent(
-  intent: UpdateIntent,
+  intent: Intent,
   source: TrackerItem | null,
   issueScopeIdentifier: string,
 ):
@@ -353,7 +353,7 @@ function validateAppliedIntent(
   return { ok: true };
 }
 
-function isStatusUpdateIntent(intent: UpdateIntent): boolean {
+function isStatusUpdateIntent(intent: Intent): boolean {
   return intent.intentType === "status_update";
 }
 
@@ -368,7 +368,7 @@ function sourceMatchesIssueScope(
 }
 
 function intentTargetMatchesSource(
-  intent: UpdateIntent,
+  intent: Intent,
   source: TrackerItem,
 ): boolean {
   return (
@@ -385,13 +385,13 @@ function statusUpdatePayloadValid(payload: Record<string, unknown>): boolean {
 
 function sourceForIntent(
   trackerItemsById: ReadonlyMap<string, TrackerItem>,
-  intent: UpdateIntent,
+  intent: Intent,
 ): TrackerItem | null {
   if (intent.trackerItemId === null) return null;
   return trackerItemsById.get(intent.trackerItemId) ?? null;
 }
 
-function idempotencyMarker(intent: UpdateIntent): string {
+function idempotencyMarker(intent: Intent): string {
   return buildIdempotencyMarker({
     adapterKind: intent.adapterKind,
     intentId: intent.id,
@@ -422,7 +422,7 @@ function hasLinearAuth(env: Record<string, string | undefined>): boolean {
 
 function evidence(
   issueScopeIdentifier: string | null,
-  intent: UpdateIntent | null,
+  intent: Intent | null,
   source: TrackerItem | null,
   marker: string | null,
   audit: IntentApplyAudit | null = null,

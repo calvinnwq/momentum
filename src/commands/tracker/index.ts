@@ -26,7 +26,7 @@ import {
   emitTrackerReconcileResult,
   emitTrackerUnlink,
 } from "../../renderers/tracker.js";
-import { evaluateGoalForTrackerSatisfiedIntents } from "../../core/tracker/update-intent-generator.js";
+import { evaluateGoalForTrackerSatisfiedIntents } from "../../core/tracker/intent-generator.js";
 
 export type LinearReconciliationClientFactoryInput = {
   apiKey: string | null;

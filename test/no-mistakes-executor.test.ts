@@ -127,7 +127,7 @@ describe("decideNoMistakesMirror — still running", () => {
       externalState({ stepStatus: "running" }),
     );
     expect(decision.classification).toBe("continue");
-    expect(decision.roundState).toBe("mirroring_external_state");
+    expect(decision.roundState).toBe("supervising_delegate");
     expect(decision.attemptState).toBe("running");
     expect(decision.humanGate).toBeNull();
     expect(decision.recoveryCode).toBeNull();
@@ -427,10 +427,10 @@ describe("decideNoMistakesMirror — totality", () => {
       if (decision.humanGate !== null) {
         expect(HUMAN_GATE_SET.has(decision.humanGate)).toBe(true);
       }
-      // The mirror round lives in mirroring_external_state; every decided round
+      // The mirror round lives in supervising_delegate; every decided round
       // state must be reachable from there.
       const roundHop = transitionExecutorRound(
-        "mirroring_external_state",
+        "supervising_delegate",
         decision.roundState,
       );
       expect(roundHop.ok).toBe(true);
@@ -648,7 +648,7 @@ describe("planNoMistakesRoundStart", () => {
     });
   }
 
-  it("projects a single mirror round born in mirroring_external_state at index 0", () => {
+  it("projects a single mirror round born in supervising_delegate at index 0", () => {
     const round = planNoMistakesRoundStart({
       attempt: attempt(),
       runtime: {
@@ -668,7 +668,7 @@ describe("planNoMistakesRoundStart", () => {
     expect(round.attemptNumber).toBe(0);
     // The mirror is one long-lived round.
     expect(round.roundIndex).toBe(0);
-    expect(round.state).toBe("mirroring_external_state");
+    expect(round.state).toBe("supervising_delegate");
     expect(round.classification).toBeNull();
     expect(round.startedAt).toBe(2000);
     expect(round.heartbeatAt).toBe(2000);
@@ -746,7 +746,7 @@ describe("planNoMistakesRoundPersistence", () => {
   it("keeps a still-running run mirroring with a continue classification", () => {
     const plan = planFor({ stepStatus: "running" });
     expect(plan.decision.classification).toBe("continue");
-    expect(plan.roundUpdate.toState).toBe("mirroring_external_state");
+    expect(plan.roundUpdate.toState).toBe("supervising_delegate");
     expect(plan.roundUpdate.classification).toBe("continue");
     expect(plan.roundUpdate.recoveryCode).toBeNull();
     expect(plan.roundUpdate.humanGate).toBeNull();

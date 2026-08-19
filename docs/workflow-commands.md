@@ -2442,7 +2442,7 @@ The first successful tick persists a handoff intent and correlated handoff check
 Each later bounded executor tick performs one external-state read, normally in a new round; a round reopened after gate resolution resumes in place.
 Only the attempt's first completed handoff may perform the durable handoff and first read as two ticks under the same workflow claim.
 Later passes and every retry attempt perform one tick, including a retry that launches a fresh external run, and continuation-only daemon cycles wait the configured poll interval before another read.
-If the claim is lost after a durable handoff intent or completed handoff exists but before classification, stale auto-release lease recovery makes an unclassified running, capturing-result, or `mirroring_external_state` round resumable under the same attempt instead of parking it or repeating the handoff.
+If the claim is lost after a durable handoff intent or completed handoff exists but before classification, stale auto-release lease recovery makes an unclassified running, capturing-result, or `supervising_delegate` round resumable under the same attempt instead of parking it or repeating the handoff.
 A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
 The read projects findings and decisions as append-only child evidence, records the raw response digest in `inputDigest`, and records the stable semantic progress digest in `resultDigest`.
 Repeated unchanged running reads refresh liveness but retain the last semantic-progress time; four minutes without semantic progress or terminal evidence parks the attempt for manual recovery.

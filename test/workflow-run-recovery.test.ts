@@ -285,7 +285,7 @@ function seedNoMistakesCheckpoint(
     executor,
     1,
     0,
-    "mirroring_external_state",
+    "supervising_delegate",
     at,
     at,
   );

@@ -37,7 +37,7 @@ import type {
   ExecuteExternalApplySuccess,
 } from "../src/core/intent/apply-execute.js";
 import type { IntentApplyAudit } from "../src/core/intent/apply-audits.js";
-import type { UpdateIntent } from "../src/core/intent/update-intents.js";
+import type { Intent } from "../src/core/intent/intents.js";
 
 /**
  * NGX-496 (RC-3) — the async run-path producer that makes the `external-apply`
@@ -270,7 +270,7 @@ function makeExternal(
   };
 }
 
-function makeIntent(): UpdateIntent {
+function makeIntent(): Intent {
   return {
     id: "intent-001",
     adapterKind: "linear",

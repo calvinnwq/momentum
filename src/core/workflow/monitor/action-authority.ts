@@ -178,7 +178,7 @@ const ACTION_POLICIES: Record<
   linear_refresh: {
     authority: "human_required",
     risk: "high",
-    evidenceRequired: ["tracker state", "local update intent/audit evidence"],
+    evidenceRequired: ["tracker state", "local intent/audit evidence"],
     rollback: "Reconcile the tracker manually or leave the intent pending.",
     rationale:
       "Linear refresh can write external tracker state, so it is never silently auto-run.",

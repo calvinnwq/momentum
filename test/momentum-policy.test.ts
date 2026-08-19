@@ -7,13 +7,13 @@ import {
   BUILTIN_DEFAULT_VERIFICATION_TIMEOUT_SEC,
   DEFAULT_INTENT_APPLY_POLICY,
   MOMENTUM_POLICY_FILENAME,
-  UPDATE_INTENT_APPLY_POLICIES,
+  INTENT_APPLY_POLICIES,
   isExternalApplyAllowedByPolicy,
   loadMomentumPolicy,
   parseMomentumPolicy,
   resolveIntentApplyPolicy,
   resolvePolicyEffectiveValues,
-  resolvePolicyPath
+  resolvePolicyPath,
 } from "../src/core/intent/policy.js";
 
 function makeTempRepo(label = "momentum-policy-"): string {
@@ -26,7 +26,9 @@ describe("resolvePolicyPath", () => {
     const result = resolvePolicyPath(repo);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.path).toBe(path.join(path.resolve(repo), MOMENTUM_POLICY_FILENAME));
+    expect(result.path).toBe(
+      path.join(path.resolve(repo), MOMENTUM_POLICY_FILENAME),
+    );
   });
 
   it("rejects an empty repoPath with policy_path_invalid", () => {
@@ -50,9 +52,7 @@ describe("resolvePolicyPath", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const expectedRepo = path.resolve(sneaky);
-    expect(result.path).toBe(
-      path.join(expectedRepo, MOMENTUM_POLICY_FILENAME)
-    );
+    expect(result.path).toBe(path.join(expectedRepo, MOMENTUM_POLICY_FILENAME));
   });
 });
 
@@ -64,7 +64,7 @@ describe("loadMomentumPolicy", () => {
     if (!result.ok) return;
     expect(result.present).toBe(false);
     expect(result.path).toBe(
-      path.join(path.resolve(repo), MOMENTUM_POLICY_FILENAME)
+      path.join(path.resolve(repo), MOMENTUM_POLICY_FILENAME),
     );
   });
 
@@ -84,7 +84,7 @@ Repo policy notes:
     fs.writeFileSync(
       path.join(repo, MOMENTUM_POLICY_FILENAME),
       policyBody,
-      "utf-8"
+      "utf-8",
     );
     const result = loadMomentumPolicy(repo);
     expect(result.ok).toBe(true);
@@ -94,7 +94,7 @@ Repo policy notes:
     expect(result.policy.config.runner).toBe("trusted-shell");
     expect(result.policy.config.verification).toEqual([
       "pnpm test",
-      "pnpm typecheck"
+      "pnpm typecheck",
     ]);
     expect(result.policy.config.verificationTimeoutSec).toBe(1800);
     expect(result.policy.config.intentApplyPolicy).toBeUndefined();
@@ -107,7 +107,7 @@ Repo policy notes:
     fs.writeFileSync(
       path.join(repo, MOMENTUM_POLICY_FILENAME),
       "Free-form repo policy.\n\nKeep tests deterministic.\n",
-      "utf-8"
+      "utf-8",
     );
     const result = loadMomentumPolicy(repo);
     expect(result.ok).toBe(true);
@@ -194,7 +194,7 @@ verification_timeout_sec: -1
     fs.writeFileSync(
       path.join(parentRepo, MOMENTUM_POLICY_FILENAME),
       `---\nrunner: fake\n---\nparent policy notes\n`,
-      "utf-8"
+      "utf-8",
     );
     const childRepo = path.join(parentRepo, "child");
     fs.mkdirSync(childRepo);
@@ -210,7 +210,7 @@ verification_timeout_sec: -1
 describe("parseMomentumPolicy", () => {
   it("ignores comment lines in frontmatter", () => {
     const result = parseMomentumPolicy(
-      `---\n# this is a comment\nrunner: fake\n---\nbody\n`
+      `---\n# this is a comment\nrunner: fake\n---\nbody\n`,
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -220,13 +220,13 @@ describe("parseMomentumPolicy", () => {
 
   it("supports inline-array verification syntax", () => {
     const result = parseMomentumPolicy(
-      `---\nverification: ["pnpm test", "pnpm typecheck"]\n---\n`
+      `---\nverification: ["pnpm test", "pnpm typecheck"]\n---\n`,
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.policy.config.verification).toEqual([
       "pnpm test",
-      "pnpm typecheck"
+      "pnpm typecheck",
     ]);
   });
 });
@@ -242,8 +242,8 @@ describe("resolvePolicyEffectiveValues", () => {
         runner: undefined,
         verification: ["policy cmd"],
         verificationTimeoutSec: 999,
-        intentApplyPolicy: undefined
-      }
+        intentApplyPolicy: undefined,
+      },
     });
     expect(eff.verification).toEqual(["goal cmd"]);
     expect(eff.verificationTimeoutSec).toBe(60);
@@ -261,8 +261,8 @@ describe("resolvePolicyEffectiveValues", () => {
         runner: undefined,
         verification: ["policy cmd"],
         verificationTimeoutSec: 1200,
-        intentApplyPolicy: undefined
-      }
+        intentApplyPolicy: undefined,
+      },
     });
     expect(eff.verification).toEqual(["policy cmd"]);
     expect(eff.verificationTimeoutSec).toBe(1200);
@@ -276,11 +276,11 @@ describe("resolvePolicyEffectiveValues", () => {
       goalVerification: [],
       goalVerificationTimeoutSecProvided: false,
       goalVerificationTimeoutSec: BUILTIN_DEFAULT_VERIFICATION_TIMEOUT_SEC,
-      policyConfig: undefined
+      policyConfig: undefined,
     });
     expect(eff.verification).toEqual(BUILTIN_DEFAULT_VERIFICATION);
     expect(eff.verificationTimeoutSec).toBe(
-      BUILTIN_DEFAULT_VERIFICATION_TIMEOUT_SEC
+      BUILTIN_DEFAULT_VERIFICATION_TIMEOUT_SEC,
     );
     expect(eff.source.verification).toBe("builtin_default");
     expect(eff.source.verificationTimeoutSec).toBe("builtin_default");
@@ -290,7 +290,7 @@ describe("resolvePolicyEffectiveValues", () => {
 describe("parseMomentumPolicy intent_apply_policy", () => {
   it("parses `intent_apply_policy: create_intents_only`", () => {
     const result = parseMomentumPolicy(
-      `---\nintent_apply_policy: create_intents_only\n---\n`
+      `---\nintent_apply_policy: create_intents_only\n---\n`,
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -299,12 +299,12 @@ describe("parseMomentumPolicy intent_apply_policy", () => {
 
   it("parses `intent_apply_policy: external_apply_allowed`", () => {
     const result = parseMomentumPolicy(
-      `---\nintent_apply_policy: external_apply_allowed\n---\n`
+      `---\nintent_apply_policy: external_apply_allowed\n---\n`,
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.policy.config.intentApplyPolicy).toBe(
-      "external_apply_allowed"
+      "external_apply_allowed",
     );
   });
 
@@ -317,7 +317,7 @@ describe("parseMomentumPolicy intent_apply_policy", () => {
 
   it("rejects an unknown `intent_apply_policy` string with policy_schema_invalid", () => {
     const result = parseMomentumPolicy(
-      `---\nintent_apply_policy: write_everything\n---\n`
+      `---\nintent_apply_policy: write_everything\n---\n`,
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -326,9 +326,7 @@ describe("parseMomentumPolicy intent_apply_policy", () => {
   });
 
   it("rejects a non-string `intent_apply_policy` value with policy_schema_invalid", () => {
-    const result = parseMomentumPolicy(
-      `---\nintent_apply_policy: 42\n---\n`
-    );
+    const result = parseMomentumPolicy(`---\nintent_apply_policy: 42\n---\n`);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe("policy_schema_invalid");
@@ -349,7 +347,7 @@ describe("resolveIntentApplyPolicy", () => {
       runner: undefined,
       verification: undefined,
       verificationTimeoutSec: undefined,
-      intentApplyPolicy: undefined
+      intentApplyPolicy: undefined,
     });
     expect(resolved.value).toBe("create_intents_only");
     expect(resolved.source).toBe("builtin_default");
@@ -360,7 +358,7 @@ describe("resolveIntentApplyPolicy", () => {
       runner: undefined,
       verification: undefined,
       verificationTimeoutSec: undefined,
-      intentApplyPolicy: "external_apply_allowed"
+      intentApplyPolicy: "external_apply_allowed",
     });
     expect(resolved.value).toBe("external_apply_allowed");
     expect(resolved.source).toBe("momentum_policy");
@@ -370,9 +368,9 @@ describe("resolveIntentApplyPolicy", () => {
 describe("intent apply policy vocabulary", () => {
   it("keeps the policy values and local-only default stable", () => {
     expect(DEFAULT_INTENT_APPLY_POLICY).toBe("create_intents_only");
-    expect([...UPDATE_INTENT_APPLY_POLICIES]).toEqual([
+    expect([...INTENT_APPLY_POLICIES]).toEqual([
       "create_intents_only",
-      "external_apply_allowed"
+      "external_apply_allowed",
     ]);
   });
 });
@@ -388,8 +386,8 @@ describe("isExternalApplyAllowedByPolicy", () => {
         runner: undefined,
         verification: undefined,
         verificationTimeoutSec: undefined,
-        intentApplyPolicy: "create_intents_only"
-      })
+        intentApplyPolicy: "create_intents_only",
+      }),
     ).toBe(false);
   });
 
@@ -399,8 +397,8 @@ describe("isExternalApplyAllowedByPolicy", () => {
         runner: undefined,
         verification: undefined,
         verificationTimeoutSec: undefined,
-        intentApplyPolicy: "external_apply_allowed"
-      })
+        intentApplyPolicy: "external_apply_allowed",
+      }),
     ).toBe(true);
   });
 });

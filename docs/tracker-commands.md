@@ -1,6 +1,6 @@
 # Tracker commands
 
-Operator-facing CLI envelopes for the `tracker list`, `tracker get`, `tracker link`, `tracker unlink`, `tracker reconcile linear`, and `project status` commands. These commands inspect, mutate links on, and reconcile durable `tracker_items` rows produced by tracker adapters, plus the deterministic project rollup that composes tracker items, evidence, and pending update intents into operator next-actions.
+Operator-facing CLI envelopes for the `tracker list`, `tracker get`, `tracker link`, `tracker unlink`, `tracker reconcile linear`, and `project status` commands. These commands inspect, mutate links on, and reconcile durable `tracker_items` rows produced by tracker adapters, plus the deterministic project rollup that composes tracker items, evidence, and pending intents into operator next-actions.
 
 See also:
 
@@ -111,14 +111,14 @@ momentum project status [--adapter <kind>] [--project <id-or-name>] [--milestone
 Computes the project rollup from local SQLite state only; it does not call tracker adapters or external APIs.
 `--adapter` filters by adapter kind, while `--project` and `--milestone` match the structured `id` or `name` stored in TrackerItem metadata.
 For compatibility with older TrackerItem rows, a non-empty scalar `project` or `milestone` metadata value also satisfies either the matching id or name filter.
-The same filter scope applies to tracker items, mismatch counts, reconciliation warnings, and pending update intents.
+The same filter scope applies to tracker items, mismatch counts, reconciliation warnings, and pending intents.
 For duplicate `linear` rows that share the same `externalKey` (for example legacy key-only and UUID-backed records),
 project status keeps a single effective row by preferring UUID-backed rows and otherwise choosing the freshest `lastObservedAt` row.
 That duplicate selection runs before `--project` and `--milestone` filters, so those filters evaluate the effective row's metadata.
 Goal links, tracker-item evidence, and tracker-item pending intents from every collapsed duplicate row still contribute to the project rollup counts, mismatches, evidence totals, and pending-intent scope.
 
 `--stale-threshold-hours` controls when a last reconciliation run is reported as stale (default 24 hours).
-`--intent-stale-threshold-days` controls when a pending update intent is flagged as stale (default 30 days).
+`--intent-stale-threshold-days` controls when a pending intent is flagged as stale (default 30 days).
 
 JSON output includes:
 
@@ -127,15 +127,17 @@ JSON output includes:
 - `trackerItems`
 - `mismatches`
 - `reconciliationWarnings`
-- `pendingUpdateIntents` — each entry includes a `stale` flag computed from the intent stale threshold
-- `totalPendingUpdateIntentCount`
-- `truncatedPendingUpdateIntents`
+- `pendingIntents` — each entry includes a `stale` flag computed from the intent stale threshold
+- `totalPendingIntentCount`
+- `truncatedPendingIntents`
 - `externalApply` — always present; project-scoped audit-ledger rollup across pending intents (see below).
 - `nextAction`
 
-Tracker item and mismatch lists are truncated to the first 20 entries with total / truncated flags. Text output prints the active filters, count summaries, reconciliation warnings, top tracker items, mismatches, pending update intents, and next action.
+For compatibility with schemaVersion 2 consumers from before the intent rename, `pendingUpdateIntents`, `totalPendingUpdateIntentCount`, `truncatedPendingUpdateIntents`, and the matching `counts.pendingUpdateIntents` / `counts.staleUpdateIntents` fields remain available as aliases of the intent-named fields.
 
-Pending update intents include `intentId`, `adapterKind`, `intentType`, `targetExternalId`, `reason`, `goalId`, `trackerItemId`, `evidenceRecordId`, `createdAt`, `ageMs`, `stale`, and an `externalApply` block with `{applyState, totalAttempts, counts, latestAttempt}`. `applyState` is `idle`, `in_flight`, or `blocked`; `counts` has `claimed`, `succeeded`, `failed`, `blocked`, `audit_incomplete`; `latestAttempt` is the most recent audit row or `null` (see [Audit row shape](intent-commands.md#audit-row-shape) for the full field list).
+Tracker item and mismatch lists are truncated to the first 20 entries with total / truncated flags. Text output prints the active filters, count summaries, reconciliation warnings, top tracker items, mismatches, pending intents, and next action.
+
+Pending intents include `intentId`, `adapterKind`, `intentType`, `targetExternalId`, `reason`, `goalId`, `trackerItemId`, `evidenceRecordId`, `createdAt`, `ageMs`, `stale`, and an `externalApply` block with `{applyState, totalAttempts, counts, latestAttempt}`. `applyState` is `idle`, `in_flight`, or `blocked`; `counts` has `claimed`, `succeeded`, `failed`, `blocked`, `audit_incomplete`; `latestAttempt` is the most recent audit row or `null` (see [Audit row shape](intent-commands.md#audit-row-shape) for the full field list).
 
 The top-level `externalApply` block provides a project-scoped rollup:
 

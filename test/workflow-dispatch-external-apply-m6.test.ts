@@ -41,7 +41,7 @@ import type {
   LinearExternalUpdateSuccess,
 } from "../src/adapters/linear-external-update-client.js";
 import type { LinearIssueRefreshClient } from "../src/adapters/linear-issue-refresh.js";
-import { getUpdateIntentById } from "../src/core/intent/update-intents.js";
+import { getIntentById } from "../src/core/intent/intents.js";
 
 /**
  * NGX-496 (RC-3) — integration proof binding the daemon-dispatchable
@@ -206,7 +206,7 @@ function seedPendingIntent(db: MomentumDb): { idempotencyMarker: string } {
     "https://linear.app/example/issue/NGX-1001",
   );
   db.prepare(
-    `INSERT INTO update_intents
+    `INSERT INTO intents
        (id, adapter_kind, target_external_id, intent_type, payload_json,
         reason, tracker_item_id, status, idempotency_key, created_at, updated_at,
         applied_at, skipped_at, canceled_at, decision_reason)
@@ -356,7 +356,7 @@ describe("external-apply producer × real M6 — applied through a mock Linear c
     expect(spy.calls[0]?.preview.idempotencyMarker).toBe(idempotencyMarker);
 
     // M6's real two-phase apply transitioned the durable intent to applied.
-    expect(getUpdateIntentById(db, INTENT_ID)?.status).toBe("applied");
+    expect(getIntentById(db, INTENT_ID)?.status).toBe("applied");
 
     // The dispatch scaffold carries the real M6 outcome as terminal evidence.
     const attempt = loadExecutorAttempt(
@@ -454,7 +454,7 @@ describe("external-apply producer × real M6 — fail-closed on a real policy re
     // M6's policy gate refused before the write: the mock Linear client was
     // never called, and the durable intent stays pending (no apply happened).
     expect(spy.calls).toHaveLength(0);
-    expect(getUpdateIntentById(db, INTENT_ID)?.status).toBe("pending");
+    expect(getIntentById(db, INTENT_ID)?.status).toBe("pending");
 
     // The scaffold carries terminal manual-recovery evidence with the precise
     // M6 cause preserved for the operator — not a fabricated clean terminal.

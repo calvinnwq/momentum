@@ -17,23 +17,23 @@ import {
   loadMomentumPolicy,
   resolveIntentApplyPolicy,
   type PolicyEffectiveFieldSource,
-  type UpdateIntentApplyPolicy,
+  type IntentApplyPolicy,
 } from "../../core/intent/policy.js";
 import {
-  UPDATE_INTENT_STATUSES,
-  cancelUpdateIntent,
-  countUpdateIntents,
-  getUpdateIntentById,
-  listUpdateIntents,
-  markUpdateIntentApplied,
-  markUpdateIntentSkipped,
-  type CountUpdateIntentsOptions,
-  type ListUpdateIntentsOptions,
-  type UpdateIntent,
-  type UpdateIntentDecisionInput,
-  type UpdateIntentDecisionResult,
-  type UpdateIntentStatus,
-} from "../../core/intent/update-intents.js";
+  INTENT_STATUSES,
+  cancelIntent,
+  countIntents,
+  getIntentById,
+  listIntents,
+  markIntentApplied,
+  markIntentSkipped,
+  type CountIntentsOptions,
+  type ListIntentsOptions,
+  type Intent,
+  type IntentDecisionInput,
+  type IntentDecisionResult,
+  type IntentStatus,
+} from "../../core/intent/intents.js";
 import {
   summarizeIntentApplyAuditsForIntent,
   type IntentApplyAuditSummary,
@@ -159,13 +159,13 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
     });
   }
 
-  let statusFilter: UpdateIntentStatus | undefined;
+  let statusFilter: IntentStatus | undefined;
   if (parsed.status !== undefined && parsed.status.length > 0) {
-    if (!isUpdateIntentStatus(parsed.status)) {
+    if (!isIntentStatus(parsed.status)) {
       return emitIntentFailure(parsed, io, {
         command: "intent list",
         code: "invalid_status",
-        message: `Invalid --status value: ${parsed.status}. Expected one of: ${UPDATE_INTENT_STATUSES.join(", ")}.`,
+        message: `Invalid --status value: ${parsed.status}. Expected one of: ${INTENT_STATUSES.join(", ")}.`,
         dataDir,
         status: parsed.status,
       });
@@ -173,7 +173,7 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
     statusFilter = parsed.status;
   }
 
-  const filters: ListUpdateIntentsOptions = {};
+  const filters: ListIntentsOptions = {};
   if (statusFilter !== undefined) filters.status = statusFilter;
   if (parsed.adapter !== undefined && parsed.adapter.length > 0) {
     filters.adapterKind = parsed.adapter;
@@ -195,7 +195,7 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
   }
 
   const db = openDb(dataDir);
-  let intents: UpdateIntent[];
+  let intents: Intent[];
   let totalAvailable: number;
   let auditSummaries: Map<string, IntentApplyAuditSummary | null>;
   try {
@@ -244,8 +244,8 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
         });
       }
     }
-    intents = listUpdateIntents(db, filters);
-    const countOptions: CountUpdateIntentsOptions = {};
+    intents = listIntents(db, filters);
+    const countOptions: CountIntentsOptions = {};
     if (filters.status !== undefined) countOptions.status = filters.status;
     if (filters.adapterKind !== undefined)
       countOptions.adapterKind = filters.adapterKind;
@@ -258,7 +258,7 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
       countOptions.evidenceRecordId = filters.evidenceRecordId;
     totalAvailable =
       filters.limit !== undefined
-        ? countUpdateIntents(db, countOptions)
+        ? countIntents(db, countOptions)
         : intents.length;
     auditSummaries = new Map();
     for (const intent of intents) {
@@ -319,10 +319,10 @@ function intentGet(parsed: ParsedFlags, io: CliIo): number {
   }
 
   const db = openDb(dataDir);
-  let record: UpdateIntent | null;
+  let record: Intent | null;
   let auditSummary: IntentApplyAuditSummary | null;
   try {
-    record = getUpdateIntentById(db, intentId);
+    record = getIntentById(db, intentId);
     auditSummary = record
       ? summarizeIntentApplyAuditsForIntent(db, intentId)
       : null;
@@ -334,7 +334,7 @@ function intentGet(parsed: ParsedFlags, io: CliIo): number {
     return emitIntentFailure(parsed, io, {
       command: "intent get",
       code: "intent_not_found",
-      message: `Update intent not found: ${intentId}`,
+      message: `Intent not found: ${intentId}`,
       dataDir,
       intentId,
     });
@@ -426,18 +426,18 @@ function intentDecision(
   }
 
   const db = openDb(dataDir);
-  let result: UpdateIntentDecisionResult;
+  let result: IntentDecisionResult;
   try {
-    const input: UpdateIntentDecisionInput = {
+    const input: IntentDecisionInput = {
       intentId,
       decisionReason: reason,
     };
     if (action === "apply") {
-      result = markUpdateIntentApplied(db, input);
+      result = markIntentApplied(db, input);
     } else if (action === "skip") {
-      result = markUpdateIntentSkipped(db, input);
+      result = markIntentSkipped(db, input);
     } else {
-      result = cancelUpdateIntent(db, input);
+      result = cancelIntent(db, input);
     }
   } finally {
     db.close();
@@ -562,7 +562,7 @@ async function intentExternalApply(args: {
     if (
       result.code === "intent_already_terminal" &&
       result.intent &&
-      isUpdateIntentStatus(result.intent.status)
+      isIntentStatus(result.intent.status)
     ) {
       failure.currentStatus = result.intent.status;
     }
@@ -663,7 +663,7 @@ function buildIntentApplyPolicySummary(
   repoOverride: string | undefined,
   externalApplyRequested: boolean,
 ): IntentApplyPolicyResolution {
-  let effective: UpdateIntentApplyPolicy = DEFAULT_INTENT_APPLY_POLICY;
+  let effective: IntentApplyPolicy = DEFAULT_INTENT_APPLY_POLICY;
   let source: PolicyEffectiveFieldSource = "builtin_default";
   if (typeof repoOverride === "string" && repoOverride.trim().length > 0) {
     const load = loadMomentumPolicy(repoOverride);
@@ -691,6 +691,6 @@ function buildIntentApplyPolicySummary(
   };
 }
 
-function isUpdateIntentStatus(value: string): value is UpdateIntentStatus {
-  return (UPDATE_INTENT_STATUSES as readonly string[]).includes(value);
+function isIntentStatus(value: string): value is IntentStatus {
+  return (INTENT_STATUSES as readonly string[]).includes(value);
 }

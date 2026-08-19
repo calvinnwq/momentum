@@ -29,16 +29,16 @@
  * mirror does **not** loop internally. No-mistakes owns and runs its own pipeline
  * at its own cadence, so Momentum never busy-loops on external state: a daemon
  * scheduler *ticks* {@link runNoMistakesMirrorRound} once per poll against the same
- * long-lived round, which lives in `mirroring_external_state` between ticks. Each
+ * long-lived round, which lives in `supervising_delegate` between ticks. Each
  * tick reconciles the durable round with the latest external evidence:
  *
- *   - `continue` is a legal same-state `mirroring_external_state` poll that
+ *   - `continue` is a legal same-state `supervising_delegate` poll that
  *     keeps the round live for the next tick (no `finished_at`). When the same
  *     semantic progress digest repeats, the prior heartbeat is preserved so the
  *     mirror can detect a stalled external run instead of treating every poll as
  *     fresh progress.
  *   - a gate moves it to a durable, non-terminal `waiting_operator` Momentum never
- *     auto-resolves; a later tick can resume it back to `mirroring_external_state`.
+ *     auto-resolves; a later tick can resume it back to `supervising_delegate`.
  *   - a settle moves it straight to its terminal (`succeeded` directly from the
  *     mirror phase — no intervening capture, unlike the result-bearing families —
  *     or `failed` / `blocked` / `manual_recovery_required`).
@@ -52,7 +52,7 @@
  * and the single round-start row, then runs the first poll and settles the
  * attempt into that poll's decision. Subsequent polls are
  * {@link runNoMistakesMirrorRound} on the existing round; both the attempt and
- * the round can stay non-terminal (`running` / `mirroring_external_state` /
+ * the round can stay non-terminal (`running` / `supervising_delegate` /
  * `waiting_operator`) across many ticks.
  *
  * External no-mistakes state is evidence to classify, not trusted authority:
@@ -725,7 +725,7 @@ export type RunNoMistakesMirrorRoundResult = {
  * @throws {NoMistakesMirrorRoundExecutorError} if `roundId` belongs to a
  * non-no-mistakes executor.
  * @throws {NoMistakesMirrorRoundTerminalError} if the round is already terminal — a poll
- * must only tick a live (`mirroring_external_state` / `waiting_operator`) round.
+ * must only tick a live (`supervising_delegate` / `waiting_operator`) round.
  * @throws {ExecutorRoundTransitionError} if persistence rejects the projected
  * round transition.
  */
@@ -821,7 +821,7 @@ export function runNoMistakesMirrorRound(
         roundId,
         {
           ...roundUpdate,
-          toState: "mirroring_external_state",
+          toState: "supervising_delegate",
           classification: "continue",
           finishedAt: null,
         },
@@ -913,7 +913,7 @@ export type RunNoMistakesMirrorStepResult = {
  * mirror round). It {@link planNoMistakesAttempt | materializes} the durable
  * `executor_attempts` row with a deterministic, reattachable id, inserts the
  * single {@link planNoMistakesRoundStart | round-start} row (born directly in
- * `mirroring_external_state`, with no agent/model — no-mistakes owns its own
+ * `supervising_delegate`, with no agent/model — no-mistakes owns its own
  * pipeline), then runs the first poll through {@link runNoMistakesMirrorRound} and
  * settles the attempt into that poll's decision.
  *
@@ -955,7 +955,7 @@ export function runNoMistakesMirrorStep(
       });
       insertExecutorAttempt(db, attempt, { now: attemptStartedAt });
 
-      // 2. Insert the single mirror round-start row (born in mirroring_external_state),
+      // 2. Insert the single mirror round-start row (born in supervising_delegate),
       //    inheriting the attempt's identity + executor and freezing the daemon's
       //    runtime inputs in.
       const roundStartedAt = now();

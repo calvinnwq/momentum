@@ -58,6 +58,13 @@ export function projectStatusToJsonShape(
   filters: ProjectRollupFilters,
   rollup: ProjectRollup,
 ): Record<string, unknown> {
+  const pendingIntents = rollup.pendingIntents.map((intent) => ({
+    ...intent,
+    externalApply: projectRollupExternalApplyIntentToJsonShape(
+      intent.externalApply,
+    ),
+  }));
+
   return {
     ok: true,
     command: "project status",
@@ -73,7 +80,11 @@ export function projectStatusToJsonShape(
     staleThresholdMs: rollup.reconciliationStaleThresholdMs,
     intentStaleThresholdMs: rollup.intentStaleThresholdMs,
     generatedAt: rollup.generatedAt,
-    counts: rollup.counts,
+    counts: {
+      ...rollup.counts,
+      pendingUpdateIntents: rollup.counts.pendingIntents,
+      staleUpdateIntents: rollup.counts.staleIntents,
+    },
     trackerItems: rollup.trackerItems,
     totalTrackerItemCount: rollup.totalTrackerItemCount,
     truncatedTrackerItems: rollup.truncatedTrackerItems,
@@ -81,14 +92,12 @@ export function projectStatusToJsonShape(
     totalMismatchCount: rollup.totalMismatchCount,
     truncatedMismatches: rollup.truncatedMismatches,
     reconciliationWarnings: rollup.reconciliationWarnings,
-    pendingUpdateIntents: rollup.pendingUpdateIntents.map((intent) => ({
-      ...intent,
-      externalApply: projectRollupExternalApplyIntentToJsonShape(
-        intent.externalApply,
-      ),
-    })),
-    totalPendingUpdateIntentCount: rollup.totalPendingUpdateIntentCount,
-    truncatedPendingUpdateIntents: rollup.truncatedPendingUpdateIntents,
+    pendingIntents,
+    pendingUpdateIntents: pendingIntents,
+    totalPendingIntentCount: rollup.totalPendingIntentCount,
+    totalPendingUpdateIntentCount: rollup.totalPendingIntentCount,
+    truncatedPendingIntents: rollup.truncatedPendingIntents,
+    truncatedPendingUpdateIntents: rollup.truncatedPendingIntents,
     externalApply: projectRollupExternalApplyToJsonShape(rollup.externalApply),
     nextAction: rollup.nextAction,
   };
@@ -177,8 +186,8 @@ export function renderProjectStatusText(
       `manual_recovery_required=${rollup.counts.mismatches.manual_recovery_required}`,
   );
   lines.push(
-    `Pending external update intents: ${rollup.counts.pendingUpdateIntents} ` +
-      `(stale=${rollup.counts.staleUpdateIntents}, ` +
+    `Pending intents: ${rollup.counts.pendingIntents} ` +
+      `(stale=${rollup.counts.staleIntents}, ` +
       `stale_threshold_ms=${rollup.intentStaleThresholdMs})`,
   );
   const externalApplyStateCounts =
@@ -258,11 +267,11 @@ export function renderProjectStatusText(
     }
   }
   lines.push("");
-  lines.push("Pending update intents:");
-  if (rollup.pendingUpdateIntents.length === 0) {
+  lines.push("Pending intents:");
+  if (rollup.pendingIntents.length === 0) {
     lines.push("  (none)");
   } else {
-    for (const intent of rollup.pendingUpdateIntents) {
+    for (const intent of rollup.pendingIntents) {
       const staleText = intent.stale ? " STALE" : "";
       const targetText = intent.targetExternalId
         ? ` target=${intent.targetExternalId}`
@@ -281,9 +290,9 @@ export function renderProjectStatusText(
           ` attempts=${intent.externalApply.totalAttempts}${latestText}`,
       );
     }
-    if (rollup.truncatedPendingUpdateIntents) {
+    if (rollup.truncatedPendingIntents) {
       lines.push(
-        `  ... and ${rollup.totalPendingUpdateIntentCount - rollup.pendingUpdateIntents.length} more`,
+        `  ... and ${rollup.totalPendingIntentCount - rollup.pendingIntents.length} more`,
       );
     }
   }
