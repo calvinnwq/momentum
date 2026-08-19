@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.24.0](https://github.com/calvinnwq/momentum/compare/v0.23.0...v0.24.0) (2026-08-19)
+
+
+### Features
+
+* **daemon:** replace live-wrapper profiles with host bindings ([4d2eb5f](https://github.com/calvinnwq/momentum/commit/4d2eb5f70dbeef11e7819f5cf953bfd4229a3ab7))
+* **intent:** complete intent and supervising_delegate migration ([#249](https://github.com/calvinnwq/momentum/issues/249)) ([7c26aa7](https://github.com/calvinnwq/momentum/commit/7c26aa767c64c36ed89a106bc369f5addc87715a))
+* **tracker:** rename source domain and CLI surface ([#248](https://github.com/calvinnwq/momentum/issues/248)) ([dfe02cd](https://github.com/calvinnwq/momentum/commit/dfe02cde42546da833d18d2786dff2e8d1acf6f5))
+* **workflow:** cut import and implementation authority ([ab608f6](https://github.com/calvinnwq/momentum/commit/ab608f60ca1530dbcd64cbe380a436755cd0a039))
+* **workflow:** deliver durable native coding workflow ([ec8aa4b](https://github.com/calvinnwq/momentum/commit/ec8aa4b647f67aa5b1a1727792a4babc4d160a02))
+* **workflow:** freeze native agent config in step state ([cb81125](https://github.com/calvinnwq/momentum/commit/cb8112503a7c0ecdca454181c348927b3027b2ed))
+* **workflow:** make canonical import state authoritative ([#244](https://github.com/calvinnwq/momentum/issues/244)) ([d16f081](https://github.com/calvinnwq/momentum/commit/d16f081d83942878402f157b1768be344d453d20))
+* **workflow:** remove route profile surfaces ([812bd5f](https://github.com/calvinnwq/momentum/commit/812bd5f46ed0e651532bc766879927377fec54f4))
+* **workflow:** select host bindings by environment ([a4abe4d](https://github.com/calvinnwq/momentum/commit/a4abe4d31b606ee55c67e107b3a28daf5b1b9587))
+
+
+### Bug Fixes
+
+* **daemon:** preflight workflow bindings before startup recovery ([9003bad](https://github.com/calvinnwq/momentum/commit/9003baddc95acd6296158734c965db0f646d31ee))
+* **db:** preflight route_json rebuild column contract before migration writes ([#246](https://github.com/calvinnwq/momentum/issues/246)) ([da574c3](https://github.com/calvinnwq/momentum/commit/da574c3ae9d32525c9428a8596b4e0f5aef5d002))
+* **executors:** adopt agent result terminology ([#247](https://github.com/calvinnwq/momentum/issues/247)) ([1dbddb3](https://github.com/calvinnwq/momentum/commit/1dbddb34744f9ab59902997f4c4ebb55eb899c19))
+* **workflow:** address PR review feedback ([#245](https://github.com/calvinnwq/momentum/issues/245)) ([9a644c4](https://github.com/calvinnwq/momentum/commit/9a644c4e049a1da74230c5e65bb6e9e4b82bf6e7))
+* **workflow:** address PR review feedback ([#245](https://github.com/calvinnwq/momentum/issues/245)) ([cfb2a6f](https://github.com/calvinnwq/momentum/commit/cfb2a6f5570d9fc01c1bfbb397269647ecbd2b20))
+* **workflow:** enforce canonical subworkflow state and lineage ([#243](https://github.com/calvinnwq/momentum/issues/243)) ([834c679](https://github.com/calvinnwq/momentum/commit/834c679e61d0075eef2412390719c6ad1532d42d))
+* **workflow:** harden daemon host-binding reattachment ([dcfe666](https://github.com/calvinnwq/momentum/commit/dcfe6660fe020d58abc215d98f2c6db1fe757be6))
+* **workflow:** keep generic agent config out of route projection ([ef819d7](https://github.com/calvinnwq/momentum/commit/ef819d78ba89253cf7c1f35fabb1bd5c28b0ad54))
+* **workflow:** persist imported source format and expose import-marker timestamps ([3d91728](https://github.com/calvinnwq/momentum/commit/3d917289c131d47bb54d883db33dda0908ef8163))
+* **workflow:** preserve frozen agent selection in native rounds ([032496c](https://github.com/calvinnwq/momentum/commit/032496c65f848dd6dd6ce57463c76a17f1fdbefe))
+* **workflow:** preserve generic executor fallback selection ([ab22e8f](https://github.com/calvinnwq/momentum/commit/ab22e8f9ca66304aec35646e8532d3262dd4f6d1))
+* **workflow:** preserve legacy route selection boundary ([d74f34d](https://github.com/calvinnwq/momentum/commit/d74f34d675286cf6d5761f37108fc973b4856912))
+* **workflow:** remove retired route-profile surfaces ([faafb48](https://github.com/calvinnwq/momentum/commit/faafb48618903735bf8bf553d62fbd8443d51db9))
+* **workflow:** restore canonical route validation ([138eadc](https://github.com/calvinnwq/momentum/commit/138eadc7b43213dd5acdf4d96367e0507bbe0566))
+
 ## [0.23.0](https://github.com/calvinnwq/momentum/compare/v0.22.0...v0.23.0) (2026-07-28)
 
 
