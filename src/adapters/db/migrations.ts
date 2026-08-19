@@ -2571,6 +2571,18 @@ const INTENT_REQUIRED_COLUMNS: readonly string[] = [
   "canceled_at",
 ];
 
+function columnHasNonNullRows(
+  db: MomentumDb,
+  table: string,
+  column: string,
+): boolean {
+  return (
+    db
+      .prepare(`SELECT 1 FROM ${table} WHERE ${column} IS NOT NULL LIMIT 1`)
+      .get() !== undefined
+  );
+}
+
 function tableForeignKeyForColumn(
   db: MomentumDb,
   table: string,
@@ -2630,6 +2642,10 @@ const INTENT_INDEX_CONTRACTS: ReadonlyArray<{
   unique: boolean;
   partial: boolean;
   columns: readonly string[] | "tracker-link";
+  // The exact WHERE predicate a partial index must carry, compared against
+  // the normalized sqlite_master definition. The tracker-link predicate is
+  // derived from the current column spelling instead.
+  predicate?: string;
 }> = [
   {
     name: "idx_intents_idempotency_key",
@@ -2651,6 +2667,7 @@ const INTENT_INDEX_CONTRACTS: ReadonlyArray<{
     unique: false,
     partial: true,
     columns: ["goal_id"],
+    predicate: "goal_id IS NOT NULL",
   },
   {
     name: "idx_intents_tracker_item",
@@ -2665,6 +2682,7 @@ const INTENT_INDEX_CONTRACTS: ReadonlyArray<{
     unique: false,
     partial: true,
     columns: ["evidence_record_id"],
+    predicate: "evidence_record_id IS NOT NULL",
   },
   {
     name: "idx_intents_adapter_target",
@@ -2714,8 +2732,21 @@ const INTENT_INDEX_CONTRACTS: ReadonlyArray<{
     unique: true,
     partial: true,
     columns: ["intent_id"],
+    predicate: "lifecycle_state = 'claimed'",
   },
 ];
+
+/**
+ * Normalize an index WHERE predicate for exact comparison: identifier quotes
+ * stripped (RENAME COLUMN may quote the rewritten identifier) and whitespace
+ * collapsed. Deliberately case-sensitive: lowercasing would accept a
+ * case-variant string literal (e.g. 'CLAIMED') that silently vacates the
+ * at-most-one-claimed-audit invariant, and every canonical predicate matches
+ * its DDL text exactly.
+ */
+function normalizeIndexPredicate(predicate: string): string {
+  return predicate.replace(/["`]/g, "").replace(/\s+/g, " ").trim();
+}
 
 /**
  * The refusal reason for a pre-existing canonical-named intent-graph index
@@ -2732,18 +2763,25 @@ function intentIndexContractViolation(
     const owner = contract.onAudits ? "intent_apply_audits" : intentTableName;
     const master = db
       .prepare(
-        "SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = ?",
+        "SELECT tbl_name, sql FROM sqlite_master WHERE type = 'index' AND name = ?",
       )
-      .get(contract.name) as { tbl_name: string } | undefined;
+      .get(contract.name) as
+      { tbl_name: string; sql: string | null } | undefined;
     if (master === undefined) continue;
     const expectedColumns =
       contract.columns === "tracker-link"
         ? [linkColumn ?? "tracker_item_id"]
         : contract.columns;
+    const expectedPredicate = !contract.partial
+      ? undefined
+      : contract.columns === "tracker-link"
+        ? `${expectedColumns[0]} IS NOT NULL`
+        : contract.predicate;
     const expected =
       `expected ${contract.unique ? "unique " : ""}` +
       `${contract.partial ? "partial " : ""}index on ` +
-      `${owner ?? "the intent table"}(${expectedColumns.join(", ")})`;
+      `${owner ?? "the intent table"}(${expectedColumns.join(", ")})` +
+      (expectedPredicate === undefined ? "" : ` WHERE ${expectedPredicate}`);
     if (owner === undefined || master.tbl_name !== owner) {
       return `index ${contract.name} is defined on ${master.tbl_name} (${expected})`;
     }
@@ -2763,11 +2801,17 @@ function intentIndexContractViolation(
     )
       .sort((a, b) => a.seqno - b.seqno)
       .map((row) => row.name);
+    const whereMatch =
+      master.sql === null ? null : /\bWHERE\b([\s\S]*)$/i.exec(master.sql);
+    const actualPredicate =
+      whereMatch === null ? undefined : normalizeIndexPredicate(whereMatch[1]!);
     if (
       Boolean(listRow.unique) !== contract.unique ||
       Boolean(listRow.partial) !== contract.partial ||
       actualColumns.length !== expectedColumns.length ||
-      expectedColumns.some((column, i) => actualColumns[i] !== column)
+      expectedColumns.some((column, i) => actualColumns[i] !== column) ||
+      (expectedPredicate !== undefined &&
+        actualPredicate !== normalizeIndexPredicate(expectedPredicate))
     ) {
       return `index ${contract.name} does not match its canonical definition (${expected})`;
     }
@@ -2784,6 +2828,8 @@ function intentIndexContractViolation(
  * a present intent-table foreign key that does not match its exact
  * from/table/to contract (tracker link to `tracker_items`/`source_items`,
  * goal and evidence links; the FK-less pre-M6 shape stays supported), a
+ * declared foreign key whose parent table is absent while existing rows
+ * reference it (recreating an empty parent would orphan them), a
  * missing or mismatched `intent_apply_audits.intent_id` foreign key, an
  * audit ledger present without any intent parent table, or a
  * canonical-named index whose definition does not match
@@ -2836,17 +2882,30 @@ function intentSchemaUnsupportedReason(db: MomentumDb): string | undefined {
       if (linkFk.table === "source_items" && !tableExists(db, "source_items")) {
         return `${presentTable}.${linkColumn} references missing table source_items`;
       }
+      // Recreating an absent parent as an empty table would orphan every
+      // existing reference, so a declared parent may only be missing while
+      // nothing references it yet.
+      if (
+        !tableExists(db, linkFk.table) &&
+        columnHasNonNullRows(db, presentTable, linkColumn)
+      ) {
+        return `${presentTable}.${linkColumn} references missing table ${linkFk.table} while existing rows reference it`;
+      }
     }
     for (const [column, parent] of [
       ["goal_id", "goals"],
       ["evidence_record_id", "evidence_records"],
     ] as const) {
       const fk = tableForeignKeyForColumn(db, presentTable, column);
-      if (
-        fk !== undefined &&
-        (fk.table !== parent || (fk.to !== null && fk.to !== "id"))
-      ) {
+      if (fk === undefined) continue;
+      if (fk.table !== parent || (fk.to !== null && fk.to !== "id")) {
         return `${presentTable}.${column} references ${fk.table}(${fk.to ?? "id"}) instead of ${parent}(id)`;
+      }
+      if (
+        !tableExists(db, parent) &&
+        columnHasNonNullRows(db, presentTable, column)
+      ) {
+        return `${presentTable}.${column} references missing table ${parent} while existing rows reference it`;
       }
     }
   }
@@ -2911,7 +2970,7 @@ export function intentSchemaMigrationNeeded(db: MomentumDb): boolean {
  * the open for operator inspection. Hoisted into the fail-closed block at
  * the top of `applyQueueMigrations` so the refusal lands before any earlier
  * migration commits and the refused database stays byte-identical to its
- * pre-open state; `migrateIntentSchemaRename` re-checks as defense.
+ * pre-open state; `applyIntentSchemaRenameSteps` re-checks as defense.
  */
 function assertIntentSchemaSupported(db: MomentumDb): void {
   const reason = intentSchemaUnsupportedReason(db);
@@ -2927,10 +2986,14 @@ function assertIntentSchemaSupported(db: MomentumDb): void {
  * Rename the durable intent table from `update_intents` to `intents`, in
  * place, losslessly, and exactly once.
  *
- * Runs after the tracker rename (which renames `update_intents.source_item_id`
- * to `tracker_item_id` while the legacy table name is still in place) and
- * before the additive DDL pass so a legacy database is renamed rather than
- * gaining an empty `intents` table beside a populated `update_intents` one.
+ * Runs inside the additive DDL transaction (the caller owns it), after the
+ * tracker rename (which renames `update_intents.source_item_id` to
+ * `tracker_item_id` while the legacy table name is still in place) and
+ * before the additive DDL statements, so a legacy database is renamed
+ * rather than gaining an empty `intents` table beside a populated
+ * `update_intents` one - and so a failure in any later additive statement
+ * (for example an unmigratable parent-table schema) rolls the rename back
+ * instead of stranding a committed rename beside the failure.
  * `ALTER TABLE ... RENAME TO` rewrites the referencing foreign-key clause in
  * `intent_apply_audits` (SQLite non-legacy alter semantics), so row bytes,
  * ids, idempotency keys, decisions, errors, timestamps, and links are
@@ -2943,37 +3006,30 @@ function assertIntentSchemaSupported(db: MomentumDb): void {
  * transaction. Unsupported partial states are refused up front by
  * `assertIntentSchemaSupported` before anything mutates.
  */
-function migrateIntentSchemaRename(db: MomentumDb): void {
+function applyIntentSchemaRenameSteps(db: MomentumDb): void {
   if (!intentSchemaMigrationNeeded(db)) return;
 
   assertIntentSchemaSupported(db);
 
   const [legacyTable, intentTable] = INTENT_TABLE_RENAME;
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    if (tableExists(db, legacyTable)) {
-      db.exec(`ALTER TABLE ${legacyTable} RENAME TO ${intentTable}`);
-    }
-    if (columnExists(db, intentTable, "source_item_id")) {
-      db.exec(
-        `ALTER TABLE ${intentTable} RENAME COLUMN source_item_id TO tracker_item_id`,
-      );
-    }
-    for (const indexName of INTENT_INDEX_RENAME_DROPS) {
-      db.exec(`DROP INDEX IF EXISTS ${indexName}`);
-    }
-    db.exec(INTENTS_DDL);
+  if (tableExists(db, legacyTable)) {
+    db.exec(`ALTER TABLE ${legacyTable} RENAME TO ${intentTable}`);
+  }
+  if (columnExists(db, intentTable, "source_item_id")) {
+    db.exec(
+      `ALTER TABLE ${intentTable} RENAME COLUMN source_item_id TO tracker_item_id`,
+    );
+  }
+  for (const indexName of INTENT_INDEX_RENAME_DROPS) {
+    db.exec(`DROP INDEX IF EXISTS ${indexName}`);
+  }
+  db.exec(INTENTS_DDL);
 
-    const violations = db.prepare("PRAGMA foreign_key_check").all();
-    if (violations.length > 0) {
-      throw new Error(
-        "intent schema migration produced foreign-key violations; rolling back",
-      );
-    }
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
+  const violations = db.prepare("PRAGMA foreign_key_check").all();
+  if (violations.length > 0) {
+    throw new Error(
+      "intent schema migration produced foreign-key violations; rolling back",
+    );
   }
 }
 
@@ -3047,13 +3103,17 @@ export function applyQueueMigrations(
   // additive pass so legacy source-named tracker tables are renamed instead
   // of coexisting with freshly created tracker-named tables.
   migrateTrackerSchemaRename(db);
-  // Runs after the tracker rename (which retargets the legacy
-  // `update_intents.source_item_id` column while the old table name is still
-  // in place) and before the additive pass so a legacy database is renamed
-  // instead of coexisting with a freshly created `intents` table.
-  migrateIntentSchemaRename(db);
-  db.exec("BEGIN");
+  db.exec("BEGIN IMMEDIATE");
   try {
+    // The NAM-06 intent rename runs first inside the additive transaction:
+    // it must still follow the tracker rename (which retargets the legacy
+    // `update_intents.source_item_id` column while the old table name is in
+    // place) and precede the additive DDL (so a legacy database is renamed
+    // rather than gaining an empty `intents` table beside a populated
+    // `update_intents` one), and sharing the transaction means a failure in
+    // any later additive statement rolls the rename back instead of
+    // stranding a committed rename beside the failure.
+    applyIntentSchemaRenameSteps(db);
     if (tableExists(db, "jobs")) {
       for (const column of JOB_QUEUE_COLUMNS) {
         ensureColumn(db, "jobs", column);

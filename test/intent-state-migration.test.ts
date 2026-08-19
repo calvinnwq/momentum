@@ -746,6 +746,139 @@ describe("NAM-06 intent graph preflight", () => {
     }
   });
 
+  it("refuses a same-name partial index with the wrong predicate, then retries after repair", () => {
+    const dataDir = makeTempDir();
+    openDb(dataDir).close();
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      // A wrong predicate on the same unique partial index vacates the
+      // at-most-one-claimed-audit invariant while owner, uniqueness, and
+      // columns all still match.
+      raw.exec("DROP INDEX idx_intent_apply_audits_active");
+      raw.exec(
+        `CREATE UNIQUE INDEX idx_intent_apply_audits_active
+           ON intent_apply_audits(intent_id) WHERE lifecycle_state = 'succeeded'`,
+      );
+    } finally {
+      raw.close();
+    }
+
+    expect(() => openDb(dataDir)).toThrow(
+      /intent schema migration refused: index idx_intent_apply_audits_active does not match its canonical definition/,
+    );
+    expect(() => openExistingDbMigratedReadOnly(dataDir)).toThrow(
+      /idx_intent_apply_audits_active does not match its canonical definition/,
+    );
+
+    const repair = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      repair.exec("DROP INDEX idx_intent_apply_audits_active");
+      repair.exec(
+        `CREATE UNIQUE INDEX idx_intent_apply_audits_active
+           ON intent_apply_audits(intent_id) WHERE lifecycle_state = 'claimed'`,
+      );
+    } finally {
+      repair.close();
+    }
+    openDb(dataDir).close();
+  });
+
+  it("refuses a declared intent link whose parent table is missing while rows reference it", () => {
+    const dataDir = makeTempDir();
+    openDb(dataDir).close();
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      raw.exec("PRAGMA foreign_keys = OFF");
+      raw
+        .prepare(
+          `INSERT INTO intents
+           (id, adapter_kind, intent_type, payload_json, reason, status,
+            idempotency_key, goal_id, created_at, updated_at)
+         VALUES ('intent_orphan_goal', 'linear', 'status_update', '{}', 'r',
+                 'pending', 'orphan-goal-key', 'goal-existing', 1, 1)`,
+        )
+        .run();
+      raw.exec("DROP TABLE goals");
+    } finally {
+      raw.close();
+    }
+
+    expect(() => openDb(dataDir)).toThrow(
+      /intent schema migration refused: intents\.goal_id references missing table goals while existing rows reference it/,
+    );
+    expect(() => openExistingDbMigratedReadOnly(dataDir)).toThrow(
+      /intents\.goal_id references missing table goals while existing rows reference it/,
+    );
+
+    // The refusal is row-gated: with no referencing rows a missing parent is
+    // recreated losslessly.
+    const emptyDir = makeTempDir();
+    openDb(emptyDir).close();
+    const emptyRaw = new DatabaseSync(path.join(emptyDir, "momentum.db"));
+    try {
+      emptyRaw.exec("PRAGMA foreign_keys = OFF");
+      emptyRaw.exec("DROP TABLE goals");
+    } finally {
+      emptyRaw.close();
+    }
+    const db = openDb(emptyDir);
+    try {
+      expect(tableNames(db)).toContain("goals");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rolls back the intent rename when later additive DDL fails, keeping the legacy graph retryable", () => {
+    const dataDir = makeTempDir();
+    openDb(dataDir).close();
+    rewindIntentRename(dataDir);
+    const raw = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      // An unmigratable parent schema the preflight does not inventory: the
+      // additive tracker index DDL fails after the intent rename steps ran,
+      // and the shared transaction must roll the rename back.
+      raw.exec("PRAGMA foreign_keys = OFF");
+      raw.exec("DROP TABLE tracker_items");
+      raw.exec("CREATE TABLE tracker_items (id TEXT PRIMARY KEY) STRICT");
+    } finally {
+      raw.close();
+    }
+
+    expect(() => openDb(dataDir)).toThrow(/adapter_kind/);
+
+    // The failed open left the legacy intent graph unchanged and retryable.
+    const inspect = new DatabaseSync(path.join(dataDir, "momentum.db"), {
+      readOnly: true,
+    });
+    try {
+      expect(tableNames(inspect)).toContain("update_intents");
+      expect(tableNames(inspect)).not.toContain("intents");
+      expect(indexNames(inspect)).toContain(
+        "idx_update_intents_idempotency_key",
+      );
+    } finally {
+      inspect.close();
+    }
+
+    // Repairing the parent lets the retry complete the rename.
+    const repair = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      repair.exec("PRAGMA foreign_keys = OFF");
+      repair.exec("DROP TABLE tracker_items");
+    } finally {
+      repair.close();
+    }
+    const db = openDb(dataDir);
+    try {
+      expect(tableNames(db)).toContain("intents");
+      expect(tableNames(db)).not.toContain("update_intents");
+      expect(columnNames(db, "tracker_items")).toContain("adapter_kind");
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps a refused sparse database byte-identical: no base schema lands before the refusal", () => {
     const dataDir = makeTempDir();
     const dbPath = path.join(dataDir, "momentum.db");
