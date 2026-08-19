@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   applyQueueMigrations,
   applyWorkflowVocabularyMigration,
+  assertQueueMigrationPreflight,
   intentSchemaMigrationNeeded,
   trackerSchemaMigrationNeeded,
   workflowRunsRouteColumnRebuildNeeded,
@@ -82,6 +83,10 @@ export function openDb(
   });
   try {
     const routeStatePlan = preScanRouteState(db);
+    // Fail closed before the base schema DDL: a refused database must stay
+    // byte-identical to its pre-open state, and SCHEMA would otherwise
+    // create base tables on a sparse database before the refusal lands.
+    assertQueueMigrationPreflight(db, routeStatePlan);
     db.exec(SCHEMA);
     const executorClaims = configuredExecutorClaims(options.env ?? process.env);
     applyQueueMigrations(

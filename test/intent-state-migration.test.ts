@@ -746,6 +746,40 @@ describe("NAM-06 intent graph preflight", () => {
     }
   });
 
+  it("keeps a refused sparse database byte-identical: no base schema lands before the refusal", () => {
+    const dataDir = makeTempDir();
+    const dbPath = path.join(dataDir, "momentum.db");
+    const raw = new DatabaseSync(dbPath);
+    try {
+      // A sparse malformed database: only a canonical intents table missing
+      // a required column, with none of the base tables present. The
+      // refusal must land before openDb's base-schema DDL executes.
+      raw.exec(
+        intentsTableDdl("tracker_item_id TEXT REFERENCES tracker_items(id)"),
+      );
+      raw.exec("ALTER TABLE intents DROP COLUMN skipped_at");
+    } finally {
+      raw.close();
+    }
+
+    const before = fs.readFileSync(dbPath);
+    expect(() => openDb(dataDir)).toThrow(
+      /intent schema migration refused: intents is missing required column skipped_at/,
+    );
+    const after = fs.readFileSync(dbPath);
+    expect(after.equals(before)).toBe(true);
+
+    const inspect = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const tables = tableNames(inspect);
+      expect(tables).not.toContain("goals");
+      expect(tables).not.toContain("jobs");
+      expect(tables).not.toContain("events");
+    } finally {
+      inspect.close();
+    }
+  });
+
   it("drops the legacy tracker-link index during safe canonical completion, idempotently", () => {
     const dataDir = makeTempDir();
     openDb(dataDir).close();

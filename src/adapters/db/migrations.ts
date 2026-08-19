@@ -2977,49 +2977,66 @@ function migrateIntentSchemaRename(db: MomentumDb): void {
   }
 }
 
-export function applyQueueMigrations(
+/**
+ * The hoisted fail-closed preflight for the durable migration chain. Read
+ * only: every check refuses by throwing before any mutation, so a refused
+ * database stays byte-identical to its pre-open state.
+ *
+ * Exported so `openDb` can run it before the base schema DDL executes:
+ * `db.exec(SCHEMA)` creates base tables on a sparse database, so a refusal
+ * raised only inside `applyQueueMigrations` would land after that mutation.
+ * `applyQueueMigrations` re-runs it as defense for callers that reach it
+ * directly.
+ */
+export function assertQueueMigrationPreflight(
   db: MomentumDb,
-  options: QueueMigrationOptions = {},
-  validatedRouteStatePlan?: WorkflowRouteStatePlan,
+  routeStatePlan: WorkflowRouteStatePlan,
 ): void {
-  const routeStatePlan = validatedRouteStatePlan ?? preScanRouteState(db);
-  // Fail closed before any mutation: the final route_json rebuild refuses
-  // unexpected workflow_runs columns, so its column contract is checked up
-  // front. Otherwise the vocabulary/route-state migration would commit its
-  // canonical writes and the later rebuild refusal would leave a mixed state.
+  // Part one: the final route_json rebuild refuses unexpected workflow_runs
+  // columns, so its column contract is checked up front. Otherwise the
+  // vocabulary/route-state migration would commit its canonical writes and
+  // the later rebuild refusal would leave a mixed state.
   assertWorkflowRunsRebuildColumnContract(db);
-  // Fail closed before any mutation, part two: a stale route-state plan must
-  // refuse the whole migration chain before the tracker rename commits, so the
-  // refused database stays byte-identical to its pre-open state.
+  // Part two: a stale route-state plan must refuse the whole migration chain
+  // before the tracker rename commits.
   if (
     routeStatePlan.deferredUntilBaseComplete !== true &&
     (trackerSchemaMigrationNeeded(db) || intentSchemaMigrationNeeded(db))
   ) {
     assertWorkflowRouteStatePlanCurrent(db, routeStatePlan);
   }
-  // Fail closed before any mutation, part three: an ambiguous or unsupported
-  // partially renamed tracker or intent graph must refuse the whole migration
-  // chain up front, so the refused database stays byte-identical to its
-  // pre-open state.
+  // Part three: an ambiguous or unsupported partially renamed tracker or
+  // intent graph must refuse the whole migration chain up front.
   if (trackerSchemaMigrationNeeded(db)) {
     assertTrackerSchemaRenameUnambiguous(db);
   }
   if (intentSchemaMigrationNeeded(db)) {
     assertIntentSchemaSupported(db);
   }
-  // Fail closed before any mutation, part four: the partial SDK-05 invocation
-  // phase runs after the tracker rename and the additive pass, so its full
-  // deterministic refusal set - required columns, current-attempt collisions,
-  // and missing foreign-key parents of the rows it would insert - is checked
-  // up front when a rename is pending. The state it reads is not changed by
-  // the earlier phases: the legacy rebuild only runs when executor_rounds
-  // carries invocation_id, in which case the check short-circuits, and no
-  // phase before the partial migration inserts parent or attempt rows.
-  // Otherwise the late refusal would strand a committed rename beside the
-  // unmigrated legacy executor table.
+  // Part four: the partial SDK-05 invocation phase runs after the tracker
+  // rename and the additive pass, so its full deterministic refusal set -
+  // required columns, current-attempt collisions, and missing foreign-key
+  // parents of the rows it would insert - is checked up front when a rename
+  // is pending. The state it reads is not changed by the earlier phases: the
+  // legacy rebuild only runs when executor_rounds carries invocation_id, in
+  // which case the check short-circuits, and no phase before the partial
+  // migration inserts parent or attempt rows. Otherwise the late refusal
+  // would strand a committed rename beside the unmigrated legacy executor
+  // table.
   if (trackerSchemaMigrationNeeded(db) || intentSchemaMigrationNeeded(db)) {
     assertPartialLegacyInvocationMigrationPreconditions(db);
   }
+}
+
+export function applyQueueMigrations(
+  db: MomentumDb,
+  options: QueueMigrationOptions = {},
+  validatedRouteStatePlan?: WorkflowRouteStatePlan,
+): void {
+  const routeStatePlan = validatedRouteStatePlan ?? preScanRouteState(db);
+  // Fail closed before any mutation; `openDb` already ran this before the
+  // base schema DDL, re-run here as defense for direct callers.
+  assertQueueMigrationPreflight(db, routeStatePlan);
   // Runs before the tracker rename and the main additive pass because it must
   // rebuild tables with foreign keys disabled, which SQLite only allows
   // outside a transaction. Its tables are disjoint from the tracker graph, so
