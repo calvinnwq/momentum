@@ -1257,10 +1257,9 @@ describe("momentum workflow run approve (NGX-325)", () => {
   it("rechecks run state inside the approval write transaction", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-approve-state-race";
-    const fifoPath = path.join(
-      makeTempDir("momentum-approve-fifo-"),
-      "approval",
-    );
+    const fifoDir = makeTempDir("momentum-approve-fifo-");
+    const fifoPath = path.join(fifoDir, "approval");
+    const readyPath = path.join(fifoDir, "ready");
 
     const db = openDb(dataDir);
     try {
@@ -1280,6 +1279,11 @@ describe("momentum workflow run approve (NGX-325)", () => {
         const path = require("node:path");
         const { DatabaseSync } = require("node:sqlite");
 
+        // Become ready before the parent calls approve. new Worker() only
+        // finishes spawning after the Vitest event loop runs; approve's
+        // readFileSync is a blocking syscall, so opening the FIFO first
+        // deadlocks CI until the job is cancelled.
+        fs.writeFileSync(workerData.readyPath, "ready");
         const db = new DatabaseSync(path.join(workerData.dataDir, "momentum.db"));
         db.prepare("UPDATE workflow_runs SET state = 'failed', updated_at = ? WHERE id = ?").run(Date.now(), workerData.runId);
         db.close();
@@ -1287,7 +1291,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       `,
       {
         eval: true,
-        workerData: { dataDir, fifoPath, runId },
+        workerData: { dataDir, fifoPath, readyPath, runId },
       },
     );
     const workerDone = new Promise<void>((resolve, reject) => {
@@ -1300,6 +1304,16 @@ describe("momentum workflow run approve (NGX-325)", () => {
         }
       });
     });
+    const readyDeadline = Date.now() + 5_000;
+    while (!fs.existsSync(readyPath)) {
+      if (Date.now() > readyDeadline) {
+        await worker.terminate();
+        throw new Error("approval race worker did not become ready");
+      }
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 10);
+      });
+    }
 
     const result = await run([
       "workflow",
